@@ -1,0 +1,61 @@
+schema: spec-driven
+
+# Shown to the AI when creating change artifacts. A digest that shapes how
+# proposals/designs/specs/tasks are written — the authoritative detail lives in
+# docs/PLAN.md (source of truth) and CLAUDE.md (load-bearing invariants).
+context: |
+  Project: clawdparty — a real-time collaborative Claude Code session server. Any number of
+  developers join a browser session and watch/guide Claude work live on a repo hosted on one Mac;
+  everyone (including the host) interacts only through the web UI. Greenfield repo.
+  Sources of truth: docs/PLAN.md (design, 17 sections) and CLAUDE.md (invariants). When this digest
+  and those disagree, the plan wins.
+
+  Architecture: three cooperating processes under Docker Compose (`bin/start` is the single entry),
+  one container per process, plus N browsers on the LAN:
+    - api/      Rails 8 API-only + ActionCable + Solid Queue/Cable (the only service publishing a port)
+    - sidecar/  Node + Fastify wrapping @anthropic-ai/claude-agent-sdk (the ONLY SDK-aware code; unpublished)
+    - web/      React 19 + Vite + TypeScript + Tailwind SPA
+    - postgres  PostgreSQL 18 (named volume)
+  Operate in the stream that owns a file — never put Rails logic in the sidecar or vice-versa.
+
+  Pinned toolchain (images + CI): Ruby 4.0.5, Node 24 LTS, PostgreSQL 18, Docker Compose.
+  Lint/format: Biome (web + sidecar), RuboCop rubocop-rails/rubocop-rspec (api; line 120, frozen
+  string literals, required parens). Tests: Vitest + RTL + MSW (web/sidecar), RSpec + FactoryBot (api).
+
+  Contract-first: the `freeze-interface-contracts` change freezes four capabilities that are the seams
+  letting the three streams build independently — `event-envelope`, `sidecar-protocol`,
+  `http-api-contract`, `contracts-package`. All other changes CONSUME these by name; never re-derive
+  or contradict them. Freeze-now vs spike-gated: the envelope, the 20 event-type names, all endpoint
+  signatures, the worktree convention, and the 4-role matrix freeze immediately; per-type SDK payload
+  schemas and packages/contracts/fixtures/sample_run.jsonl are spike-gated (finalized after the
+  Tuesday Week-1 SDK spike — schemas invented before the spike are fiction).
+
+  Load-bearing invariants (full list in CLAUDE.md): one active run per session (DB partial unique
+  index); per-run monotonic `seq` + global `events.id` client cursor; idempotent ingest on
+  (ai_run_id, seq); every mutation appends an event in the same transaction; ephemeral types
+  (ai_text_delta, presence_changed) are broadcast-but-never-persisted; reject severs
+  claude_session_id chaining (only revise resumes); diffs go over REST never cable; the server
+  enforces roles (client only hides buttons); the sidecar is unpublished (compose-network only); the
+  sidecar uses the host developer's EXISTING Claude login (API key | subscription/enterprise OAuth |
+  Bedrock) via read-only ~/.claude + ~/.aws mounts + inherited auth env — never an app-owned key.
+
+  Engineering conventions (see docs/PLAN.md §16): backend = single-responsibility service POROs
+  (Runs::Start, Events::Ingest, Git::WorktreeManager), rescue_from → render json: { errors }, one
+  minimal factory per model. frontend = FC<Props>, snake_case filenames, flat hooks/ + helpers/,
+  nested provider composition, strict TS, React Router 6+, ActionCable mounted at /~cable.
+
+# Per-artifact constraints applied when generating each artifact type. These guide the author;
+# they must never be copied verbatim into the artifact files.
+rules:
+  proposal:
+    - Reference and consume existing specs/capabilities by name rather than re-deriving or contradicting them.
+    - State an explicit out-of-scope boundary, and defer work that depends on inputs not yet finalized.
+    - Describe ownership by stream, not by gating. Do not add sign-off / approval / "waiting for X" / person-as-blocker language.
+  design:
+    - Honor the CLAUDE.md invariants and call out any cross-change dependency (e.g. a seam another change owns).
+    - Do not finalize a detail that depends on an input not yet available; state the dependency instead.
+  specs:
+    - For any wire/API requirement, pin both the success (2xx) and error response shapes, not just the errors.
+    - Reference existing type and endpoint names rather than re-enumerating them.
+  tasks:
+    - Mark tasks that depend on a not-yet-finalized input as blocked; do not require they pass before that input lands.
