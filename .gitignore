@@ -10,8 +10,17 @@
 /test/version_tmp/
 /tmp/
 
-# Used by dotenv library to load environment variables.
-# .env
+# Per-session git worktrees (bind-mounted, never committed)
+/.clawdparty/
+
+# Node deps (live in named volumes; ignore defensively if installed host-side)
+node_modules/
+
+# Local env files holding generated secrets (e.g. SIDECAR_SHARED_SECRET).
+# Committed template is .env.example; per-developer secrets live in .env.local.
+.env
+.env.local
+.env*.local
 
 # Ignore Byebug command history file.
 .byebug_history
