@@ -1,9 +1,9 @@
 # Contract 1 — Event envelope & taxonomy
 
 > **Status:** envelope, type names, per-type axes (actor / durability / scope), cursor &
-> idempotency rules, and the ephemeral-vs-durable rule are **FROZEN**. Per-type `payload`
-> field schemas are **`pending-spike`** — finalized at the Wednesday Week-1 freeze from real
-> SDK spike output. Every change after the freeze is recorded in [`CHANGELOG.md`](./CHANGELOG.md).
+> idempotency rules, and the ephemeral-vs-durable rule are **FROZEN** (v1.0). Per-type `payload`
+> field schemas were **finalized at v1.1** from real SDK spike output (see §8 + `sdk_mapping.md`).
+> Every change after the freeze is recorded in [`CHANGELOG.md`](./CHANGELOG.md).
 >
 > **Machine-checked source of truth for SHAPE:** [`packages/contracts/src/events.ts`](../../packages/contracts/src/events.ts).
 > This doc is authoritative for INTENT. If the two disagree, fix the drift and changelog it.
@@ -42,7 +42,7 @@ and treat `payload` as opaque JSON without erroring.
 | `type` | `string` | One of the 20 frozen names (§2) or the `ai_raw` fallback (§3). |
 | `actor` | object | Discriminated union on `kind` (§6). |
 | `ts` | `string` | ISO-8601 UTC, **millisecond precision**, `Z` suffix (e.g. `2026-06-28T20:11:05.123Z`). **Display-only** — never used to order events (§4). Fixed ms precision avoids the classic cross-stream date-format mismatch. |
-| `payload` | JSON | Type-specific. Internals are `pending-spike` (§7). |
+| `payload` | JSON | Type-specific; per-type field schemas finalized at v1.1 (§8 + `sdk_mapping.md`). |
 
 ## 2. The frozen taxonomy — exactly 20 names
 
@@ -105,18 +105,18 @@ is the **durable** record emitted on text-block stop. All other types are durabl
   and **null `id`**. It does **not** advance the durable per-run counter (the next durable event
   takes the next `seq` as though the delta had not been emitted). Clients order/accumulate deltas
   by **`(ai_run_id, block)`** — where `block` identifies the in-progress text block — **not** by
-  `seq`. (The exact representation of `block` is **`pending-spike`**, resolved from spike output;
-  it is the key the Week-2 web reducer accumulates by.)
+  `seq`. (Resolved at v1.1: `block` = `"<assistant_message_uuid>:<content_block_index>"`; it is the
+  key the Week-2 web reducer accumulates by.)
 - `presence_changed` is **session-scoped & ephemeral** — null `ai_run_id`/`seq`/`id`; applied
   **last-writer-wins per participant**.
 
 A **null `id` marks ephemerality.** Ephemeral events bypass REST backfill and are not deduped by
 `id`.
 
-### Per-type table — actor / durability / scope are FROZEN now
+### Per-type table — actor / durability / scope are FROZEN
 
-> Only each row's **payload internals** are `pending-spike`. The three axes below are frozen so
-> the three streams agree without inference.
+> The three axes below were frozen at v1.0 so the three streams agree without inference; each row's
+> **payload internals** were finalized at v1.1 (§8 + `sdk_mapping.md`).
 
 | type | actor.kind | durability | scope | carries |
 |---|---|---|---|---|
@@ -162,26 +162,27 @@ type Actor =
 (resolved from the participant and enforced server-side regardless of what an event claims). The
 discriminated union makes a mismatched `kind`/`id` combination fail type-checking.
 
-## 8. Payload schemas — `pending-spike`, never silently absent
+## 8. Payload schemas — FINALIZED from the spike (v1.1)
 
-Per-type `payload` field schemas are **explicitly marked `pending-spike`** until the Tuesday
-SDK spike output is incorporated at the Wednesday freeze. In `events.ts` every payload is typed
-`unknown` via `EventPayloadMap`; here, each type's payload is understood to be unspecified until
-then. The **envelope, type names, cursor/idempotency/ephemeral rules, and per-type axes freeze
-independently of the spike** — downstream streams build the ingest/broadcast/backfill plumbing
-against opaque `payload` now (the Week-1 replay milestone treats `payload` as opaque JSON).
+Per-type `payload` field schemas were **finalized at `CONTRACT_VERSION` 1.1** (`sdk-message-spike`)
+from real SDK output — they are no longer `pending-spike`. The concrete per-type schemas, derived
+from the captured raw messages, live in **[`sdk_mapping.md`](./sdk_mapping.md)** (the single source)
+and are typed in [`packages/contracts/src/events.ts`](../../packages/contracts/src/events.ts)
+(`EventPayloadMap`, with one interface per type). The `ai_text_delta` `block` field is resolved to
+`"<assistant_message_uuid>:<content_block_index>"`. The **envelope, type names,
+cursor/idempotency/ephemeral rules, and per-type axes were frozen at v1.0 independently of the
+spike**; finalizing the payloads is an **additive** `minor` bump (see
+[`CHANGELOG.md`](./CHANGELOG.md) `[1.1.0]`), not a breaking change.
 
-When the spike lands: replace the `pending-spike` markers here and the `unknown` stubs in
-`events.ts` with concrete per-type field schemas, resolve the `ai_text_delta` `block` field, and
-capture [`fixtures/sample_run.jsonl`](../../packages/contracts/fixtures/sample_run.jsonl) as the
-executable contract.
+[`fixtures/sample_run.jsonl`](../../packages/contracts/fixtures/sample_run.jsonl) is the real
+spike-derived executable contract (concrete payloads), replacing the v1.0 envelope-only placeholder.
 
-## 9. Freeze-now vs spike-gated boundary
+## 9. Freeze history: v1.0 (envelope) vs v1.1 (payloads)
 
-| frozen now | spike-gated (Wednesday) |
+| frozen at v1.0 (envelope) | finalized at v1.1 (from the spike) |
 |---|---|
 | envelope fields + scalar types | per-type `payload` field schemas |
 | the 20 type names + `ai_raw` | concrete `events.ts` payload interfaces |
 | per-type actor / durability / scope | `ai_text_delta` `block` representation |
 | `(ai_run_id, seq)` idempotency, dual cursor | `fixtures/sample_run.jsonl` (real capture) |
-| ephemeral-vs-durable rule, `actor` union | |
+| ephemeral-vs-durable rule, `actor` union | (additive `minor` bump — envelope unchanged) |

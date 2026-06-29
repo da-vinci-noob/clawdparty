@@ -28,10 +28,37 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [1.1.0] — SDK payload finalization (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 1 }`.** Additive `minor` bump (`sdk-message-spike`):
+per-type `payload` schemas, previously `pending-spike`, are now finalized from real
+`@anthropic-ai/claude-agent-sdk` `query()` output captured over Bedrock.
+
+### Added (additive — nothing removed or changed)
+
+- **Concrete per-type payload interfaces** in `packages/contracts/src/events.ts` (`EventPayloadMap`
+  + one interface per type), replacing the `unknown` `PendingSpikePayload` stubs.
+- **`docs/contracts/sdk_mapping.md`** — the single source mapping each raw SDK message shape →
+  Contract-1 type + payload, derived from `sidecar/test/fixtures/raw_run.jsonl`.
+- **Resolved `ai_text_delta` `block` field** — `"<assistant_message_uuid>:<content_block_index>"`.
+- **Pinned PLAN payload obligations** — `total_cost_usd` + `usage` on `run_finished`/`run_failed`;
+  `tool_started.input_summary` (≤~500 chars, never the full Edit/Write content); `terminal_output`
+  ~64KB chunks.
+- **Real `packages/contracts/fixtures/sample_run.jsonl`** — spike-derived envelopes with concrete
+  payloads, replacing the v1.0 envelope-only placeholder. The frozen structural invariants are
+  unchanged (the existing fixture test still passes; a non-empty-payload smoke check is added).
+
+### Unchanged (why this is a `minor`, not a `major`)
+
+The envelope fields + scalar types, the 20 type names + `ai_raw`, the per-type actor/durability/scope
+axes, the `(ai_run_id, seq)` idempotency + dual-cursor rules, the ephemeral-vs-durable rule, the
+`actor` union, and every endpoint signature are **unchanged**. A consumer requiring an exact `major`
+and `minor ≥ 0` (e.g. the Rails `ContractVersion`/`FakeClaude::Replay` consumer) stays compatible.
+
 ## [1.0.0] — Week 1 freeze
 
 **`CONTRACT_VERSION = { major: 1, minor: 0 }`.** Frozen at the Wednesday-of-Week-1 gate
-(`docs/PLAN.md §11`), after the Tuesday SDK spike.
+(`docs/PLAN.md §11`); per-type payloads deferred as `pending-spike` (finalized additively at 1.1).
 
 ### Frozen now
 

@@ -5,10 +5,10 @@ import { AI_RAW, type Actor, EVENT_TYPES, type EnvelopeType } from "../src/event
 
 /**
  * The executable contract: assert that `sample_run.jsonl` obeys every FROZEN
- * envelope rule. Payloads are `pending-spike` (currently `{}`), so nothing here
- * inspects payload internals — only the envelope, cursor, actor, and scope
- * rules that are frozen now. When the spike lands and payloads are filled in,
- * these assertions still hold and per-type payload assertions are added.
+ * envelope rule (envelope fields, dual cursor, ephemeral null-id/seq, per-type
+ * actor.kind). As of v1.1 the fixture is REAL spike-derived output with concrete
+ * payloads, so a smoke check confirms durable payloads are non-empty; per-type
+ * payload-field validation is the sidecar-runner normalizer cross-check.
  */
 
 const EPHEMERAL = new Set<EnvelopeType>(["ai_text_delta", "presence_changed"]);
@@ -123,6 +123,19 @@ describe("sample_run.jsonl — frozen envelope rules", () => {
       } else {
         expect("id" in e.actor, `${e.type} non-user actor must not carry id`).toBe(false);
       }
+    }
+  });
+
+  // v1.1 smoke check: the real spike-derived fixture carries concrete payloads
+  // (no longer the v1.0 placeholder `{}`). Per-type field validation is the
+  // sidecar-runner normalizer cross-check, not this fixture test.
+  it("durable events carry non-empty payloads (real spike fixture, not placeholder)", () => {
+    for (const e of events) {
+      if (EPHEMERAL.has(e.type)) continue;
+      expect(
+        Object.keys(e.payload).length,
+        `${e.type} payload should be non-empty`,
+      ).toBeGreaterThan(0);
     }
   });
 });

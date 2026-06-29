@@ -12,22 +12,21 @@ consumable by all three streams as the single executable contract:
 It contains **only normalized envelopes** — never raw SDK message shapes. (Raw SDK logs are a
 separate fixture set, input to the normalizer tests, owned by the `sidecar/` stream.)
 
-### ⚠️ Interim placeholder (pre-spike)
+### Real spike-derived fixture (v1.1)
 
-> This file is currently the **hand-authored, envelope-only placeholder** allowed by
-> `freeze-interface-contracts` task **5.4** (the "if the Tuesday SDK spike slips" escape hatch).
-> It exists to unblock the ingest/broadcast/backfill plumbing and the Week-1 replay milestone,
-> which treat `payload` as opaque JSON.
->
-> **Every `payload` here is `{}`** — payload field schemas are `pending-spike` (see
-> [`docs/contracts/events.md §8`](../../../docs/contracts/events.md)). When the spike lands,
-> **replace this file** with real spike-derived events carrying concrete payloads (task 5.1) and
-> drop this warning.
+> As of `CONTRACT_VERSION` **1.1** (`sdk-message-spike`), this file is **real, spike-derived**
+> output: it was produced by normalizing `sidecar/test/fixtures/raw_run.jsonl` — captured from a
+> live `@anthropic-ai/claude-agent-sdk` `query()` over Bedrock against a throwaway repo — into
+> Contract-1 envelopes with **concrete payloads** (real `total_cost_usd`, token `usage`, summarized
+> tool inputs, resolved `block` keys). It replaces the v1.0 envelope-only placeholder (`payload: {}`).
+> The per-type payload schemas it carries are documented in
+> [`docs/contracts/sdk_mapping.md`](../../../docs/contracts/sdk_mapping.md) and typed in
+> [`src/events.ts`](../src/events.ts) (`EventPayloadMap`).
 
-### What the placeholder *does* exercise (and is verified to)
+### What the fixture exercises (and is verified to)
 
-Although payloads are empty, the file is a faithful exercise of every **frozen** envelope rule,
-and `fixtures/sample_run.test.ts` asserts all of them:
+The file is a faithful exercise of every **frozen** envelope rule plus the v1.1 non-empty-payload
+smoke check, and `fixtures/sample_run.test.ts` asserts all of them:
 
 - durable events carry an integer `id`, ascending across the run; **ephemeral**
   (`ai_text_delta`, `presence_changed`) carry `id: null`;
@@ -37,4 +36,6 @@ and `fixtures/sample_run.test.ts` asserts all of them:
 - each event's `actor.kind` matches the frozen per-type table (e.g. `run_finished` → `system`,
   `run_interrupted`/`run_started` → `user`, `ai_text` → `claude`), and `actor.id` is present
   **iff** `kind === "user"`;
-- `ts` is ISO-8601 UTC with millisecond precision and a `Z` suffix.
+- `ts` is ISO-8601 UTC with millisecond precision and a `Z` suffix;
+- durable events carry **non-empty** payloads (v1.1 smoke check; per-type field validation is the
+  sidecar-runner normalizer cross-check against `raw_run.jsonl`).

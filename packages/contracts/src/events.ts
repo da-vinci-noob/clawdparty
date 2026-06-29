@@ -8,10 +8,10 @@
  * the doc is authoritative for INTENT — keep them in sync and record every
  * change in `docs/contracts/CHANGELOG.md`.
  *
- * FREEZE STATE (Week 1): the envelope fields, their scalar types, the 20 type
- * names, and the `Actor` union are FROZEN. Per-type `payload` interfaces are
- * `pending-spike` — typed `unknown` until the Tuesday SDK spike output is
- * incorporated at the Wednesday freeze. Do not narrow them by guessing.
+ * FREEZE STATE: the envelope fields, their scalar types, the 20 type names, and
+ * the `Actor` union are FROZEN (since v1.0). Per-type `payload` interfaces were
+ * FINALIZED from the real SDK spike at v1.1 (`sdk-message-spike`); they are no
+ * longer `pending-spike`. See `docs/contracts/sdk_mapping.md` for the derivation.
  */
 
 /**
@@ -21,7 +21,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 0 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 1 } as const;
 
 /**
  * The 20 frozen event type names. Adding or removing a name is a CONTRACT
@@ -103,41 +103,138 @@ export interface EventEnvelope<P = unknown> {
 }
 
 /**
- * PENDING-SPIKE placeholder. Every per-type payload below is typed as `unknown`
- * until the Tuesday SDK spike output is incorporated at the Wednesday freeze.
- * They are listed EXPLICITLY (never omitted) so the set of types still needing
- * a payload schema is visible. The `ai_text_delta` `block` field — the key the
- * web reducer accumulates deltas by, per the `(ai_run_id, block)` rule — is
- * itself `pending-spike` and resolved from spike output.
+ * Per-type payload schemas, FINALIZED from the real SDK spike (`sdk-message-spike`;
+ * see `docs/contracts/sdk_mapping.md` for the derivation from `raw_run.jsonl`).
+ * SDK-produced types are derived from captured message shapes; Rails-originated
+ * types (`chat_message`, `participant_joined`, `presence_changed`, `changeset_*`,
+ * `task_*`) are defined from the data model (they were never SDK-gated). This
+ * replaces the v1.0 `pending-spike` `unknown` stubs — an additive `minor` bump.
  */
-type PendingSpikePayload = unknown;
+
+/** Token usage carried on run-completion events (trimmed from the SDK `usage`). */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+}
+
+export interface RunStartedPayload {
+  model: string;
+  cwd: string;
+  permission_mode: string;
+  claude_session_id: string;
+}
+/** `block` = "<assistant_message_uuid>:<content_block_index>" — the reducer accumulation key. */
+export interface AiTextDeltaPayload {
+  block: string;
+  text: string;
+}
+export interface AiTextPayload {
+  block: string;
+  text: string;
+}
+export interface AiThinkingPayload {
+  text: string;
+}
+/** `input_summary` is the summarized tool input (≤~500 chars), NEVER the full Edit/Write content. */
+export interface ToolStartedPayload {
+  tool_use_id: string;
+  name: string;
+  input_summary: string;
+}
+export interface ToolFinishedPayload {
+  tool_use_id: string;
+  ok: true;
+}
+export interface ToolFailedPayload {
+  tool_use_id: string;
+  ok: false;
+  error: string;
+}
+/** Bash output emitted in ~64KB chunks (one event per chunk, ascending index). */
+export interface TerminalOutputPayload {
+  tool_use_id: string;
+  chunk_index: number;
+  text: string;
+}
+export interface FileChangedPayload {
+  tool_use_id: string;
+  path: string;
+  change: "created" | "modified";
+}
+export interface RunFinishedPayload {
+  stop_reason: string;
+  num_turns: number;
+  duration_ms: number;
+  total_cost_usd: number;
+  usage: TokenUsage;
+}
+export interface RunFailedPayload {
+  stop_reason: string;
+  api_error_status: string | null;
+  total_cost_usd: number;
+  usage: TokenUsage;
+}
+export type RunInterruptedPayload = Record<string, never>;
+export interface ChangesetReadyPayload {
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+export interface ChangesetApprovedPayload {
+  commit_sha: string;
+}
+export type ChangesetRejectedPayload = Record<string, never>;
+export interface ChatMessagePayload {
+  body: string;
+}
+export interface TaskPayload {
+  task_id: string;
+  title: string;
+  status: string;
+}
+export interface ParticipantJoinedPayload {
+  participant_id: string;
+  name: string;
+  role: string;
+}
+export interface PresenceChangedPayload {
+  participant_id: string;
+  online: boolean;
+}
+/** The never-crash fallback: redacted-then-truncated (≤8KB) opaque content. */
+export interface AiRawPayload {
+  raw: unknown;
+  truncated: boolean;
+}
 
 /**
  * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 20
  * names + `ai_raw`) exactly — enforced by `PAYLOAD_MAP_COVERS_TAXONOMY` below.
  */
 export interface EventPayloadMap {
-  run_started: PendingSpikePayload;
-  ai_text_delta: PendingSpikePayload;
-  ai_text: PendingSpikePayload;
-  ai_thinking: PendingSpikePayload;
-  tool_started: PendingSpikePayload;
-  tool_finished: PendingSpikePayload;
-  tool_failed: PendingSpikePayload;
-  terminal_output: PendingSpikePayload;
-  file_changed: PendingSpikePayload;
-  run_finished: PendingSpikePayload;
-  run_failed: PendingSpikePayload;
-  run_interrupted: PendingSpikePayload;
-  changeset_ready: PendingSpikePayload;
-  changeset_approved: PendingSpikePayload;
-  changeset_rejected: PendingSpikePayload;
-  chat_message: PendingSpikePayload;
-  task_created: PendingSpikePayload;
-  task_updated: PendingSpikePayload;
-  participant_joined: PendingSpikePayload;
-  presence_changed: PendingSpikePayload;
-  ai_raw: PendingSpikePayload;
+  run_started: RunStartedPayload;
+  ai_text_delta: AiTextDeltaPayload;
+  ai_text: AiTextPayload;
+  ai_thinking: AiThinkingPayload;
+  tool_started: ToolStartedPayload;
+  tool_finished: ToolFinishedPayload;
+  tool_failed: ToolFailedPayload;
+  terminal_output: TerminalOutputPayload;
+  file_changed: FileChangedPayload;
+  run_finished: RunFinishedPayload;
+  run_failed: RunFailedPayload;
+  run_interrupted: RunInterruptedPayload;
+  changeset_ready: ChangesetReadyPayload;
+  changeset_approved: ChangesetApprovedPayload;
+  changeset_rejected: ChangesetRejectedPayload;
+  chat_message: ChatMessagePayload;
+  task_created: TaskPayload;
+  task_updated: TaskPayload;
+  participant_joined: ParticipantJoinedPayload;
+  presence_changed: PresenceChangedPayload;
+  ai_raw: AiRawPayload;
 }
 
 /**
