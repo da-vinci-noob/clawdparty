@@ -1,0 +1,148 @@
+# clawdparty dev stack — one container per process.
+#
+# Five services, one process each: rails (Puma), jobs (Solid Queue), postgres,
+# sidecar (Fastify + Agent SDK), vite (dev SPA server). Only `rails` publishes a
+# port (3000 -> LAN); sidecar/vite are compose-network only. Run with `bin/start`
+# (after `bin/setup`). See docs/PLAN.md §2/§3 + CLAUDE.md for the invariants.
+
+# Pin the project name so the whole stack always comes up under `clawdparty`
+# (containers `clawdparty-<service>-1`), independent of the host directory name.
+name: clawdparty
+
+services:
+  # --- PostgreSQL 18 -------------------------------------------------------
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: ${POSTGRES_HOST_AUTH_METHOD:-trust}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      # postgres:18+ stores data in a version subdir and expects the volume at
+      # /var/lib/postgresql (NOT /var/lib/postgresql/data — the 18 image rejects
+      # the old path as an "unused mount/volume" and refuses to start).
+      - pg_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    # No `ports:` — postgres is reachable only on the compose network.
+
+  # --- Rails 8 API + ActionCable (Puma) — the ONLY published port ----------
+  rails:
+    build:
+      context: .
+      dockerfile: docker/rails.Dockerfile
+    restart: unless-stopped
+    command: ["bin/rails", "server", "-b", "0.0.0.0", "-p", "3000"]
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      RAILS_ENV: ${RAILS_ENV:-development}
+      DATABASE_HOST: ${DATABASE_HOST:-postgres}
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      SIDECAR_URL: ${SIDECAR_URL:-http://sidecar:8787}
+    volumes:
+      - ./api:/app:delegated
+      - bundle:/usr/local/bundle
+      # The frozen contracts package, mounted at /packages so the app's
+      # Rails.root.join("..","packages",...) resolves identically in-container
+      # and on the host (fake-Claude replay reads the fixture + CONTRACT_VERSION).
+      - ./packages:/packages:ro
+      - ${TARGET_REPO_PATH:-./repo}:/repo
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # --- Solid Queue supervisor — same image as rails, different command -----
+  jobs:
+    build:
+      context: .
+      dockerfile: docker/rails.Dockerfile
+    restart: unless-stopped
+    command: ["bin/jobs"]
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      RAILS_ENV: ${RAILS_ENV:-development}
+      DATABASE_HOST: ${DATABASE_HOST:-postgres}
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+    volumes:
+      - ./api:/app:delegated
+      - bundle:/usr/local/bundle
+      - ./packages:/packages:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rails:
+        condition: service_started
+    # No `ports:` — jobs runs no server. restart: unless-stopped doubles as the
+    # restart-until-ready posture if it boots before rails has prepared the queue DB.
+
+  # --- Node sidecar (Fastify + Agent SDK) — UNPUBLISHED --------------------
+  sidecar:
+    build:
+      context: .
+      dockerfile: docker/sidecar.Dockerfile
+    # Independent lifecycle: its OWN restart policy, NOT a depends_on child of
+    # rails — a Rails restart must never kill a live Claude run.
+    restart: unless-stopped
+    env_file:
+      - path: .env.local
+        required: false
+    # List form so bare keys pass through from the host ONLY WHEN SET (the SDK's
+    # own auto-detection/precedence is preserved; nothing is forced to empty).
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - RAILS_INTERNAL_URL=${RAILS_INTERNAL_URL:-http://rails:3000}
+      # Claude / AWS auth passthrough — only-when-set (no app-owned credential):
+      - ANTHROPIC_API_KEY
+      - ANTHROPIC_AUTH_TOKEN
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - CLAUDE_CODE_USE_BEDROCK
+      - CLAUDE_CODE_USE_VERTEX
+      - AWS_PROFILE
+      - AWS_REGION
+      - ANTHROPIC_MODEL
+    expose:
+      - "8787"
+    volumes:
+      - ./sidecar:/app:delegated
+      - sidecar_node_modules:/app/node_modules
+      # Target repo READ-WRITE at the identical path /repo (Claude edits the
+      # worktree; reject reverts it). Same path as rails so worktree gitdirs resolve.
+      - ${TARGET_REPO_PATH:-./repo}:/repo
+      # Host login, READ-ONLY (tamper-safety + JSONL resume). Targets the `node`
+      # user's home so `~/.claude` / `~/.aws` resolve to the mounts.
+      - ${HOME}/.claude:/home/node/.claude:ro
+      - ${HOME}/.aws:/home/node/.aws:ro
+    # No `ports:` key at all — reachable only on the compose network.
+
+  # --- Vite dev server (dev only) — UNPUBLISHED ----------------------------
+  vite:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      # Polling so HMR detects host edits over the macOS :delegated bind mount.
+      VITE_USE_POLLING: ${VITE_USE_POLLING:-true}
+    expose:
+      - "5173"
+    volumes:
+      - ./web:/app:delegated
+      - web_node_modules:/app/node_modules
+    # No `ports:` key — the browser reaches the SPA only via the rails reverse-proxy.
+
+volumes:
+  pg_data:
+  bundle:
+  sidecar_node_modules:
+  web_node_modules:

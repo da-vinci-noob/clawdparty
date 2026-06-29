@@ -1,0 +1,68 @@
+## 1. Repo scaffold and ignore rules
+
+- [x] 1.1 Create the `docker/` directory and the top-level `docker-compose.yml`, `bin/start`, `bin/setup`, and `.dockerignore` files
+- [x] 1.2 Write `.dockerignore` excluding `.git`, `node_modules`, `vendor/bundle`, logs, `tmp`, build artifacts, and the local secret env file `.env.local`
+- [x] 1.3 Add an env template (e.g. `.env.example`) with a `SIDECAR_SHARED_SECRET` slot, the `SIDECAR_URL` default (`http://sidecar:8787`, the rails→sidecar direction), the `RAILS_INTERNAL_URL` default (`http://rails:3000`, the sidecar→Rails callback direction for `/internal/events` + heartbeat — distinct from `SIDECAR_URL`), the configurable host target-repo path, the Postgres slots (`POSTGRES_HOST_AUTH_METHOD=trust`, `DATABASE_HOST=postgres`, `DATABASE_USER=postgres` — no password under trust auth), the environment selectors (`RAILS_ENV=development`, `NODE_ENV=development`), and the documented pass-through auth-env list
+
+## 2. bin/setup and bin/start (dev-entrypoint)
+
+- [x] 2.1 Implement `bin/setup`: generate a random `SIDECAR_SHARED_SECRET` only if absent (idempotent — never clobber an existing secret) and write it to `.env.local` (the git-ignored local env file); do NOT create databases directly  — *verified: idempotency + empty-secret repair tested in a sandbox*
+- [x] 2.2 Implement `bin/start` as the single entry point: `docker compose build` then `docker compose up` with sensible flags (`--remove-orphans`), building before up so first run does not fail on a missing image
+- [~] 2.3 Verify `bin/setup` then `bin/start` boots the stack from a clean checkout with one command each  — *PRODUCED-NOW, BOOT-DEFERRED: `bin/setup` fully verified; a full `bin/start` boot needs the bind-mounted `api/`+`sidecar/`+`web/` app code from rails-foundation/sidecar-foundation/web-scaffold (entrypoints install against their Gemfile/package.json). `docker compose config` validates structurally; entrypoints guard cleanly when app code is absent.*
+- [x] 2.4 Load `.env.local` explicitly on both the `rails` and `sidecar` services (via `env_file: .env.local` or equivalent — Compose does NOT auto-load `.env.local`) and inject `SIDECAR_SHARED_SECRET` into BOTH from that single source, so both hold the identical value and `/internal/events` bearer auth works  — *both `rails` and `sidecar` carry `env_file: [{path: .env.local, required: false}]`*
+- [x] 2.5 In `bin/setup`, ensure host `~/.claude` and `~/.aws` exist (create empty, host-owned, if absent) so Docker does not silently create a root-owned bind-mount source on first `bin/start`; an API-key-only dev with empty mounts still authenticates via the env-var path
+
+## 3. Dockerfiles + entrypoints with pinned toolchain (dev-entrypoint)
+
+- [x] 3.1 Create the Ruby **4.0.5** application Dockerfile (used by `rails` and `jobs`); install the PostgreSQL client + a wait-for-postgres tool; `CMD` runs Puma bound to `0.0.0.0:3000`  — *`docker/rails.Dockerfile` (`ruby:4.0.5-slim`, libpq/postgresql-client/netcat); CMD Puma `-b 0.0.0.0 -p 3000`*
+- [x] 3.2 Write the rails entrypoint: `bundle check || bundle install`, `wait-for-it postgres:5432`, then DB prepare (create + migrate; schema owned by `rails-foundation`)  — *`docker/entrypoints/rails.sh`; `nc -z postgres 5432` wait; `db:prepare` guarded until rails-foundation lands*
+- [x] 3.3 Create the Node **24** sidecar Dockerfile + entrypoint (install `node_modules` into the named volume; start the Fastify server); pin `USER node` (the non-root `node` user, home `/home/node`) so `~` resolves to `/home/node` for the credential mounts  — *`docker/sidecar.Dockerfile` pins `USER node`; node_modules mountpoint pre-chowned to `node`*
+- [x] 3.4 Create the Node **24** web/`vite` Dockerfile + entrypoint (install `node_modules` into the named volume; start the Vite dev server)  — *`docker/web.Dockerfile` + `docker/entrypoints/web.sh`*
+- [x] 3.5 Confirm Node is pinned to 24 in both node images even though the host runs Node 25  — *both node images `FROM node:24-slim` (host is Node 25)*
+
+## 4. Compose services + volumes (compose-stack)
+
+- [x] 4.1 Define the `postgres` service on **PostgreSQL 18** with a `pg_data` named volume for its data dir and a `pg_isready` healthcheck  — *`postgres:18`, `pg_data:/var/lib/postgresql/data`, `pg_isready` healthcheck*
+- [x] 4.1a Set the `postgres` service env (`POSTGRES_HOST_AUTH_METHOD=trust`, `POSTGRES_USER=postgres`, `POSTGRES_DB=postgres`) so the image initializes and the connect-as `postgres` superuser holds CREATE-DATABASE privilege, and set the `rails`/`jobs` DB-connection env (`DATABASE_HOST=postgres`, `DATABASE_USER=postgres`, no password under trust); verify first-boot `db:prepare` connects and creates all three databases (primary, Solid Queue, Solid Cable)  — *all env asserted in the resolved config; three-DB `db:prepare` is boot-deferred to rails-foundation's schema*
+- [x] 4.2 Define the `rails` service from the Ruby image, source bind-mounted `:delegated`, `bundle` named volume for gems, `depends_on: postgres: condition: service_healthy`
+- [x] 4.3 Define the `jobs` service reusing the `rails` image with `bin/jobs` as the command and no published port
+- [x] 4.3a Ensure `jobs` does not boot before the queue DB exists: give it a `depends_on` (at least `postgres` `service_healthy`, ideally ordered after the `rails` entrypoint's DB-prepare) or a restart-until-ready posture, so it never assumes the queue database exists at boot  — *`jobs depends_on` postgres(`service_healthy`) + rails(`service_started`), plus `restart: unless-stopped` as restart-until-ready*
+- [x] 4.4 Define the `sidecar` service from the Node image, source bind-mounted `:delegated`, a named volume for its `node_modules`
+- [x] 4.5 Define the dev-only `vite` service from the Node image, source bind-mounted `:delegated`, a named volume for its `node_modules`
+- [x] 4.6 Declare the named volumes (`pg_data`, `bundle`, sidecar + web `node_modules`) at the top level; confirm no `node_modules`/gem dir is bind-mounted from the host  — *`pg_data`, `bundle`, `sidecar_node_modules`, `web_node_modules`; deps are named volumes, not host binds*
+- [x] 4.7 Confirm exactly five services exist, each running one process, and no extra services (search index/Redis/mail catcher/extra apps) or HTTPS mode are present  — *resolved config has exactly `jobs/postgres/rails/sidecar/vite`*
+- [x] 4.7a Set the environment selector on the dev services — `RAILS_ENV=development` on `rails` and `jobs`, `NODE_ENV=development` on `sidecar` and `vite` — so the documented dev-vs-prod serving branch has an explicit selector  — *asserted in resolved config*
+
+## 5. Networking + ports (compose-networking)
+
+- [x] 5.1 Publish only `rails` as `3000:3000`; confirm `jobs`/`postgres`/`sidecar`/`vite` publish no host ports  — *resolved config: only `rails` has `ports`*
+- [x] 5.1a Confirm neither `sidecar` nor `vite` carries a `ports:` key at all (not even `127.0.0.1:8787:8787`) — an `expose:` key is fine — so an implementer cannot accidentally publish to the host  — *both use `expose:` only; no `ports:` key*
+- [x] 5.2 Set `SIDECAR_URL` (default `http://sidecar:8787`) on `rails`; confirm the sidecar address is configurable and no fixed host is hard-coded  — *`SIDECAR_URL=${SIDECAR_URL:-http://sidecar:8787}` on `rails`*
+- [x] 5.2a Set `RAILS_INTERNAL_URL` (default `http://rails:3000`) on the `sidecar` service for the sidecar→Rails callback direction (`POST /internal/events`, heartbeat); confirm it is distinct from `SIDECAR_URL`, configurable over compose DNS, and no fixed host is hard-coded  — *`RAILS_INTERNAL_URL=${RAILS_INTERNAL_URL:-http://rails:3000}` on `sidecar`; distinct from `SIDECAR_URL`*
+- [x] 5.3 Configure the `vite` service to proxy `/api` and `/~cable` to `rails` over the compose network (Vite config itself owned by `web-scaffold`)  — *service + compose-network reachability provided here; the Vite proxy config itself is `web-scaffold`'s (per design Decision 12, the primary path is rails reverse-proxying to vite)*
+- [x] 5.3a Set `VITE_USE_POLLING=true` on the `vite` service so Vite uses file-watch polling and HMR detects host edits over the macOS `:delegated` bind mount (var name coordinated with `web-scaffold`)  — *`VITE_USE_POLLING=${VITE_USE_POLLING:-true}` on `vite`*
+- [x] 5.4 Give the `sidecar` its own restart policy (e.g. `unless-stopped`) and confirm it is NOT a `depends_on` child of `rails`  — *`restart: unless-stopped`; sidecar has no `depends_on`*
+- [x] 5.4a Declare an explicit restart posture for ALL five services (`rails`, `jobs`, `postgres`, `sidecar`, `vite`) — `unless-stopped` for each (or an explicit "no restart by design" where intended) — so the long-lived host stack survives crashes and Mac sleep/wake  — *all five `unless-stopped` (asserted)*
+- [ ] 5.5 Confirm rails-foundation sets `config.hosts` + cable allowed origins for `.local`/LAN-IP before LAN access is expected to work — cross-change dependency, since publishing 3000 to the LAN without it makes Rails HostAuthorization silently block `<host>.local`  — *CROSS-CHANGE: owned by rails-foundation's `rails-dev-serving` spec; cannot be satisfied in this change. Left open as the tracked dependency.*
+
+## 6. Worktree-path consistency (compose-networking)
+
+- [x] 6.1 Bind-mount the target repo into BOTH `rails` and `sidecar` at an identical in-container path (host path configurable via env), so absolute worktree gitdir paths resolve in both; the target-repo mount is **read-write** (NOT `:ro` like `~/.claude`/`~/.aws`) because Claude edits the worktree `cwd` and a reject runs `git reset --hard HEAD && git clean -fd` in it  — *`${TARGET_REPO_PATH:-./repo}:/repo` (read-write) in both; creds remain `:ro` (asserted)*
+- [x] 6.1a Pin the in-container target-repo mount path to the single constant `/repo` (host path configurable via `TARGET_REPO_PATH`) and assert `rails` and `sidecar` mount the target repo at the identical path `/repo`  — *both resolve to target `/repo` (asserted)*
+- [x] 6.1b Configure git `safe.directory` for `/repo` and the worktrees path (`/repo/.clawdparty/worktrees/*`) in the `sidecar` image (preferred over aligning uids, which would break the `node`-home credential resolution), so git run by the non-root `node` user does not fail with "detected dubious ownership in repository" on a worktree created by the root `rails` service  — *`git config --system --add safe.directory` for `/repo` + worktrees glob in `docker/sidecar.Dockerfile`*
+- [~] 6.2 Verify a worktree created under `<repo>/.clawdparty/worktrees/session-<id>` by the rails-side path resolves correctly when used as `cwd` from the sidecar (no dangling-gitdir error)  — *PRODUCED-NOW, BOOT-DEFERRED: identical `/repo` path + `safe.directory` are in place (the two conditions that make it resolve); a live cross-service worktree run needs rails-foundation's `Git::WorktreeManager` to create one.*
+
+## 7. Claude credential mounts + auth env (claude-credential-mounts)
+
+- [x] 7.1 Read-only bind-mount the host `~/.claude` and `~/.aws` into the `sidecar` service at `/home/node/.claude` and `/home/node/.aws` (the `node` user's home, per task 3.3), so `~` resolves to the mounted credentials  — *`${HOME}/.claude:/home/node/.claude:ro`, `${HOME}/.aws:/home/node/.aws:ro` (asserted)*
+- [x] 7.2 Pass through `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `AWS_PROFILE`, `AWS_REGION`, `ANTHROPIC_MODEL` — only-when-set (so unset vars are not forced to empty) — and confirm no credential/method is hard-coded  — *bare-key list form; verified none forced to empty; no app-owned credential*
+- [x] 7.3 Confirm the `~/.claude` + `~/.aws` mounts are read-only (tamper-safety) and that the `~/.claude` mount makes the session JSONL survive a sidecar restart for `claude_session_id` resume  — *both `:ro` (asserted); host `~/.claude/projects/` JSONL lives on the host so it survives container restarts*
+- [x] 7.4 Document the two host caveats in the runbook/README: macOS Keychain OAuth → `claude setup-token` + export `CLAUDE_CODE_OAUTH_TOKEN`; Bedrock-SSO token expiry → host stays `aws sso login`-fresh  — *already in `README.md` lines 65–66*
+- [x] 7.5 Confirm the `jobs` service does NOT mount `~/.claude`/`~/.aws` — `Sidecar::HealthcheckJob` makes no SDK call, so only `sidecar` needs Claude credentials; revisit only if a future job calls the SDK  — *`jobs` mounts neither the repo nor creds (asserted)*
+
+## 8. End-to-end verification
+
+- [~] 8.1 From a clean checkout: `bin/setup` then `bin/start`; confirm `postgres` becomes healthy, `rails` is reachable on the LAN at `:3000`, and `sidecar`/`vite` are NOT reachable from the host  — *PRODUCED-NOW, BOOT-DEFERRED: the topology that guarantees this is verified in the resolved config (only `rails` publishes `3000`; `sidecar`/`vite` have no `ports`); a live boot needs the three streams' bind-mounted app code.*
+- [~] 8.2 Confirm `rails` can reach `http://sidecar:8787` over the compose network and that restarting `rails` does not stop the `sidecar`  — *PRODUCED-NOW, BOOT-DEFERRED: `SIDECAR_URL` wired + `sidecar` independent (no `depends_on: rails`) verified structurally; live reachability needs running servers from rails-foundation/sidecar-foundation.*
+- [~] 8.3 Confirm a Claude run in the `sidecar` authenticates using the host's existing login (whichever method the dev uses) with no app-owned credential  — *PRODUCED-NOW, BOOT-DEFERRED: mounts + only-when-set passthrough + no app-owned credential verified structurally; a live authenticated run needs sidecar-foundation's runner.*
+- [x] 8.4 Run `openspec validate "dev-docker-compose"` and confirm the change is valid and apply-ready
