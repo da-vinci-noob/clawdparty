@@ -121,4 +121,31 @@ export function selectMaxAppliedId(state: EventStoreState): number {
   return state.maxAppliedId;
 }
 
+// The active run id, derived from lifecycle events: a run_started whose ai_run_id
+// has no terminal lifecycle event yet. Returns null if no run is active. Used to
+// gate the composer (start vs follow-up) and the interrupt button — status comes
+// from events, never a bespoke message.
+const TERMINAL_RUN_TYPES = new Set(["run_finished", "run_failed", "run_interrupted"]);
+
+export function selectActiveRunId(state: EventStoreState): string | null {
+  const terminated = new Set<string>();
+  const started = new Set<string>();
+  for (const e of state.durableList) {
+    if (e.ai_run_id === null) {
+      continue;
+    }
+    if (e.type === "run_started") {
+      started.add(e.ai_run_id);
+    } else if (TERMINAL_RUN_TYPES.has(e.type)) {
+      terminated.add(e.ai_run_id);
+    }
+  }
+  for (const runId of started) {
+    if (!terminated.has(runId)) {
+      return runId;
+    }
+  }
+  return null;
+}
+
 export { deltaKey };
