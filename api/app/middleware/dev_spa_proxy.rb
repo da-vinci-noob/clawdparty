@@ -13,8 +13,11 @@ require 'net/http'
 # dev-docker-compose; the Vite-side HMR config (server.host, hmr.clientPort,
 # usePolling) is owned by web-scaffold. This middleware is the Rails-side half.
 class DevSpaProxy
-  # Requests Rails handles itself — never proxied to vite.
-  PASSTHROUGH_PREFIXES = ['/api', '/~cable', '/up', '/rails', '/cable'].freeze
+  # Requests Rails handles itself — never proxied to vite. `/internal` is the
+  # bearer-authed sidecar→Rails callback surface (events + heartbeat); it MUST be
+  # served by Rails, not forwarded to vite (which would reject the compose
+  # service-name Host with a 403 "blocked host").
+  PASSTHROUGH_PREFIXES = ['/api', '/~cable', '/up', '/rails', '/cable', '/internal'].freeze
 
   def initialize(app, upstream: ENV.fetch('SPA_UPSTREAM', 'http://vite:5173'))
     @app = app

@@ -78,6 +78,11 @@ Rails.application.configure do
   # check must permit them or Rails silently blocks cross-machine access.
   config.hosts << /.+\.local/
   config.hosts << /\A(?:\d{1,3}\.){3}\d{1,3}\z/ # any IPv4 (the host's LAN IP)
+  # Intra-compose-network callbacks use the compose service-name Host header
+  # (the sidecar POSTs /internal/* with Host: rails via RAILS_INTERNAL_URL).
+  # Without these, HostAuthorization blocks them with a 403 "Blocked hosts" page.
+  config.hosts << "rails"
+  config.hosts << "sidecar"
   config.action_cable.allowed_request_origins = [
     %r{\Ahttps?://[^/]+\.local(?::\d+)?\z},
     %r{\Ahttps?://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\z},

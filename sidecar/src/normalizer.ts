@@ -1,41 +1,32 @@
 // normalizer.ts — the ONLY sidecar file that touches raw @anthropic-ai/claude-
-// agent-sdk message shapes. Every other file (index/transport/permissions) sees
-// only Contract-1 envelopes. This contains SDK shape/version surprises here.
+// agent-sdk message shapes. Every other file (index/runner/transport/permissions)
+// sees only Contract-1 envelopes. This contains SDK shape/version surprises here.
 //
-// v1 committed behavior (pre-spike):
-//  - never-crash: any unknown/unmapped/malformed SDK message -> `ai_raw`, never
-//    dropped, never thrown.
-//  - `ai_raw` payload is REDACTED then TRUNCATED (8KB) — order matters.
-//  - per-run monotonic `seq`, scoped to ai_run_id, assigned ONLY to durable
-//    run-scoped events; ephemeral events carry null seq + null id.
-//  - actor stamping: run_started / run_interrupted -> { kind:"user", id:requested_by };
-//    Claude-originated -> { kind:"claude" }.
-// The full per-SDK-type mapping table is `pending-spike` (see PENDING_SPIKE).
+// Committed behavior:
+//  - full per-type mapping per docs/contracts/sdk_mapping.md (derived from the
+//    real spike capture, sdk-message-spike): system/init -> run_started; assistant
+//    text -> ephemeral ai_text_delta + durable ai_text; thinking -> ai_thinking;
+//    tool_use -> tool_started (+ file_changed for Write/Edit); tool_result ->
+//    tool_finished/tool_failed (+ terminal_output chunks for Bash); result ->
+//    run_finished/run_failed (with cost/usage).
+//  - never-crash: any unknown/unmapped/malformed SDK message -> ai_raw, never
+//    dropped, never thrown; ai_raw payload REDACTED then TRUNCATED (8KB).
+//  - per-run monotonic seq, scoped to ai_run_id, on DURABLE run-scoped events
+//    only; ephemeral (ai_text_delta) carries null seq + null id.
+//  - actor: run_started/run_interrupted -> { kind:"user", id:requested_by };
+//    run_finished/run_failed -> { kind:"system" }; Claude-originated -> claude.
 
 import type { Actor, EnvelopeType, EventEnvelope } from "@clawdparty/contracts";
 
 const EPHEMERAL_TYPES = new Set<EnvelopeType>(["ai_text_delta", "presence_changed"]);
 
 export const AI_RAW_CAP_BYTES = 8 * 1024;
+export const TOOL_INPUT_SUMMARY_CAP = 500;
+export const TERMINAL_CHUNK_BYTES = 64 * 1024;
 
-// Case-insensitive key-name match for credential-bearing fields. Matches more
-// than the four obvious names (also pwd, credential, private_key, aws_*_key…).
 const CREDENTIAL_KEY =
   /(api[_-]?key|token|secret|authorization|bearer|password|passwd|pwd|credential|private[_-]?key|aws[_-]?(secret|access)[_-]?key)/i;
 const REDACTED = "[REDACTED]";
-
-// PENDING-SPIKE: the full per-SDK-message-type mapping (text deltas, text blocks,
-// thinking, tool start/finish/fail, terminal output, file changes, run lifecycle,
-// result incl. cost/usage; tool-input summarization to ~500 chars; terminal_output
-// ~64KB chunking) is finalized only after the Tuesday SDK spike. Do NOT invent it
-// from guessed shapes here. Only the never-crash unknown->ai_raw behavior and the
-// ephemeral classification are committed in v1.
-export const PENDING_SPIKE = {
-  perTypeMapping: "pending-spike",
-  costUsageOnResult: "pending-spike",
-  toolInputSummarization: "pending-spike",
-  terminalOutputChunking: "pending-spike",
-} as const;
 
 export interface NormalizeContext {
   sessionId: string;
@@ -44,8 +35,8 @@ export interface NormalizeContext {
   requestedBy?: string;
 }
 
-// Recursively redact credential-bearing values by key name, across the full
-// structure. Returns a structurally-cloned, redacted copy (never mutates input).
+// --- redaction + bounding (unchanged from v1; the ai_raw safety valve) --------
+
 export function redactCredentials(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => redactCredentials(item));
@@ -60,9 +51,7 @@ export function redactCredentials(value: unknown): unknown {
   return value;
 }
 
-// Redact FIRST, then truncate to the 8KB cap. Redacting before truncating ensures
-// a credential is never leaked by the cap boundary slicing through a key/value
-// pair after the redactor stopped scanning.
+// Redact FIRST, then truncate to the 8KB cap — order is load-bearing.
 export function boundRawPayload(raw: unknown): { raw: unknown; truncated: boolean } {
   const redacted = redactCredentials(raw);
   const serialized = JSON.stringify(redacted) ?? "";
@@ -73,14 +62,63 @@ export function boundRawPayload(raw: unknown): { raw: unknown; truncated: boolea
   return { raw: { truncated_serialized: sliced }, truncated: true };
 }
 
+// Summarize a tool input to path/command/≤500-char form — NEVER the full payload.
+export function summarizeToolInput(name: string, input: unknown): string {
+  const obj = (input ?? {}) as Record<string, unknown>;
+  let summary: string;
+  if (name === "Write" || name === "Edit" || name === "Read") {
+    summary = String(obj.file_path ?? "");
+  } else if (name === "Bash") {
+    const command = String(obj.command ?? "");
+    const description = obj.description ? ` — ${String(obj.description)}` : "";
+    summary = `${command}${description}`;
+  } else {
+    summary = JSON.stringify(obj);
+  }
+  return summary.slice(0, TOOL_INPUT_SUMMARY_CAP);
+}
+
 function isoMs(date: Date): string {
   return `${date.toISOString().slice(0, 23)}Z`;
 }
 
-// The sidecar assigns per-run monotonic `seq` to DURABLE run-scoped events only.
-// Rails assigns the global `id` on ingest, so the sidecar always emits id: null.
+// Minimal shapes the normalizer reads off raw SDK messages (the SDK's own types
+// are richer; we read only what the mapping needs).
+interface RawBlock {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+interface RawMessage {
+  type?: string;
+  subtype?: string;
+  uuid?: string;
+  message?: { content?: RawBlock[] };
+  // result fields
+  stop_reason?: string;
+  num_turns?: number;
+  duration_ms?: number;
+  total_cost_usd?: number;
+  usage?: Record<string, number>;
+  api_error_status?: string | null;
+  is_error?: boolean;
+  // init fields
+  model?: string;
+  cwd?: string;
+  permissionMode?: string;
+  session_id?: string;
+}
+
 export class Normalizer {
   private seq = 0;
+  // Track tool_use id -> name so a tool_result can be classified (Bash → terminal).
+  private readonly toolNames = new Map<string, string>();
 
   constructor(private readonly ctx: NormalizeContext) {}
 
@@ -88,8 +126,6 @@ export class Normalizer {
     return EPHEMERAL_TYPES.has(type);
   }
 
-  // Build a Contract-1 envelope. Ephemeral types get null seq; durable run-scoped
-  // types consume the next per-run seq. `id` is always null (Rails assigns it).
   private envelope(
     type: EnvelopeType,
     actor: Actor,
@@ -109,27 +145,203 @@ export class Normalizer {
     };
   }
 
-  // v1 fallback: degrade any unknown/unmapped/malformed SDK message to `ai_raw`,
-  // never throwing. Redact-then-truncate the payload. `ai_raw` is durable.
+  // The full per-type mapping: one raw SDK message -> zero or more Contract-1
+  // envelopes (an assistant message has multiple content blocks; a Bash result
+  // yields chunked terminal_output). Never throws — unknowns -> ai_raw.
+  normalize(rawMessage: unknown, nowMs: number = Date.now()): EventEnvelope[] {
+    try {
+      return this.map(rawMessage as RawMessage, nowMs);
+    } catch {
+      return [this.toAiRaw(rawMessage, nowMs)];
+    }
+  }
+
+  private map(msg: RawMessage, nowMs: number): EventEnvelope[] {
+    switch (msg.type) {
+      case "system":
+        return msg.subtype === "init"
+          ? [this.runStartedFromInit(msg, nowMs)]
+          : [this.toAiRaw(msg, nowMs)];
+      case "assistant":
+        return this.mapAssistant(msg, nowMs);
+      case "user":
+        return this.mapUser(msg, nowMs);
+      case "result":
+        return [this.mapResult(msg, nowMs)];
+      default:
+        return [this.toAiRaw(msg, nowMs)];
+    }
+  }
+
+  private runStartedFromInit(msg: RawMessage, nowMs: number): EventEnvelope {
+    return this.envelope(
+      "run_started",
+      this.userActor(),
+      {
+        model: msg.model ?? "",
+        cwd: msg.cwd ?? "",
+        permission_mode: msg.permissionMode ?? "",
+        claude_session_id: msg.session_id ?? "",
+      },
+      nowMs,
+    );
+  }
+
+  private mapAssistant(msg: RawMessage, nowMs: number): EventEnvelope[] {
+    const out: EventEnvelope[] = [];
+    const blocks = msg.message?.content ?? [];
+    blocks.forEach((block, index) => {
+      const blockKey = `${msg.uuid ?? "msg"}:${index}`;
+      if (block.type === "text") {
+        // Durable ai_text on block stop. (Live streaming deltas are emitted by the
+        // runner's partial-message path; this maps the completed block.)
+        out.push(
+          this.envelope(
+            "ai_text",
+            { kind: "claude" },
+            { block: blockKey, text: block.text ?? "" },
+            nowMs,
+          ),
+        );
+      } else if (block.type === "thinking") {
+        out.push(
+          this.envelope("ai_thinking", { kind: "claude" }, { text: block.thinking ?? "" }, nowMs),
+        );
+      } else if (block.type === "tool_use") {
+        const id = block.id ?? "";
+        const name = block.name ?? "";
+        this.toolNames.set(id, name);
+        out.push(
+          this.envelope(
+            "tool_started",
+            { kind: "claude" },
+            { tool_use_id: id, name, input_summary: summarizeToolInput(name, block.input) },
+            nowMs,
+          ),
+        );
+        if (name === "Write" || name === "Edit") {
+          const path = String(((block.input ?? {}) as Record<string, unknown>).file_path ?? "");
+          out.push(
+            this.envelope(
+              "file_changed",
+              { kind: "claude" },
+              { tool_use_id: id, path, change: name === "Write" ? "created" : "modified" },
+              nowMs,
+            ),
+          );
+        }
+      }
+    });
+    return out;
+  }
+
+  private mapUser(msg: RawMessage, nowMs: number): EventEnvelope[] {
+    const out: EventEnvelope[] = [];
+    const blocks = msg.message?.content ?? [];
+    for (const block of blocks) {
+      if (block.type !== "tool_result") {
+        continue;
+      }
+      const id = block.tool_use_id ?? "";
+      const name = this.toolNames.get(id);
+      const text =
+        typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+      if (name === "Bash" && !block.is_error) {
+        out.push(...this.chunkTerminal(id, text, nowMs));
+      }
+      if (block.is_error) {
+        out.push(
+          this.envelope(
+            "tool_failed",
+            { kind: "claude" },
+            { tool_use_id: id, ok: false, error: text.slice(0, TOOL_INPUT_SUMMARY_CAP) },
+            nowMs,
+          ),
+        );
+      } else {
+        out.push(
+          this.envelope("tool_finished", { kind: "claude" }, { tool_use_id: id, ok: true }, nowMs),
+        );
+      }
+    }
+    return out;
+  }
+
+  // Bash output in ~64KB chunks (one event per chunk, ascending index).
+  private chunkTerminal(toolUseId: string, text: string, nowMs: number): EventEnvelope[] {
+    const buf = Buffer.from(text, "utf8");
+    const events: EventEnvelope[] = [];
+    let offset = 0;
+    let chunkIndex = 0;
+    do {
+      const slice = buf.subarray(offset, offset + TERMINAL_CHUNK_BYTES).toString("utf8");
+      events.push(
+        this.envelope(
+          "terminal_output",
+          { kind: "claude" },
+          { tool_use_id: toolUseId, chunk_index: chunkIndex, text: slice },
+          nowMs,
+        ),
+      );
+      offset += TERMINAL_CHUNK_BYTES;
+      chunkIndex += 1;
+    } while (offset < buf.length);
+    return events;
+  }
+
+  private mapResult(msg: RawMessage, nowMs: number): EventEnvelope {
+    const usage = msg.usage ?? {};
+    const trimmedUsage = {
+      input_tokens: usage.input_tokens ?? 0,
+      output_tokens: usage.output_tokens ?? 0,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+    };
+    if (msg.subtype === "success" && !msg.is_error) {
+      return this.envelope(
+        "run_finished",
+        { kind: "system" },
+        {
+          stop_reason: msg.stop_reason ?? "",
+          num_turns: msg.num_turns ?? 0,
+          duration_ms: msg.duration_ms ?? 0,
+          total_cost_usd: msg.total_cost_usd ?? 0,
+          usage: trimmedUsage,
+        },
+        nowMs,
+      );
+    }
+    return this.envelope(
+      "run_failed",
+      { kind: "system" },
+      {
+        stop_reason: msg.stop_reason ?? "",
+        api_error_status: msg.api_error_status ?? null,
+        total_cost_usd: msg.total_cost_usd ?? 0,
+        usage: trimmedUsage,
+      },
+      nowMs,
+    );
+  }
+
+  // Streaming text delta (ephemeral). The runner calls this for partial-assistant
+  // text; `block` is the same key the durable ai_text will carry.
+  textDelta(block: string, text: string, nowMs: number = Date.now()): EventEnvelope {
+    return this.envelope("ai_text_delta", { kind: "claude" }, { block, text }, nowMs);
+  }
+
+  // Fallback: degrade an unknown/malformed SDK message to ai_raw, never throwing.
   toAiRaw(rawMessage: unknown, nowMs: number): EventEnvelope {
     let bounded: { raw: unknown; truncated: boolean };
     try {
       bounded = boundRawPayload(rawMessage);
     } catch {
-      // Even a serialization failure must not throw — emit a minimal ai_raw.
       bounded = { raw: { unserializable: true }, truncated: false };
     }
     return this.envelope("ai_raw", { kind: "system" }, bounded, nowMs);
   }
 
-  // run_started is user-attributed via requested_by.
-  runStarted(nowMs: number): EventEnvelope {
-    return this.envelope("run_started", this.userActor(), {}, nowMs);
-  }
-
-  // run_interrupted mirrors run_started — user-attributed via requested_by,
-  // NOT system-attributed.
-  runInterrupted(nowMs: number): EventEnvelope {
+  runInterrupted(nowMs: number = Date.now()): EventEnvelope {
     return this.envelope("run_interrupted", this.userActor(), {}, nowMs);
   }
 

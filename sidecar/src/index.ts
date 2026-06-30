@@ -1,42 +1,76 @@
 // index.ts — the Fastify server + heartbeat loop. Deals only in Contract-1
-// envelopes and HTTP; it never touches raw SDK shapes (that is normalizer.ts).
-//
-// W1 skeleton: run-control routes are 501 stubs (wired to the runner in W2);
-// healthz/heartbeat report an empty active-run set. Binds 0.0.0.0:8787 and
+// envelopes and HTTP; it never touches raw SDK shapes (that is normalizer.ts) and
+// never drives the SDK directly (that is runner.ts). Binds 0.0.0.0:8787 and
 // publishes no port itself (the unpublished-port guarantee is dev-docker-compose's).
+//
+// Run-control routes are backed by the Runner: POST /runs → 202, follow-up +
+// interrupt → 200, matching the frozen sidecar-protocol. /healthz and the
+// heartbeat report the runner's real active_run_ids.
 
 import Fastify, { type FastifyInstance } from "fastify";
 import { type SidecarConfig, loadConfig } from "./config.js";
+import { type QueryFn, RunConflict, Runner, type StartRunInput, UnknownRun } from "./runner.js";
 import { Transport } from "./transport.js";
 
-// W1 has no runner, so there are never any active runs.
-function activeRunIds(): string[] {
-  return [];
-}
-
-export function buildServer(): FastifyInstance {
+export function buildServer(runner: Runner): FastifyInstance {
   const app = Fastify({ logger: true });
 
-  // Liveness probe — no auth, reports active runs (empty in the skeleton).
-  app.get("/healthz", async () => ({ active_run_ids: activeRunIds() }));
+  // Liveness probe — no auth, reports the runner's real active runs.
+  app.get("/healthz", async () => ({ active_run_ids: runner.activeRunIds() }));
 
-  // Run-control stubs matching the frozen sidecar-protocol signatures. W1: 501.
-  // W2 fills the handler bodies (202 for /runs, 200 for messages/interrupt)
-  // WITHOUT changing these signatures.
-  const notImplemented = { error: "not_implemented", detail: "wired to the runner in Week 2" };
-  app.post("/runs", async (_req, reply) => reply.code(501).send(notImplemented));
-  app.post("/runs/:id/messages", async (_req, reply) => reply.code(501).send(notImplemented));
-  app.post("/runs/:id/interrupt", async (_req, reply) => reply.code(501).send(notImplemented));
+  // POST /runs — start a run. 202 on accept; 409 when a run is already active.
+  app.post("/runs", async (req, reply) => {
+    const input = req.body as StartRunInput;
+    try {
+      runner.startRun(input);
+      return reply.code(202).send({ run_id: input.run_id, status: "running" });
+    } catch (err) {
+      if (err instanceof RunConflict) {
+        return reply.code(409).send({ error: "run_active" });
+      }
+      throw err;
+    }
+  });
+
+  // POST /runs/:id/messages — follow-up into the live run. 200 / 404.
+  app.post<{ Params: { id: string }; Body: { message: string } }>(
+    "/runs/:id/messages",
+    async (req, reply) => {
+      try {
+        runner.sendMessage(req.params.id, req.body.message);
+        return reply.code(200).send({ run_id: req.params.id, accepted: true });
+      } catch (err) {
+        if (err instanceof UnknownRun) {
+          return reply.code(404).send({ error: "unknown_run" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // POST /runs/:id/interrupt — interrupt the live run. 200 / 404.
+  app.post<{ Params: { id: string } }>("/runs/:id/interrupt", async (req, reply) => {
+    try {
+      await runner.interrupt(req.params.id);
+      return reply.code(200).send({ run_id: req.params.id, accepted: true });
+    } catch (err) {
+      if (err instanceof UnknownRun) {
+        return reply.code(404).send({ error: "unknown_run" });
+      }
+      throw err;
+    }
+  });
 
   return app;
 }
 
 // Heartbeat: POST { active_run_ids } every 5s, bearer-authed. 5xx/network is
 // transient (keep going); 401/403/404 is a FATAL misconfiguration (log + surface,
-// do not retry forever).
+// do not retry forever). `activeRunIds` is read live from the runner each beat.
 export function startHeartbeat(
   config: SidecarConfig,
   logger: FastifyInstance["log"],
+  activeRunIds: () => string[],
   fetchImpl: typeof fetch = fetch,
 ): { stop: () => void } {
   let fatal = false;
@@ -80,16 +114,32 @@ export async function flushWithTimeout(transport: Transport, timeoutMs: number):
   ]);
 }
 
-async function main(): Promise<void> {
-  const config = loadConfig();
-  const app = buildServer();
+export function buildRunner(
+  config: SidecarConfig,
+  logger: FastifyInstance["log"],
+  queryFn?: QueryFn,
+): {
+  runner: Runner;
+  transport: Transport;
+} {
   const transport = new Transport({
     railsInternalUrl: config.railsInternalUrl,
     sharedSecret: config.sharedSecret,
-    logger: app.log,
+    logger,
   });
+  const runner = queryFn ? new Runner(transport, queryFn) : new Runner(transport);
+  return { runner, transport };
+}
 
-  const heartbeat = startHeartbeat(config, app.log);
+async function main(): Promise<void> {
+  const config = loadConfig();
+  // A logger to build the transport/runner before the server exists; Fastify
+  // reuses pino under the hood, so use a Fastify instance's logger.
+  const app0 = Fastify({ logger: true });
+  const { runner, transport } = buildRunner(config, app0.log);
+  const app = buildServer(runner);
+
+  const heartbeat = startHeartbeat(config, app.log, () => runner.activeRunIds());
 
   const shutdown = async (): Promise<void> => {
     heartbeat.stop();
