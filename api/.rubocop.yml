@@ -48,7 +48,13 @@ Metrics/MethodLength:
 Metrics/AbcSize:
   Exclude:
     - "db/migrate/**/*"
-  Max: 22
+  Max: 24
+# Orchestration services + controllers do small attribute-mapping + branch-per-
+# lifecycle-state work; the cyclomatic/param thresholds fight that without value.
+Metrics/CyclomaticComplexity:
+  Max: 11
+Metrics/ParameterLists:
+  Max: 7
 
 # RSpec specs are naturally long/expressive; relax the defaults that fight specs.
 Metrics/BlockLength:
@@ -63,6 +69,12 @@ RSpec/MultipleMemoizedHelpers:
   Enabled: false
 # Request/integration specs legitimately describe a route string, not a class.
 RSpec/DescribeClass:
+  Enabled: false
+# Stubbing the sidecar/git seams via any-instance is the cleanest way to keep
+# request specs server/git-free; the around-block throwaway repo uses @repo.
+RSpec/AnyInstance:
+  Enabled: false
+RSpec/InstanceVariable:
   Enabled: false
 
 # `authorize!` follows the bang-on-side-effect convention, not a predicate.

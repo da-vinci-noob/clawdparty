@@ -15,6 +15,16 @@ Rails.application.routes.draw do
     resources :sessions, only: [] do
       # Late-joiner backfill: GET /api/sessions/:session_id/events?after=<cursor>
       resources :events, only: :index
+      # Run start: POST /api/sessions/:session_id/runs
+      resources :runs, only: :create
+    end
+
+    # Run control: POST /api/runs/:id/messages, POST /api/runs/:id/interrupt
+    resources :runs, only: [] do
+      member do
+        post :messages
+        post :interrupt
+      end
     end
   end
 
