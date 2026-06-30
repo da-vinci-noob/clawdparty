@@ -1,0 +1,19 @@
+import type { EventEnvelope, TerminalOutputPayload } from "@clawdparty/contracts";
+import anser from "anser";
+import type { FC } from "react";
+
+// Bash output (chunked ~64KB by the normalizer), rendered with ANSI coloring via
+// anser, scroll-capped so large output doesn't blow out the feed.
+export const TerminalBlock: FC<{ event: EventEnvelope }> = ({ event }) => {
+  const { text } = event.payload as TerminalOutputPayload;
+  const html = anser.ansiToHtml(anser.escapeForHtml(text));
+  return (
+    <pre
+      data-testid="feed-terminal"
+      className="max-h-64 overflow-auto rounded bg-black p-2 font-mono text-xs text-neutral-200"
+      // anser output is escaped first, then ANSI→span; safe to render.
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: anser escapes input before colorizing
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+};

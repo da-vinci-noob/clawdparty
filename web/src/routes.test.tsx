@@ -17,8 +17,8 @@ describe("AppRoutes", () => {
     expect(screen.getByTestId("landing-placeholder")).toBeInTheDocument();
   });
 
-  it("resolves the session route to the live raw-event list", async () => {
-    // The session route now renders the live transport, which backfills over REST
+  it("resolves the session route to the live activity feed", async () => {
+    // The session route renders the live activity feed, which backfills over REST
     // and subscribes to cable. Stub the backfill (empty) and inject a fake consumer.
     server.use(http.get("/api/sessions/:id/events", () => HttpResponse.json([])));
     const { consumer } = makeFakeConsumer();
@@ -31,6 +31,6 @@ describe("AppRoutes", () => {
       </AppProvider>,
     );
 
-    expect(await screen.findByTestId("raw-event-list")).toBeInTheDocument();
+    expect(await screen.findByTestId("activity-feed")).toBeInTheDocument();
   });
 });
