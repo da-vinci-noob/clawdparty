@@ -38,6 +38,17 @@ All envelope fields (`id`/`session_id`/`ai_run_id`/`seq`/`type`/`actor`/`ts`) ar
 `claude_session_id` ← the SDK `session_id`. `actor` is `{ kind: "user", id: <requested_by> }` (stamped by the
 runner, not from the SDK message).
 
+### `user_prompt` — NOT an SDK message (synthesized by the runner; added v1.2)
+```jsonc
+{ "text": string }
+```
+The human's prompt that drives the run. There is **no raw SDK message** for this — the sidecar synthesizes a
+`user_prompt` envelope immediately **before** it pushes each user message into the SDK streaming-input iterable:
+once for the initial prompt (`runner.startRun`) and once per follow-up (`runner.sendMessage`). Run-scoped +
+durable; `actor` is `{ kind: "user", id: <requested_by> }`; `seq` is the next per-run monotonic value (so on a
+fresh run the prompt is `seq 1` and `run_started` is `seq 2`). Added additively at `CONTRACT_VERSION` 1.2
+(`user-prompt-event`); see `CHANGELOG.md [1.2.0]`.
+
 ### `ai_text_delta` — ephemeral, from streaming `text` (partial assistant message)
 ```jsonc
 { "block": string, "text": string }

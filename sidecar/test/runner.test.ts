@@ -122,6 +122,76 @@ describe("Runner", () => {
     expect(() => runner.startRun({ ...baseInput, run_id: "r2" })).not.toThrow();
   });
 
+  it("emits a user_prompt at seq 1, before run_started (seq 2), on a fresh run", async () => {
+    const { transport, durable } = captureTransport();
+    const { handle } = scriptedQuery([
+      {
+        type: "system",
+        subtype: "init",
+        model: "m",
+        cwd: "/repo",
+        permissionMode: "acceptEdits",
+        session_id: "sdk-1",
+      },
+      {
+        type: "result",
+        subtype: "success",
+        stop_reason: "end_turn",
+        num_turns: 1,
+        total_cost_usd: 0.5,
+        usage: {},
+      },
+    ]);
+    const runner = new Runner(transport, () => handle);
+
+    runner.startRun({ ...baseInput, prompt: "build it" });
+    await vi.waitFor(() => expect(durable.some((e) => e.type === "run_finished")).toBe(true));
+
+    const prompt = durable.find((e) => e.type === "user_prompt");
+    const started = durable.find((e) => e.type === "run_started");
+    expect(prompt).toBeDefined();
+    expect(prompt?.payload).toEqual({ text: "build it" });
+    expect(prompt?.seq).toBe(1);
+    expect(prompt?.ai_run_id).toBe("r1");
+    expect(prompt?.actor).toEqual({ kind: "user", id: "p1" });
+    expect(started?.seq).toBe(2);
+    // Durable, not ephemeral: it carries a non-null seq.
+    expect(prompt?.seq).not.toBeNull();
+  });
+
+  it("emits exactly one user_prompt per follow-up, before the message is pushed", async () => {
+    const { transport, durable } = captureTransport();
+    // A query that stays open so the run is active for the follow-up.
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        yield {
+          type: "system",
+          subtype: "init",
+          model: "m",
+          cwd: "/repo",
+          permissionMode: "acceptEdits",
+          session_id: "x",
+        };
+        await new Promise(() => {}); // stay open
+      })(),
+      { interrupt: () => Promise.resolve() },
+    ) as unknown as QueryHandle;
+    const runner = new Runner(transport, () => handle);
+    runner.startRun(baseInput);
+    await vi.waitFor(() => expect(durable.some((e) => e.type === "run_started")).toBe(true));
+
+    const before = durable.filter((e) => e.type === "user_prompt").length;
+    runner.sendMessage("r1", "and now this");
+    await vi.waitFor(() =>
+      expect(durable.filter((e) => e.type === "user_prompt").length).toBe(before + 1),
+    );
+
+    const followUp = durable.filter((e) => e.type === "user_prompt").at(-1);
+    expect(followUp?.payload).toEqual({ text: "and now this" });
+    expect(followUp?.actor).toEqual({ kind: "user", id: "p1" });
+    expect(followUp?.seq).not.toBeNull();
+  });
+
   it("rejects a second concurrent start with RunConflict", () => {
     const { transport } = captureTransport();
     // A query that never ends, so the run stays active.

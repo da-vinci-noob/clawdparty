@@ -110,6 +110,9 @@ export class Runner {
       aiRunId: input.run_id,
       requestedBy: input.requested_by,
     });
+    // The initial prompt becomes seq 1 (assigned now), shipped before the drain
+    // loop emits run_started (seq 2) — so the human's words lead the transcript.
+    const promptEvent = normalizer.userPrompt(input.prompt);
     const pushable = new PushableInput();
     pushable.push(userMessage(input.prompt));
 
@@ -125,12 +128,15 @@ export class Runner {
       normalizer,
       requestedBy: input.requested_by,
     };
-    void this.drain(this.active);
+    void this.drain(this.active, [promptEvent]);
   }
 
-  // Push a follow-up into the live run's input iterable (no respawn).
+  // Push a follow-up into the live run's input iterable (no respawn). Emit a
+  // user_prompt (next seq) BEFORE the push, so the follow-up's words precede the
+  // output it triggers.
   sendMessage(runId: string, message: string): void {
     const run = this.requireActive(runId);
+    void this.ship([run.normalizer.userPrompt(message)]);
     run.input.push(userMessage(message));
   }
 
@@ -154,8 +160,11 @@ export class Runner {
   // generator open awaiting more input after `result`, so waiting for it to return
   // would leak the single run slot forever. Breaking lets `finally` close the
   // input (signaling end-of-input to the SDK) and free the slot.
-  private async drain(run: ActiveRun): Promise<void> {
+  private async drain(run: ActiveRun, leading: EventEnvelope[] = []): Promise<void> {
     try {
+      if (leading.length > 0) {
+        await this.ship(leading);
+      }
       for await (const message of run.handle) {
         const events = run.normalizer.normalize(message);
         await this.ship(events);

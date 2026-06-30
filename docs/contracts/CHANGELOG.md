@@ -28,6 +28,32 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [1.2.0] — `user_prompt` event (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 2 }`.** Additive `minor` bump (`user-prompt-event`): a new
+event type so the activity feed can show the human's words, not just Claude's. The feed is rebuilt
+from the event stream alone; the prompt previously lived only on `AiRun.prompt` and was never an
+event, so a watcher saw answers to invisible questions.
+
+### Added (additive — nothing removed or changed)
+
+- **`user_prompt` event type** (the 21st taxonomy name) — **run-scoped, durable**, `actor.kind: "user"`
+  (the requesting participant), payload `UserPromptPayload { text }`. Carries the initial prompt and
+  each mid-run follow-up.
+- **Producer:** the **sidecar** emits it (it already holds the prompt text and **owns the per-run
+  `seq` space** — Rails has no collision-free run `seq`). Emitted immediately **before** each user
+  message is pushed into the SDK streaming-input iterable, so the prompt's `seq` precedes the output
+  it triggers (on a fresh run: `user_prompt` = `seq 1`, `run_started` = `seq 2`).
+- **`EVENT_TYPE_COUNT`** freeze guard updated `20 → 21`.
+
+### Unchanged (why this is a `minor`, not a `major`)
+
+The envelope fields + scalar types, the `Actor` union, the `(ai_run_id, seq)` idempotency + dual-cursor
+rules, the ephemeral-vs-durable rule, and every endpoint signature are **unchanged**. `user_prompt`
+rides the existing sidecar→Rails ingest path and the `[ai_run_id, seq]` index like any other run-scoped
+durable event; Rails needs no new code (ingest persists it verbatim, `Runs::Finalize` ignores it). A
+consumer requiring exact `major` and `minor ≥ 1` stays compatible (proven across `1.0 → 1.1`).
+
 ## [1.1.0] — SDK payload finalization (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 1 }`.** Additive `minor` bump (`sdk-message-spike`):
