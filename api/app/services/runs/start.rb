@@ -40,9 +40,7 @@ module Runs
       claude_session_id = resume_session_id(revise)
       prior&.update!(status: 'superseded') if revise
 
-      run = create_run!(worktree_path)
-      status = post_to_sidecar(run, worktree_path, claude_session_id)
-      Result.new(ai_run: run, sidecar_status: status)
+      create_and_post!(worktree_path, claude_session_id)
     rescue ActiveRecord::RecordNotUnique
       # The partial unique index won the race: another active run exists.
       raise(ActiveRunExists)
@@ -57,6 +55,18 @@ module Runs
       return nil unless revise
 
       @session.ai_runs.where.not(claude_session_id: nil).order(:id).last&.claude_session_id
+    end
+
+    # If the sidecar refuses the start, drop the just-created run so no
+    # queued/active run is left behind to block the session (queued counts toward
+    # one-active-run); re-raise so the controller still surfaces the error.
+    def create_and_post!(worktree_path, claude_session_id)
+      run = create_run!(worktree_path)
+      status = post_to_sidecar(run, worktree_path, claude_session_id)
+      Result.new(ai_run: run, sidecar_status: status)
+    rescue Sidecar::Client::ActiveRunConflict, Sidecar::Client::TransportError
+      run&.destroy
+      raise
     end
 
     def create_run!(_worktree_path)

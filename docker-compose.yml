@@ -109,7 +109,10 @@ services:
       - CLAUDE_CODE_USE_VERTEX
       - AWS_PROFILE
       - AWS_REGION
-      - ANTHROPIC_MODEL
+      # ANTHROPIC_MODEL is intentionally NOT a host passthrough — it comes from
+      # .env.local (env_file) so the SAME value is authoritative for rails too.
+      # (A host-shell passthrough here would override .env.local and re-introduce
+      # the rails/sidecar model mismatch.)
     expose:
       - "8787"
     volumes:

@@ -11,6 +11,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const activeRunId = useEventStore(selectActiveRunId);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!can("run")) {
     return null;
@@ -21,24 +22,32 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
     if (!text.trim()) {
       return;
     }
+    setError(null);
     setBusy(true);
     try {
-      if (activeRunId) {
-        await fetch(`/api/runs/${activeRunId}/messages`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ message: text }),
-        });
-      } else {
-        await fetch(`/api/sessions/${sessionId}/runs`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ prompt: text }),
-        });
+      const res = activeRunId
+        ? await fetch(`/api/runs/${activeRunId}/messages`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ message: text }),
+          })
+        : await fetch(`/api/sessions/${sessionId}/runs`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ prompt: text }),
+          });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          errors?: { message: string }[];
+        } | null;
+        setError(body?.errors?.[0]?.message ?? `Request failed (${res.status})`);
+        return;
       }
       setText("");
+    } catch {
+      setError("Network error");
     } finally {
       setBusy(false);
     }
@@ -64,6 +73,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
       >
         {activeRunId ? "Send" : "Run"}
       </button>
+      {error && (
+        <p data-testid="composer-error" className="text-sm text-red-400">
+          {error}
+        </p>
+      )}
     </form>
   );
 };

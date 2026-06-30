@@ -17,6 +17,9 @@ class RunsController < ApplicationController
   rescue_from Sidecar::Client::UnknownRun do
     render_not_found
   end
+  rescue_from Sidecar::Client::TransportError do
+    render(json: { errors: [{ message: 'The Claude sidecar is unavailable; try again' }] }, status: :bad_gateway)
+  end
 
   # POST /api/sessions/:session_id/runs
   def create

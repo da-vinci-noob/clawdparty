@@ -150,10 +150,18 @@ export class Runner {
   }
 
   // Consume the SDK message stream, normalize each, and ship the envelopes.
+  // Stop on a terminal lifecycle event: in streaming-input mode the SDK keeps the
+  // generator open awaiting more input after `result`, so waiting for it to return
+  // would leak the single run slot forever. Breaking lets `finally` close the
+  // input (signaling end-of-input to the SDK) and free the slot.
   private async drain(run: ActiveRun): Promise<void> {
     try {
       for await (const message of run.handle) {
-        await this.ship(run.normalizer.normalize(message));
+        const events = run.normalizer.normalize(message);
+        await this.ship(events);
+        if (events.some((e) => isTerminal(e.type))) {
+          break;
+        }
       }
     } catch (err) {
       this.transport.logger.error({ err: String(err) }, "run drain error");
@@ -180,6 +188,10 @@ export class Runner {
 
 function isEphemeral(type: string): boolean {
   return type === "ai_text_delta" || type === "presence_changed";
+}
+
+function isTerminal(type: string): boolean {
+  return type === "run_finished" || type === "run_failed";
 }
 
 function userMessage(text: string): unknown {

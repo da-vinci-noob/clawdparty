@@ -83,6 +83,45 @@ describe("Runner", () => {
     expect(runner.activeRunIds()).toEqual([]); // cleared after drain
   });
 
+  it("clears the active slot after run_finished even when the input stream stays open", async () => {
+    // Mimics the REAL SDK in streaming-input mode: it yields init + result and
+    // then keeps the generator open awaiting more input (the pushable input
+    // iterable is never closed). The slot must free on run_finished, NOT wait for
+    // the generator to return — otherwise the single run slot leaks forever and
+    // every subsequent run 409s.
+    const { transport, durable } = captureTransport();
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        yield {
+          type: "system",
+          subtype: "init",
+          model: "m",
+          cwd: "/repo",
+          permissionMode: "acceptEdits",
+          session_id: "sdk-1",
+        };
+        yield {
+          type: "result",
+          subtype: "success",
+          stop_reason: "end_turn",
+          num_turns: 1,
+          total_cost_usd: 0.5,
+          usage: {},
+        };
+        await new Promise(() => {}); // stay open like streaming-input mode
+      })(),
+      { interrupt: () => Promise.resolve() },
+    ) as unknown as QueryHandle;
+    const runner = new Runner(transport, () => handle);
+
+    runner.startRun(baseInput);
+    await vi.waitFor(() => expect(durable.some((e) => e.type === "run_finished")).toBe(true));
+    await vi.waitFor(() => expect(runner.activeRunIds()).toEqual([]));
+
+    // And a fresh run can start once the slot is freed.
+    expect(() => runner.startRun({ ...baseInput, run_id: "r2" })).not.toThrow();
+  });
+
   it("rejects a second concurrent start with RunConflict", () => {
     const { transport } = captureTransport();
     // A query that never ends, so the run stays active.
