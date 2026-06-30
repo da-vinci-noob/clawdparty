@@ -53,6 +53,20 @@ class RunsController < ApplicationController
     render(json: { run_id: run.id.to_s, accepted: true }, status: :ok)
   end
 
+  # GET /api/runs/:id/diff — the run's diff vs base_sha, REST only (never cable),
+  # view-gated (all roles review). Untracked files are counted (intent-to-add).
+  def diff
+    run = find_run!
+    authorize_action!(:view, run.session)
+    result = Git::Diff.new(run).call
+    render(json: {
+             run_id: run.id.to_s,
+             base_sha: result.base_sha,
+             files: result.files.map(&:to_h),
+             patch: result.patch
+           }, status: :ok)
+  end
+
   private
 
   def find_run!
