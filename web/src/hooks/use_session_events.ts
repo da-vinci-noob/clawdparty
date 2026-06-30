@@ -4,16 +4,22 @@
 // max applied id on reconnect (dedupe-by-id makes the re-drain idempotent).
 
 import type { EventEnvelope } from "@clawdparty/contracts";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { fetchBackfill } from "../helpers/backfill";
 import { useConsumer } from "../lib/action_cable_provider";
 import { CableController, type SessionChannel } from "../lib/cable";
 import { useEventStore } from "../stores/event_store";
 
-export function useSessionEvents(sessionId: string): void {
+// "loading" until the first backfill resolves; "ok" once it does; "not_found" if
+// the session is unknown or the requester has not joined (the backfill 404s).
+export type SessionEventsStatus = "loading" | "ok" | "not_found";
+
+export function useSessionEvents(sessionId: string): SessionEventsStatus {
   const consumer = useConsumer();
+  const [status, setStatus] = useState<SessionEventsStatus>("loading");
 
   useEffect(() => {
+    setStatus("loading");
     let controller: CableController | null = null;
 
     const channel: SessionChannel = {
@@ -36,12 +42,19 @@ export function useSessionEvents(sessionId: string): void {
 
     controller = new CableController({
       channel,
-      backfill: (afterId) => fetchBackfill(sessionId, afterId),
+      backfill: async (afterId) => {
+        const events = await fetchBackfill(sessionId, afterId);
+        setStatus("ok");
+        return events;
+      },
       apply: (event) => useEventStore.getState().apply(event),
       maxAppliedId: () => useEventStore.getState().maxAppliedId,
+      onNotFound: () => setStatus("not_found"),
     });
     controller.start();
 
     return () => controller?.stop();
   }, [consumer, sessionId]);
+
+  return status;
 }

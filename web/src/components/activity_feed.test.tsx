@@ -2,12 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { act, render, screen } from "@testing-library/react";
-import { http, HttpResponse } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeFakeConsumer } from "../../test/fake_consumer";
-import { server } from "../../test/msw_server";
-import { AppProvider } from "../providers/app_provider";
 import { useEventStore } from "../stores/event_store";
 import { ActivityFeed } from "./activity_feed";
 
@@ -20,16 +15,11 @@ const fixture: EventEnvelope[] = readFileSync(
   .split("\n")
   .map((line) => JSON.parse(line));
 
+// The feed is a pure reader of the event store now (the cable catch-up lives on
+// the session page), so it renders without a consumer/backfill — events are
+// applied to the store directly in each test.
 function renderFeed() {
-  server.use(http.get("/api/sessions/:id/events", () => HttpResponse.json([])));
-  const { consumer } = makeFakeConsumer();
-  return render(
-    <AppProvider consumerFactory={() => consumer}>
-      <MemoryRouter>
-        <ActivityFeed sessionId="sess_demo" />
-      </MemoryRouter>
-    </AppProvider>,
-  );
+  return render(<ActivityFeed />);
 }
 
 describe("ActivityFeed", () => {

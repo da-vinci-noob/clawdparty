@@ -33,4 +33,22 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByTestId("activity-feed")).toBeInTheDocument();
   });
+
+  it("shows a not-found state (not the empty shell) for an unknown/not-joined session", async () => {
+    // Backfill 404 = the session does not exist OR the requester has not joined.
+    // The page must surface that, not render a blank working shell.
+    server.use(http.get("/api/sessions/:id/events", () => new HttpResponse(null, { status: 404 })));
+    const { consumer } = makeFakeConsumer();
+
+    render(
+      <AppProvider consumerFactory={() => consumer}>
+        <MemoryRouter initialEntries={["/sessions/6"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </AppProvider>,
+    );
+
+    expect(await screen.findByTestId("session-not-found")).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-feed")).not.toBeInTheDocument();
+  });
 });
