@@ -1,14 +1,14 @@
 # clawdparty — Real-Time Collaborative Claude Code Session Server
 
-**3-week plan · Team: Shah Rukh, Snehal (W1-3), Manish (W1 unavailable) · Host: Shah Rukh's Mac, same local network (LAN) — Tailscale/remote hosting is a future phase**
+**3-week plan · Team: Shah Rukh, Snehal · Host: Shah Rukh's Mac, same local network (LAN) — Tailscale/remote hosting is a future phase**
 
-*Plan finalized: 2026-06-12 · Updated: 2026-06-19 (timeline compressed to 3 weeks; Manish unavailable W1) · local dev runs on **Docker Compose** — one container per process, `bin/start` as the single entry point.*
+*Plan finalized: 2026-06-12 · Updated: 2026-06-19 (timeline compressed to 3 weeks) · local dev runs on **Docker Compose** — one container per process, `bin/start` as the single entry point.*
 
 > **As-of note:** this plan is written in the original pre-build future tense (e.g. "W1 spike before freeze"). The week-by-week schedule (§10) and milestone narration are the historical plan of record; treat the **specs in `openspec/changes/`** as the current authority for what is built, and the dated execution timeline as the original sequencing intent rather than a live status board.
 
 ## 1. Context & goal
 
-We're building a real-time collaborative coding session server: **any number of developers** join a browser session and watch/guide Claude Code working live on a repository on Shah Rukh's Mac. Shared chat (per-session sidebar), live Claude activity stream, file/diff viewers, and a human approval flow for Claude's changes. (The task board and a dedicated terminal tab are modeled in the schema/events but cut from the MVP UI per §12 — terminal output and tool events render in the activity feed.) Timeline: **3 weeks** (Manish joins Week 2 — Week 1 is Shah Rukh + Snehal only), built by 3 people total — but sessions are not limited to 3 participants.
+We're building a real-time collaborative coding session server: **any number of developers** join a browser session and watch/guide Claude Code working live on a repository on Shah Rukh's Mac. Shared chat (per-session sidebar), live Claude activity stream, file/diff viewers, and a human approval flow for Claude's changes. (The task board and a dedicated terminal tab are modeled in the schema/events but cut from the MVP UI per §12 — terminal output and tool events render in the activity feed.) Timeline: **3 weeks**, built by 2 people (Shah Rukh + Snehal) — but sessions are not limited to 2 participants.
 
 **Key usage model:** Shah Rukh's Mac is only the *host machine* (Rails + sidecar + repo live there). **Shah Rukh participates exactly like everyone else — through the browser**: he joins the session, prompts Claude, chats, and reviews diffs from the web UI (with the `owner` role, so he's also the one who approves/rejects). Nobody drives Claude from a terminal; the web session IS the interface.
 
@@ -62,8 +62,8 @@ We're building a real-time collaborative coding session server: **any number of 
    vite container. In prod, rails serves the built SPA. (Vite still proxies /api+/~cable
    back to rails for the direct-on-compose-network case.)
    ┌────────────────┬───┴──────────┬──────────────┐
-Shah Rukh's      Snehal's      Manish's      …any invited
-browser (owner)  browser       browser       developer
+Shah Rukh's      Snehal's      …any invited
+browser (owner)  browser       developer
 ```
 
 All humans — including Shah Rukh — interact through the browser session. The session UI is the only interface to Claude; participants per session are unbounded (invite links are reusable).
@@ -140,43 +140,42 @@ SDK message → sidecar/src/normalizer.ts → batched POST /internal/events
 ## 10. 3-week execution plan
 
 **Phase structure:** the 3 weeks are bookended by review phases —
-- **Days 1–2 (W1 Mon–Tue): Architecture review phase.** No feature building. Shah Rukh + Snehal review this plan and challenge every decision (Manish out W1); Shah Rukh runs the SDK spike (validating the riskiest assumption is part of review); contracts drafted against real spike output.
+- **Days 1–2 (W1 Mon–Tue): Architecture review phase.** No feature building. The plan is reviewed and every decision challenged; the SDK spike is run (validating the riskiest assumption is part of review); contracts drafted against real spike output.
 - **Days 3–13: Building phase.** Starts Wed W1 with the contract freeze; ends Wed W3.
 - **Last 2 days (W3 Thu–Fri): Complete project review phase.** Cross-stream code review, security review, docs walkthrough, final end-to-end verification. No new features.
 
-Ownership (swappable; contracts make handoffs cheap): **Shah Rukh = sidecar + integration** (sidecar is inseparable from his machine/credentials; integrator and riskiest stream co-located), **Snehal = Rails backend** (deepest pure-Rails stream), **Manish = frontend (W2-3 only; unavailable W1)**. W1 frontend scaffolding (Vite/React/routes only, no features) covered by Shah Rukh to unblock Manish on day 1 of W2. Streams integrate continuously — never batched to week-end; each week has a concrete working milestone (below) as its acceptance gate.
+Work by week (each week's scope is one coherent slice; contracts make handoffs cheap): **Week 1** = contracts freeze + the full skeleton (Docker Compose scaffold, Rails + sidecar foundations, frontend scaffold) so the live-Claude work has a working base; **Week 2** = live Claude end-to-end (sidecar run loop, run orchestration, the cable client + activity feed, prompt/interrupt/chat, file + diff APIs); **Week 3** = the full loop + hardening (changeset approve/reject, diff viewer + approval UI, LAN serving + supervision, security hardening, README/runbook). Streams integrate continuously — never batched to week-end; each week has a concrete working milestone (below) as its acceptance gate.
 
-### Week 1 — Review phase (Mon–Tue), then contracts + skeletons (Shah Rukh + Snehal only; Manish unavailable)
-**Milestone: Rails + sidecar can replay the fixture end-to-end; frontend scaffold exists (routes/shell only, zero features) for Manish to build on top of in W2.**
+### Week 1 — Review phase (Mon–Tue), then contracts + skeletons
+**Milestone: Rails + sidecar can replay the fixture end-to-end; frontend scaffold exists (routes/shell only, zero features) to build features on top of in W2.**
 
-**Mon–Tue — Architecture review (Shah Rukh + Snehal only):**
-- Mon: Shah Rukh + Snehal walk through this plan section by section — challenge stack choices, data model, event taxonomy draft, protocol, git/approval flow, security model; agree repo layout; assign streams; draft the three contracts. Manish will review async and raise any concerns by Wed AM.
-- Tue: **Shah Rukh** runs the Agent SDK spike on a toy repo — capture every raw message type, exercise streaming input/interrupt/resume, save raw logs as fixtures (this validates the architecture's riskiest assumption). **Snehal** reviews/refines the REST+cable API shapes, role matrix, and migration plan against the draft contracts; preps CI config.
-- Tue EOD: spike findings written up and shared with Manish. **Wed: contract freeze** (only after the spike — schemas invented before seeing real SDK output are fiction; Manish sign-off by Wed noon).
+**Mon–Tue — Architecture review:**
+- Mon: walk through this plan section by section — challenge stack choices, data model, event taxonomy draft, protocol, git/approval flow, security model; agree repo layout; assign streams; draft the three contracts.
+- Tue: run the Agent SDK spike on a toy repo — capture every raw message type, exercise streaming input/interrupt/resume, save raw logs as fixtures (this validates the architecture's riskiest assumption); review/refine the REST+cable API shapes, role matrix, and migration plan against the draft contracts; prep CI config.
+- Tue EOD: spike findings written up. **Wed: contract freeze** (only after the spike — schemas invented before seeing real SDK output are fiction).
 
-**Wed–Fri — Build starts (Shah Rukh + Snehal; Shah Rukh covers minimal frontend scaffold):**
-- **Shah Rukh (3.5d):** **Docker Compose scaffold + `bin/start`** (rails · sidecar · jobs · postgres · vite services, bind-mounted source, named volumes for gems/node_modules, sidecar binds host `~/.claude` + the target repo) so every stream develops in containers from day one (0.5d); sidecar skeleton: HTTP server, normalizer v1, event POST to Rails (1.5d); `packages/contracts` TS types + `fixtures/sample_run.jsonl` from real spike output (0.5d); **minimal frontend scaffold: Vite + React + Biome + routes + app shell component (zero features), CI green** (1d). Goal: Manish can `bin/start` on Mon W2 and immediately start building features against a working skeleton. (Integration buffer absorbed into the Docker setup; watch this as a pace risk.)
-- **Snehal (3.5d):** Rails scaffold + PostgreSQL + RuboCop + CI (0.5d); models/migrations incl. events + constraints (1d); invite-link auth + cookie (0.5d); `SessionChannel` + `POST /internal/events` ingest→persist→broadcast (1d); **fake-Claude rake task** replaying `sample_run.jsonl` through real ingest (0.5d).
+**Wed–Fri — Build starts (the full skeleton):**
+- **Docker Compose scaffold + `bin/start`** (rails · sidecar · jobs · postgres · vite services, bind-mounted source, named volumes for gems/node_modules, sidecar binds host `~/.claude` + the target repo) so every stream develops in containers from day one; **Rails foundation** — scaffold + PostgreSQL + RuboCop + CI, models/migrations incl. events + constraints, invite-link auth + cookie, `SessionChannel` + `POST /internal/events` ingest→persist→broadcast, and the **fake-Claude rake task** replaying `sample_run.jsonl` through real ingest; **sidecar skeleton** — HTTP server, normalizer v1, event POST to Rails; `packages/contracts` TS types + `fixtures/sample_run.jsonl` from real spike output; **minimal frontend scaffold** — Vite + React + Biome + routes + app shell component (zero features), CI green. Goal: a working skeleton so W2 can immediately build features against it. (Branches: `freeze-interface-contracts` → `dev-docker-compose` → `rails-foundation` → `sidecar-foundation` → `web-scaffold`.)
 
-### Week 2 — Live Claude end-to-end (all three; Manish joins Mon)
-**Milestone: Claude runs live and is watchable from multiple browsers; owner can prompt and interrupt; a mid-run joiner catches up correctly; verified cross-machine over the LAN from Snehal's/Manish's own laptops.**
-- **Shah Rukh (4d):** run lifecycle/state machine in sidecar (1d); worktree creation + base_sha recording (1d); normalizer full coverage: deltas/tools/terminal/result (1d); interrupt + streaming follow-ups + heartbeat (1d).
-- **Snehal (4d):** run orchestration `POST /sessions/:id/runs` → sidecar, status from events, role checks (1d); event store hardening: pagination, payload caps (0.5d); **file tree + content API with traversal request specs** (1.5d); **diff API** with intent-to-add (1d).
-- **Manish (4d, starts Mon W2):** inherit the W1 frontend scaffold; **cable.ts wrapper + event reducer with backfill/buffer/drain** (1.5d); activity feed real rendering: streamed text, collapsible tool chips, run banners (1.5d); prompt composer + follow-up + interrupt button, role-gated, chat panel + presence stub (1d).
+### Week 2 — Live Claude end-to-end
+**Milestone: Claude runs live and is watchable from multiple browsers; owner can prompt and interrupt; a mid-run joiner catches up correctly; verified cross-machine over the LAN from a second laptop.**
+- **Sidecar run loop:** run lifecycle/state machine in sidecar; worktree creation + base_sha recording; normalizer full coverage: deltas/tools/terminal/result; interrupt + streaming follow-ups + heartbeat.
+- **Rails orchestration + read APIs:** run orchestration `POST /sessions/:id/runs` → sidecar, status from events, role checks; event store hardening: pagination, payload caps; **file tree + content API with traversal request specs**; **diff API** with intent-to-add.
+- **Frontend features:** **cable.ts wrapper + event reducer with backfill/buffer/drain**; activity feed real rendering: streamed text, collapsible tool chips, run banners; prompt composer + follow-up + interrupt button, role-gated, chat panel + presence stub.
 
 ### Week 3 — Full loop + hardening + final review (build freezes Wed EOD)
-**Milestone: full loop works — prompt → watch live → review diff → approve commits / reject reverts, roles enforced; clawdparty used on itself over the LAN; final verification run by Snehal or Manish from their own laptop using only the README.**
+**Milestone: full loop works — prompt → watch live → review diff → approve commits / reject reverts, roles enforced; clawdparty used on itself over the LAN; final verification run from a second laptop using only the README.**
 
-**Mon–Wed — final build (all three, ~3d each):**
-- **Shah Rukh:** sidecar supervision: container restart policy, SIGTERM/graceful shutdown, restart recovery via resume (1d); LAN serving config: Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs (0.5d); pair with Snehal on changeset service over real worktrees (0.5d); security hardening: token expiry/revocation, secret review, confirm sidecar/Vite ports stay unpublished (0.5d); runbook + README incl. LAN join instructions (0.5d).
-- **Snehal:** **changeset service: approve=commit / reject=revert + unit tests** (untracked, gitignored, empty diff, dirty-at-start, reject-leaves-clean) (1.5d); role-enforcement pass + request-spec matrix (1d); test backstop: auth/role/traversal specs, git edge specs, **one happy-path system test via fixture replay** (0.5d).
-- **Manish:** **diff viewer** (react-diff-view, per-file list, stats) (1.5d); **approval UI** (review screen, approve/reject/revise, owner-gated) (1d); mid-run join/reconnect resync + UI polish: loading/empty/error states (0.5d).
+**Mon–Wed — final build:**
+- **Infrastructure + hardening:** sidecar supervision (container restart policy, SIGTERM/graceful shutdown, restart recovery via resume); LAN serving config (Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs); security hardening (token expiry/revocation, secret review, confirm sidecar/Vite ports stay unpublished); runbook + README incl. LAN join instructions.
+- **Review loop:** **changeset service: approve=commit / reject=revert + unit tests** (untracked, gitignored, empty diff, dirty-at-start, reject-leaves-clean); **diff viewer** (react-diff-view, per-file list, stats) + **approval UI** (review screen, approve/reject/revise, owner-gated); role-enforcement pass + request-spec matrix; mid-run join/reconnect resync + UI polish: loading/empty/error states; test backstop: auth/role/traversal specs, git edge specs, **one happy-path system test via fixture replay**.
+- The changeset service over real worktrees (the A↔B↔git seam) is the cross-stream piece — built with both backend and sidecar in view.
 
-**Thu–Fri — Complete project review (all three; no new features, fixes only):**
-- Thu AM: **cross-stream code review** — each person reviews a stream they didn't build (Shah Rukh→Rails backend, Snehal→frontend, Manish→sidecar); findings triaged into fix-now vs backlog.
+**Thu–Fri — Complete project review (no new features, fixes only):**
+- Thu AM: **cross-stream code review** — each stream is reviewed by someone who didn't build it; findings triaged into fix-now vs backlog.
 - Thu PM: **security review checklist** — path traversal + denylist on file API, role-enforcement matrix endpoint by endpoint, invite token lifecycle, cable subscription auth, sidecar unpublished-port/secret, git reject leaves clean worktree.
 - Fri AM: fix-now items; README/runbook walkthrough executed cold by a non-author; dogfood: use clawdparty on itself, capture any final issues.
-- Fri PM: **final end-to-end verification run by Snehal or Manish from their own laptop, using only the README** (proves owner-independence + docs); future-phase backlog written up (Tailscale, per-tool Bash gating, Monaco, cloud).
+- Fri PM: **final end-to-end verification run from a second laptop, using only the README** (proves owner-independence + docs); future-phase backlog written up (Tailscale, per-tool Bash gating, Monaco, cloud).
 
 ## 11. Contracts — freeze Wednesday of Week 1 (only after the spike findings are in, never before)
 
@@ -184,7 +183,7 @@ Ownership (swappable; contracts make handoffs cheap): **Shah Rukh = sidecar + in
 2. **Rails↔sidecar protocol** (`docs/contracts/sidecar_protocol.md`) — incl. the worktree convention (who creates it, path layout, base_sha rule). This is the A↔B seam.
 3. **REST + cable API** (`docs/contracts/http_api.md`) — endpoints, role matrix, rule: *everything live arrives as a Contract-1 event*, no bespoke cable messages.
 
-`fixtures/sample_run.jsonl` (from real spike output) is the **executable contract**: Manish renders it, Snehal's seed replays it, Shah Rukh's normalizer tests assert producing it. Post-freeze changes require sign-off from all three + a CHANGELOG entry; additive types cheap, envelope changes are emergencies.
+`fixtures/sample_run.jsonl` (from real spike output) is the **executable contract**: the web renders it, the Rails seed replays it, the sidecar normalizer tests assert producing it. Post-freeze changes require sign-off from both contributors + a CHANGELOG entry; additive types cheap, envelope changes are emergencies.
 
 **Stub strategy (nobody waits for anybody):** frontend builds against fixtures; Rails is exercised end-to-end via the fake-Claude replay; sidecar logs to stdout before ingest exists; diff viewer builds against a checked-in sample diff JSON.
 
@@ -207,16 +206,16 @@ Tests where bugs are catastrophic/invisible: request specs for join auth + role 
 | SDK event-shape surprises (least-known dep; schema derives from it) | W1 spike before freeze; fixtures checked in; normalizer = only SDK-aware file; pin SDK version | Spike can't map messages to draft taxonomy by Wed W1 → delay freeze 2 days |
 | Run-lifecycle bugs (orphans, double-active, stuck review) | State machine in one place; **DB partial unique index**; heartbeat + boot reconciliation built W2 | Runs stuck "running" after sidecar restart |
 | Streaming UX jank (delta floods) | Ephemeral vs durable two-tier; 150ms coalescing; Zustand selectors; capped feed | Feed jank during W2 live runs; >10-20k events per modest run |
-| Git edge cases (untracked files, reject residue) | intent-to-add; W3 unit tests + Shah Rukh/Snehal pairing; no-submodule-repos scoping | W3 dogfood diff missing a new file |
+| Git edge cases (untracked files, reject residue) | intent-to-add; W3 unit tests + backend/sidecar pairing; no-submodule-repos scoping | W3 dogfood diff missing a new file |
 | Reject/resume context divergence | Hard rule in `Runs::Start`: reject severs claude_session_id; only revise resumes | — (correctness rule, encoded) |
-| ActionCable auth/origin cross-machine (works on localhost, 403s/silently drops from other laptops) | Cookie-auth cable + explicit allowed origins for `.local`/LAN-IP; **cross-machine smoke end of W2, not deferred to the final week**; mDNS hostname in join URLs so DHCP changes don't break links | W2 Fri: REST works from Snehal's machine, cable won't subscribe |
+| ActionCable auth/origin cross-machine (works on localhost, 403s/silently drops from other laptops) | Cookie-auth cable + explicit allowed origins for `.local`/LAN-IP; **cross-machine smoke end of W2, not deferred to the final week**; mDNS hostname in join URLs so DHCP changes don't break links | W2 Fri: REST works from a second machine, cable won't subscribe |
 | Aggressive 3-week pace (was 4 weeks) | Pre-agreed scope ladder; task board + terminal tab already cut; fixtures decouple streams; weekly milestones = pace checkpoints | Any milestone missed by >1 day → execute next ladder cut |
-| Bus factor (Shah Rukh's machine) | Everything but live-Claude works anywhere via fixtures; W3 runbook; final verification run by non-Shah Rukh | Only Shah Rukh can restart the stack in W3 |
+| Bus factor (the host machine) | Everything but live-Claude works anywhere via fixtures; W3 runbook; final verification run by a non-author | Only the host can restart the stack in W3 |
 
 ## 15. Verification
 
 - **Two review gates bookend the build:** days 1–2 architecture review (plan challenged + SDK spike validates the riskiest assumption before any contract freezes) and W3 Thu–Fri complete project review (cross-stream code review, security checklist, cold docs walkthrough).
-- **Weekly milestones** are the acceptance gates (W1 Rails+sidecar replay the fixture end-to-end + frontend scaffold exists → W2 live Claude + LAN cross-machine smoke + chat/presence/activity feed → W3 full approve/reject loop + README-driven cold start by Snehal/Manish).
+- **Weekly milestones** are the acceptance gates (W1 Rails+sidecar replay the fixture end-to-end + frontend scaffold exists → W2 live Claude + LAN cross-machine smoke + chat/presence/activity feed → W3 full approve/reject loop + README-driven cold start from a second laptop).
 - **Dogfood = highest-leverage QA**: from W3 onward, using clawdparty to build clawdparty with everyone on their own laptop over the LAN — exercises streaming, diff review, approval, and cross-machine networking simultaneously.
 - Automated: CI green on the three jobs; system test proves prompt→events→changeset→approve→commit.
 
