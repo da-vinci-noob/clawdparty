@@ -67,4 +67,51 @@ RSpec.describe(Git::WorktreeManager) do
     expect(manager.dirty?).to(be(false))
     expect(File.exist?(File.join(path, 'new_file.txt'))).to(be(false))
   end
+
+  describe 'per-repo worktree (roots at the session repository_path)' do
+    # Mirror production: a NON-git parent mount holding git subdir repos. The
+    # worktree must be created FROM the selected repo, with its working files
+    # centralized under the (non-git) mount root.
+    around do |example|
+      Dir.mktmpdir('clawd-mount') do |mount|
+        proj = File.join(mount, 'proj')
+        FileUtils.mkdir_p(proj)
+        git!(proj, 'init', '-b', 'main')
+        git!(proj, 'config', 'user.email', 'a@b.c')
+        git!(proj, 'config', 'user.name', 'x')
+        File.write(File.join(proj, 'README.md'), "proj-seed\n")
+        git!(proj, 'add', '-A')
+        git!(proj, 'commit', '-m', 'init')
+        @mount = mount
+        @proj = proj
+        example.run
+      end
+    end
+
+    it 'creates the worktree from the selected repo, centralized under the mount root' do
+      session.update!(repository_path: @proj)
+      mgr = described_class.new(session, repo_root: @mount)
+      path = mgr.ensure_worktree!
+
+      expect(path).to(eq(File.join(@mount, '.clawdparty', 'worktrees', "session-#{session.id}")))
+      expect(File.exist?(File.join(path, '.git'))).to(be(true))
+      # Content comes from the SELECTED repo (proj), not the non-git mount root.
+      expect(File.read(File.join(path, 'README.md'))).to(eq("proj-seed\n"))
+    end
+
+    it 'falls back to the mount root when repository_path is blank' do
+      # Blank repository_path + non-git mount → the git base is the mount root,
+      # which is not a repo here, so it raises (matches single-repo-mount reality).
+      mgr = described_class.new(session, repo_root: @mount)
+      expect { mgr.ensure_worktree! }.to(raise_error(described_class::GitError))
+    end
+
+    it 'raises GitError when the selected repository_path is not a git repo' do
+      plain = File.join(@mount, 'plain')
+      FileUtils.mkdir_p(plain)
+      session.update!(repository_path: plain)
+      mgr = described_class.new(session, repo_root: @mount)
+      expect { mgr.ensure_worktree! }.to(raise_error(described_class::GitError))
+    end
+  end
 end

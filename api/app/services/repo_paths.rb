@@ -15,7 +15,11 @@ module RepoPaths
   # path.
   def self.contain!(root, relative)
     real_root = File.realpath(root)
-    candidate = File.expand_path(File.join(real_root, relative.to_s))
+    # File.expand_path uses the base dir only when the path is RELATIVE, so a
+    # relative "sub/dir" resolves to "<root>/sub/dir" while an absolute
+    # "<root>/sub/dir" stays as-is (no double-prefix, unlike File.join). A blank
+    # path resolves to the root itself.
+    candidate = File.expand_path(relative.to_s, real_root)
     resolved = File.realpath(candidate)
     raise(Escape, 'escapes root') unless contained?(resolved, real_root)
 

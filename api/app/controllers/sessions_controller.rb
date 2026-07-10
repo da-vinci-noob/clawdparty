@@ -37,7 +37,7 @@ class SessionsController < ApplicationController
     raise(ActiveRecord::RecordNotFound) if session.nil?
 
     authorize!(:manage_session, session)
-    session.update!(repository_path: contained_repository_path)
+    session.update!(repository_path: working_directory)
     render(json: session_json(session), status: :ok)
   end
 
@@ -63,21 +63,11 @@ class SessionsController < ApplicationController
     end
   end
 
-  # For a chat session, resolve the working directory (default: the repo root) and
-  # confirm it is realpath-contained within the mounted repo root (defeat `../` +
-  # symlink escape). Review sessions keep the raw value (the worktree is derived
-  # from the session id, not this path).
+  # The working directory to persist, for BOTH modes: an absolute path
+  # realpath-contained within the mounted repo root (defeat `../` + symlink
+  # escape), defaulting to the repo root when blank. review roots its worktree at
+  # this repo; chat pins it as the run cwd. Used by both #create and #update.
   def working_directory
-    given = params[:repository_path].presence
-    return given unless mode_param == 'chat'
-    return File.realpath(Git::WorktreeManager.repo_root) if given.nil?
-
-    contain_in_repo!(given)
-  end
-
-  # The contained working directory for #update (default: the repo root when
-  # blank). Always containment-checked, for both modes.
-  def contained_repository_path
     given = params[:repository_path].presence
     return File.realpath(Git::WorktreeManager.repo_root) if given.nil?
 

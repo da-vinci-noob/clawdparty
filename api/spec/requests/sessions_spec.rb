@@ -73,6 +73,19 @@ RSpec.describe('POST /api/sessions (create)') do
       end.not_to(change(Session, :count))
       expect(response).to(have_http_status(:unprocessable_content))
     end
+
+    it 'refuses a REVIEW working directory that escapes the repo root with 422 (contained for both modes)' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', repository_path: '../../etc' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
+
+    it 'stores the resolved absolute repo root for a review session given the root itself' do
+      post('/api/sessions', params: { title: 'T', name: 'A', repository_path: '/repo' })
+      expect(response).to(have_http_status(:created))
+      expect(Session.last.repository_path).to(eq(File.realpath(Git::WorktreeManager.repo_root)))
+    end
   end
 
   it 'refuses a blank title with 422 and creates nothing' do
