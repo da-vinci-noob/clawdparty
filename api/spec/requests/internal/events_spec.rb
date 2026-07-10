@@ -68,6 +68,16 @@ RSpec.describe('POST /internal/events') do
     expect(response).to(have_http_status(:unprocessable_content))
   end
 
+  it 'rejects a user-actor element missing its participant id with 422 and ingests nothing' do
+    with_secret
+    bad = { session_id: session.id, type: 'chat_message', actor: { kind: 'user' },
+            ts: '2026-06-28T20:11:05.123Z', payload: {} }
+    expect do
+      post('/internal/events', params: { events: [bad] }.to_json, headers: auth_headers)
+    end.not_to(change(Event, :count))
+    expect(response).to(have_http_status(:unprocessable_content))
+  end
+
   it 'ingests best-effort: a parseable batch with one duplicate still ingests the rest' do
     with_secret
     post('/internal/events', params: { events: [durable(seq: 1)] }.to_json, headers: auth_headers)

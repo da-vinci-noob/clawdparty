@@ -52,22 +52,23 @@ RSpec.describe(Event) do
     end
   end
 
-  describe 'actor check constraint' do
-    it 'rejects a user-kind event without a participant id' do
-      expect do
-        described_class.create!(session: session, ai_run: ai_run, seq: 99,
-                                event_type: 'chat_message', actor_kind: 'user',
-                                actor_participant_id: nil, payload: {})
-      end.to(raise_error(ActiveRecord::StatementInvalid, /events_user_actor_has_participant/))
+  describe 'actor / participant consistency' do
+    it 'is invalid (RecordInvalid, not a DB StatementInvalid) for a user-kind event without a participant' do
+      event = described_class.new(session: session, ai_run: ai_run, seq: 99,
+                                  event_type: 'chat_message', actor_kind: 'user',
+                                  actor_participant_id: nil, payload: {})
+      expect(event).not_to(be_valid)
+      expect(event.errors[:actor_participant_id]).to(be_present)
+      expect { event.save! }.to(raise_error(ActiveRecord::RecordInvalid))
     end
 
-    it 'rejects a claude-kind event that carries a participant id' do
+    it 'is invalid for a non-user-kind event that carries a participant id' do
       participant = create(:participant, session: session)
-      expect do
-        described_class.create!(session: session, ai_run: ai_run, seq: 98,
-                                event_type: 'ai_text', actor_kind: 'claude',
-                                actor_participant_id: participant.id, payload: {})
-      end.to(raise_error(ActiveRecord::StatementInvalid, /events_user_actor_has_participant/))
+      event = described_class.new(session: session, ai_run: ai_run, seq: 98,
+                                  event_type: 'ai_text', actor_kind: 'claude',
+                                  actor_participant_id: participant.id, payload: {})
+      expect(event).not_to(be_valid)
+      expect(event.errors[:actor_participant_id]).to(be_present)
     end
 
     it 'accepts a user-kind event with a participant id' do
@@ -77,6 +78,15 @@ RSpec.describe(Event) do
                                 event_type: 'chat_message', actor_kind: 'user',
                                 actor_participant_id: participant.id, payload: {})
       end.not_to(raise_error)
+    end
+
+    it 'still enforces the rule at the DB when model validation is bypassed (defense in depth)' do
+      event = described_class.new(session: session, ai_run: ai_run, seq: 96,
+                                  event_type: 'chat_message', actor_kind: 'user',
+                                  actor_participant_id: nil, payload: {})
+      expect do
+        event.save!(validate: false)
+      end.to(raise_error(ActiveRecord::StatementInvalid, /events_user_actor_has_participant/))
     end
   end
 
