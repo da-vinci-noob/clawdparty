@@ -5,14 +5,18 @@ require 'open3'
 module Git
   # Rails owns worktree creation (the frozen sidecar-protocol convention): the
   # per-session worktree lives at <repo>/.clawdparty/worktrees/session-<id> on
-  # branch clawd/session-<id>, created against the bind-mounted target repo at
-  # TARGET_REPO_PATH (default /repo, identical in the sidecar container). The
+  # branch clawd/session-<id>, created against the bind-mounted target repo. The
   # sidecar only uses it as `cwd`; it never creates or relocates it.
   class WorktreeManager
     class GitError < StandardError; end
 
+    # The IN-CONTAINER repo root — always /repo (the frozen convention: the host
+    # dir is bind-mounted to /repo). This is deliberately NOT `TARGET_REPO_PATH`:
+    # that env var is the HOST mount SOURCE (used only for compose substitution)
+    # and would be a path that does not exist inside the container. `REPO_ROOT`
+    # is an in-container override knob, defaulting to /repo.
     def self.repo_root
-      ENV.fetch('TARGET_REPO_PATH', '/repo')
+      ENV.fetch('REPO_ROOT', '/repo')
     end
 
     def initialize(session, repo_root: self.class.repo_root)

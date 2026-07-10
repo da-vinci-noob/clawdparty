@@ -13,5 +13,10 @@ if [[ ! -f ".env.local" ]]; then
   exit 1
 fi
 
-docker compose build
-exec docker compose up --remove-orphans
+# --env-file .env.local so a single file drives BOTH ${...} substitution in the
+# compose file (e.g. the TARGET_REPO_PATH bind-mount source) AND the in-container
+# env (via each service's `env_file: .env.local`). Without this, compose reads
+# only the default `.env` for substitution, so TARGET_REPO_PATH set in .env.local
+# is silently ignored for the mount.
+docker compose --env-file .env.local build
+exec docker compose --env-file .env.local up --remove-orphans
