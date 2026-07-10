@@ -44,7 +44,7 @@ class Event < ApplicationRecord
   AI_RAW = 'ai_raw'
 
   # Broadcast-but-never-persisted types (null id, null seq).
-  EPHEMERAL_TYPES = %w[ai_text_delta presence_changed].freeze
+  EPHEMERAL_TYPES = %w[ai_text_delta ai_thinking_delta presence_changed].freeze
 
   belongs_to :session
   belongs_to :ai_run, optional: true

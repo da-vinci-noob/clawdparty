@@ -28,6 +28,31 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [1.3.0] — `ai_thinking_delta` event, live streaming (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 3 }`.** Additive `minor` bump (`live-streaming-thinking`): a new
+**ephemeral** event type so Claude's thinking can stream live, matching how `ai_text_delta` already streams
+text. Live streaming was designed but unwired (the runner never enabled partial messages); this finishes it.
+
+### Added (additive — nothing removed or changed)
+
+- **`ai_thinking_delta` event type** (the 22nd taxonomy name) — **ephemeral** (broadcast, never persisted;
+  null `id`/`seq`), payload `AiThinkingDeltaPayload { block, text }` mirroring `ai_text_delta`. Keyed by the
+  same `"<uuid>:<index>"` block key as the durable `ai_thinking`, so the live accumulator reconciles with the
+  settled block. Registered ephemeral in the sidecar normalizer and Rails `Event` (alongside `ai_text_delta`
+  and `presence_changed`).
+- **`EVENT_TYPE_COUNT`** freeze guard updated `21 → 22`.
+- **Sidecar streaming** (behavior, not contract): the runner enables `includePartialMessages` + adaptive
+  thinking and maps `content_block_delta` `text_delta` → `ai_text_delta` and `thinking_delta` →
+  `ai_thinking_delta` (see `sdk_mapping.md`).
+
+### Unchanged (why this is a `minor`, not a `major`)
+
+The envelope fields + scalar types, the `Actor` union, `ai_text_delta` and every other type, the
+`(ai_run_id, seq)` idempotency + dual-cursor rules, and every endpoint/protocol signature are **unchanged**.
+`ai_thinking_delta` is ephemeral like `ai_text_delta` (null `id`/`seq`, broadcast-not-persisted) so it needs
+no persistence changes. A consumer requiring exact `major` and `minor ≥ 1` stays compatible.
+
 ## [1.2.0] — `user_prompt` event (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 2 }`.** Additive `minor` bump (`user-prompt-event`): a new

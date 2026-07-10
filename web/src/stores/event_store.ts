@@ -23,6 +23,43 @@ interface PresencePayload {
   online?: boolean;
 }
 
+// When a durable block settles (ai_text/ai_thinking), drop its live accumulator so
+// the block is not rendered twice (live + durable). On a terminal run event, sweep
+// every live block for that run as a safety net (in case a block event was missed).
+function reconcileLive(
+  state: EventStoreState,
+  event: EventEnvelope,
+): Partial<Pick<EventStoreState, "textByBlock" | "thinkingByBlock">> {
+  if (event.type === "ai_text" || event.type === "ai_thinking") {
+    const key = deltaKey(event.ai_run_id, (event.payload as DeltaPayload).block ?? "");
+    const field = event.type === "ai_text" ? "textByBlock" : "thinkingByBlock";
+    if (!state[field].has(key)) {
+      return {};
+    }
+    const next = new Map(state[field]);
+    next.delete(key);
+    return { [field]: next };
+  }
+  if (TERMINAL_RUN_TYPES.has(event.type) && event.ai_run_id) {
+    const prefix = `${event.ai_run_id}::`;
+    return {
+      textByBlock: withoutPrefix(state.textByBlock, prefix),
+      thinkingByBlock: withoutPrefix(state.thinkingByBlock, prefix),
+    };
+  }
+  return {};
+}
+
+function withoutPrefix(map: Map<string, string>, prefix: string): Map<string, string> {
+  const next = new Map(map);
+  for (const key of next.keys()) {
+    if (key.startsWith(prefix)) {
+      next.delete(key);
+    }
+  }
+  return next;
+}
+
 export interface EventStoreState {
   // Durable events deduped by id, in insertion (ascending-id) order. `durableList`
   // is the referentially-STABLE array selectors return — its identity changes only
@@ -32,6 +69,8 @@ export interface EventStoreState {
   seenIds: Set<number>;
   // In-progress streamed text, keyed by (ai_run_id, block).
   textByBlock: Map<string, string>;
+  // In-progress streamed thinking, keyed by (ai_run_id, block).
+  thinkingByBlock: Map<string, string>;
   // Presence, last-writer-wins per participant id.
   presenceByParticipant: Map<string, boolean>;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
@@ -46,18 +85,20 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   durableList: [],
   seenIds: new Set(),
   textByBlock: new Map(),
+  thinkingByBlock: new Map(),
   presenceByParticipant: new Map(),
   maxAppliedId: 0,
 
   apply: (event) => {
     // Ephemeral: null id. Never deduped by id, never in the durable list.
     if (event.id === null) {
-      if (event.type === "ai_text_delta") {
+      if (event.type === "ai_text_delta" || event.type === "ai_thinking_delta") {
         const payload = (event.payload ?? {}) as DeltaPayload;
         const key = deltaKey(event.ai_run_id, payload.block ?? "");
-        const next = new Map(get().textByBlock);
+        const field = event.type === "ai_text_delta" ? "textByBlock" : "thinkingByBlock";
+        const next = new Map(get()[field]);
         next.set(key, (next.get(key) ?? "") + (payload.text ?? ""));
-        set({ textByBlock: next });
+        set({ [field]: next } as Pick<EventStoreState, "textByBlock" | "thinkingByBlock">);
         return;
       }
       if (event.type === "presence_changed") {
@@ -85,6 +126,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         durableList: [...state.durableList, event],
         seenIds,
         maxAppliedId: Math.max(state.maxAppliedId, event.id as number),
+        // Reconcile: a settled block supersedes its live accumulator (avoid showing
+        // it twice — once live, once durable). Clear per-block for ai_text/ai_thinking.
+        ...reconcileLive(state, event),
       };
     });
   },
@@ -100,6 +144,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       durableList: [],
       seenIds: new Set(),
       textByBlock: new Map(),
+      thinkingByBlock: new Map(),
       presenceByParticipant: new Map(),
       maxAppliedId: 0,
     }),

@@ -219,6 +219,11 @@ function buildOptions(input: StartRunInput): Record<string, unknown> {
     cwd: input.repo_path,
     permissionMode: input.permission_mode ?? "acceptEdits",
     allowedTools: input.allowed_tools ?? ["Read", "Write", "Edit", "Bash"],
+    // Live streaming: interleave partial content_block_delta events (text +
+    // thinking) with the complete messages, and enable adaptive thinking so
+    // thinking_delta events are produced. Mapped in normalizer.mapStreamEvent.
+    includePartialMessages: true,
+    thinking: { type: "adaptive" },
   };
   if (input.model) {
     options.model = input.model;

@@ -26,6 +26,81 @@ describe("normalizer v1 — never-crash unknown -> ai_raw", () => {
   });
 });
 
+describe("live streaming — content_block_delta → ephemeral deltas", () => {
+  const streamEvent = (over: Record<string, unknown>) => ({
+    type: "stream_event",
+    uuid: "msg_abc",
+    event: over,
+  });
+
+  it("maps a text_delta to ai_text_delta keyed <uuid>:<index>", () => {
+    const n = new Normalizer(ctx);
+    const e = n.normalize(
+      streamEvent({
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "Hel" },
+      }),
+      0,
+    )[0];
+    expect(e?.type).toBe("ai_text_delta");
+    expect(e?.payload).toEqual({ block: "msg_abc:1", text: "Hel" });
+    expect(e?.seq).toBeNull(); // ephemeral
+    expect(e?.id).toBeNull();
+  });
+
+  it("maps a thinking_delta to ai_thinking_delta (same block scheme)", () => {
+    const n = new Normalizer(ctx);
+    const e = n.normalize(
+      streamEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "hmm" },
+      }),
+      0,
+    )[0];
+    expect(e?.type).toBe("ai_thinking_delta");
+    expect(e?.payload).toEqual({ block: "msg_abc:0", text: "hmm" });
+    expect(e?.seq).toBeNull();
+  });
+
+  it("ignores non-delta stream events (no ai_raw noise)", () => {
+    const n = new Normalizer(ctx);
+    for (const t of [
+      "message_start",
+      "content_block_start",
+      "content_block_stop",
+      "message_delta",
+      "message_stop",
+    ]) {
+      expect(n.normalize(streamEvent({ type: t }), 0)).toEqual([]);
+    }
+  });
+
+  it("does not advance the durable seq (a later durable event still gets seq 1)", () => {
+    const n = new Normalizer(ctx);
+    n.normalize(
+      streamEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "x" },
+      }),
+      0,
+    );
+    const events = n.normalize(
+      {
+        type: "assistant",
+        uuid: "msg_abc",
+        message: { content: [{ type: "text", text: "done" }] },
+      },
+      0,
+    );
+    const aiText = events.find((e) => e.type === "ai_text");
+    expect(aiText?.seq).toBe(1);
+    expect(aiText?.payload).toMatchObject({ block: "msg_abc:0" }); // same key as the deltas
+  });
+});
+
 describe("ai_raw bounding — redact FIRST, then truncate", () => {
   it("redacts credential-like keys by name (more than the obvious four)", () => {
     const redacted = redactCredentials({
