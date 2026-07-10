@@ -58,6 +58,56 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
     expect(first(out).payload).toMatchObject({ block: "u1:0", text: "hello" });
   });
 
+  it("durable ai_thinking carries the accumulated thinking_delta text when the final block is empty", () => {
+    // The real SDK's finalized `thinking` block is signature-only (thinking: "");
+    // the text arrives ONLY via streaming thinking_deltas. The durable ai_thinking
+    // must reconstruct the full text from those deltas, else the UI block is empty.
+    const out = normalizeAll([
+      {
+        type: "stream_event",
+        uuid: "u1",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "let me " },
+        },
+      },
+      {
+        type: "stream_event",
+        uuid: "u1",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "think about it" },
+        },
+      },
+      { type: "assistant", uuid: "u1", message: { content: [{ type: "thinking", thinking: "" }] } },
+    ]);
+    const durable = out.find((e) => e.type === "ai_thinking");
+    expect(durable?.payload).toMatchObject({ block: "u1:0", text: "let me think about it" });
+  });
+
+  it("durable ai_thinking prefers a non-empty block.thinking over accumulated deltas", () => {
+    const out = normalizeAll([
+      {
+        type: "stream_event",
+        uuid: "u9",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "partial" },
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "u9",
+        message: { content: [{ type: "thinking", thinking: "full thought" }] },
+      },
+    ]);
+    const durable = out.find((e) => e.type === "ai_thinking");
+    expect(durable?.payload).toMatchObject({ block: "u9:0", text: "full thought" });
+  });
+
   it("maps tool_use → tool_started with SUMMARIZED input (never the full payload) + file_changed for Write", () => {
     const out = normalizeAll([
       {
