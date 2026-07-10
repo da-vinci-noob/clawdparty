@@ -4,6 +4,7 @@ import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
 import { ChatPanel } from "../components/chat_panel";
 import { InterruptButton } from "../components/interrupt_button";
+import { InvitePanel } from "../components/invite_panel";
 import { ParticipantList } from "../components/participant_list";
 import { PromptComposer } from "../components/prompt_composer";
 import { useSessionEvents } from "../hooks/use_session_events";
@@ -42,7 +43,12 @@ export const SessionPage: FC = () => {
 
   return (
     <AppShell
-      sidebar={<ParticipantList />}
+      sidebar={
+        <>
+          <ParticipantList />
+          <InvitePanel sessionId={sessionId} />
+        </>
+      }
       chat={<ChatPanel sessionId={sessionId} />}
       footer={
         <div className="flex items-center gap-2 border-t border-neutral-800 px-2 py-1">
