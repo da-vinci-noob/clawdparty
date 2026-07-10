@@ -95,5 +95,19 @@ RSpec.describe('Run control') do
       post("/api/runs/#{run.id}/interrupt")
       expect(response).to(have_http_status(:forbidden))
     end
+
+    it 'reconciles an orphaned run when the sidecar no longer has it (no dead-end 404)' do
+      # e.g. the sidecar restarted mid-run: it returns UnknownRun, but the run is
+      # still "running" in Rails. Interrupt should finalize it (emit run_interrupted
+      # → terminal) so the session unblocks, not relay a 404 that leaves it stuck.
+      join_as(session, role: 'owner')
+      allow_any_instance_of(Sidecar::Client).to(receive(:interrupt)
+        .and_raise(Sidecar::Client::UnknownRun, "run #{run.id} unknown"))
+
+      post("/api/runs/#{run.id}/interrupt")
+      expect(response).to(have_http_status(:ok))
+      expect(run.session.events.exists?(ai_run_id: run.id, event_type: 'run_interrupted')).to(be(true))
+      expect(run.reload.active?).to(be(false)) # no longer blocks the session
+    end
   end
 end
