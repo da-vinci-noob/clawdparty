@@ -18,7 +18,11 @@
 
 import type { Actor, EnvelopeType, EventEnvelope } from "@clawdparty/contracts";
 
-const EPHEMERAL_TYPES = new Set<EnvelopeType>(["ai_text_delta", "presence_changed"]);
+const EPHEMERAL_TYPES = new Set<EnvelopeType>([
+  "ai_text_delta",
+  "ai_thinking_delta",
+  "presence_changed",
+]);
 
 export const AI_RAW_CAP_BYTES = 8 * 1024;
 export const TOOL_INPUT_SUMMARY_CAP = 500;
@@ -95,11 +99,19 @@ interface RawBlock {
   content?: unknown;
   is_error?: boolean;
 }
+// A streaming content-block delta (SDKPartialAssistantMessage.event) — the only
+// stream_event we map. `delta.text` for text_delta, `delta.thinking` for thinking_delta.
+interface RawStreamEvent {
+  type?: string;
+  index?: number;
+  delta?: { type?: string; text?: string; thinking?: string };
+}
 interface RawMessage {
   type?: string;
   subtype?: string;
   uuid?: string;
   message?: { content?: RawBlock[] };
+  event?: RawStreamEvent; // stream_event (partial assistant message)
   // result fields
   stop_reason?: string;
   num_turns?: number;
@@ -168,9 +180,30 @@ export class Normalizer {
         return this.mapUser(msg, nowMs);
       case "result":
         return [this.mapResult(msg, nowMs)];
+      case "stream_event":
+        return this.mapStreamEvent(msg, nowMs);
       default:
         return [this.toAiRaw(msg, nowMs)];
     }
+  }
+
+  // Live streaming: map ONLY content_block_delta (text/thinking); every other
+  // stream-event subtype (message_start/stop, content_block_start/stop,
+  // message_delta) yields nothing — never ai_raw noise. Block key
+  // "<uuid>:<index>" matches the durable ai_text/ai_thinking that settles it.
+  private mapStreamEvent(msg: RawMessage, nowMs: number): EventEnvelope[] {
+    const ev = msg.event;
+    if (!ev || ev.type !== "content_block_delta" || !ev.delta) {
+      return [];
+    }
+    const block = `${msg.uuid ?? "msg"}:${ev.index ?? 0}`;
+    if (ev.delta.type === "text_delta") {
+      return [this.textDelta(block, ev.delta.text ?? "", nowMs)];
+    }
+    if (ev.delta.type === "thinking_delta") {
+      return [this.thinkingDelta(block, ev.delta.thinking ?? "", nowMs)];
+    }
+    return [];
   }
 
   private runStartedFromInit(msg: RawMessage, nowMs: number): EventEnvelope {
@@ -205,7 +238,12 @@ export class Normalizer {
         );
       } else if (block.type === "thinking") {
         out.push(
-          this.envelope("ai_thinking", { kind: "claude" }, { text: block.thinking ?? "" }, nowMs),
+          this.envelope(
+            "ai_thinking",
+            { kind: "claude" },
+            { block: blockKey, text: block.thinking ?? "" },
+            nowMs,
+          ),
         );
       } else if (block.type === "tool_use") {
         const id = block.id ?? "";
@@ -324,10 +362,16 @@ export class Normalizer {
     );
   }
 
-  // Streaming text delta (ephemeral). The runner calls this for partial-assistant
-  // text; `block` is the same key the durable ai_text will carry.
+  // Streaming text delta (ephemeral). `block` is the same key the durable ai_text
+  // will carry, so the live accumulator reconciles at block stop.
   textDelta(block: string, text: string, nowMs: number = Date.now()): EventEnvelope {
     return this.envelope("ai_text_delta", { kind: "claude" }, { block, text }, nowMs);
+  }
+
+  // Streaming thinking delta (ephemeral). Same block-key scheme as textDelta; the
+  // durable ai_thinking settles the block.
+  thinkingDelta(block: string, text: string, nowMs: number = Date.now()): EventEnvelope {
+    return this.envelope("ai_thinking_delta", { kind: "claude" }, { block, text }, nowMs);
   }
 
   // Fallback: degrade an unknown/malformed SDK message to ai_raw, never throwing.

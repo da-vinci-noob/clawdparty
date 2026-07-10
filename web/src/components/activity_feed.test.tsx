@@ -116,6 +116,39 @@ describe("ActivityFeed", () => {
     expect(prompt).not.toHaveTextContent("#42");
   });
 
+  it("renders live thinking (ai_thinking_delta) and the durable ai_thinking as a thinking block", () => {
+    renderFeed();
+    // Live thinking streams into a thinking block.
+    act(() =>
+      useEventStore.getState().apply({
+        id: null,
+        session_id: "sess_demo",
+        ai_run_id: "run_demo",
+        seq: null,
+        type: "ai_thinking_delta",
+        actor: { kind: "claude" },
+        ts: "2026-06-28T20:11:00.000Z",
+        payload: { block: "m:0", text: "let me think" },
+      }),
+    );
+    expect(screen.getByTestId("feed-thinking")).toHaveTextContent("let me think");
+
+    // The durable ai_thinking settles it (still one thinking block, live cleared).
+    act(() =>
+      useEventStore.getState().apply({
+        id: 1,
+        session_id: "sess_demo",
+        ai_run_id: "run_demo",
+        seq: 1,
+        type: "ai_thinking",
+        actor: { kind: "claude" },
+        ts: "2026-06-28T20:11:01.000Z",
+        payload: { block: "m:0", text: "let me think" },
+      }),
+    );
+    expect(screen.getAllByTestId("feed-thinking")).toHaveLength(1);
+  });
+
   it("renders an ai_raw / unknown type via the safe fallback (no crash)", () => {
     renderFeed();
     act(() =>

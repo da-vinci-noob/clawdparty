@@ -44,26 +44,26 @@ and treat `payload` as opaque JSON without erroring.
 | `ts` | `string` | ISO-8601 UTC, **millisecond precision**, `Z` suffix (e.g. `2026-06-28T20:11:05.123Z`). **Display-only** — never used to order events (§4). Fixed ms precision avoids the classic cross-stream date-format mismatch. |
 | `payload` | JSON | Type-specific; per-type field schemas finalized at v1.1 (§8 + `sdk_mapping.md`). |
 
-## 2. The frozen taxonomy — exactly 21 names
+## 2. The frozen taxonomy — exactly 22 names
 
 ```
 run_started        user_prompt      ai_text_delta    ai_text
-ai_thinking        tool_started     tool_finished    tool_failed
-terminal_output    file_changed     run_finished     run_failed
-run_interrupted    changeset_ready  changeset_approved  changeset_rejected
-chat_message       task_created     task_updated     participant_joined
-presence_changed
+ai_thinking_delta  ai_thinking      tool_started     tool_finished
+tool_failed        terminal_output  file_changed     run_finished
+run_failed         run_interrupted  changeset_ready  changeset_approved
+changeset_rejected chat_message     task_created     task_updated
+participant_joined presence_changed
 ```
 
 Adding or removing a name is a **contract change** (CHANGELOG entry; see §8). The count of
-**exactly 21** is asserted in `events.ts` (`EVENT_TYPE_COUNT: 21`) so an accidental addition
+**exactly 22** is asserted in `events.ts` (`EVENT_TYPE_COUNT: 22`) so an accidental addition
 fails type-checking. Downstream specs reference this list **by name** rather than re-enumerating
-it, so a rename changes one place. (`user_prompt` was added additively at v1.2 — see CHANGELOG.)
+it, so a rename changes one place. (`user_prompt` added at v1.2, `ai_thinking_delta` at v1.3 — see CHANGELOG.)
 
-## 3. The `ai_raw` fallback (not one of the 21)
+## 3. The `ai_raw` fallback (not one of the 22)
 
 Any SDK message the normalizer cannot map to a known type is emitted as **`ai_raw`** — never
-dropped, never a crash. It is **not** a member of the 21-name taxonomy; it is the safety valve
+dropped, never a crash. It is **not** a member of the 22-name taxonomy; it is the safety valve
 that keeps the normalizer total over an evolving SDK surface.
 
 ## 4. Two cursors — `seq` (per-run) and `id` (global)
@@ -95,9 +95,10 @@ cable and REST backfill — apply once). **Ephemeral events have a null `id` and
 
 ## 6. Ephemeral vs durable, and per-type axes
 
-`ai_text_delta` and `presence_changed` are **ephemeral**: broadcast to subscribers but **never
-persisted**. `ai_text_delta` is coalesced (~150 ms) in the sidecar before broadcast; `ai_text`
-is the **durable** record emitted on text-block stop. All other types are durable.
+`ai_text_delta`, `ai_thinking_delta`, and `presence_changed` are **ephemeral**: broadcast to
+subscribers but **never persisted**. `ai_text_delta`/`ai_thinking_delta` stream Claude's text/thinking
+live; `ai_text`/`ai_thinking` are the **durable** records emitted on block stop. All other types are
+durable.
 
 **Ephemeral ≠ unordered, and ephemeral never consumes `seq`:**
 
@@ -124,6 +125,7 @@ A **null `id` marks ephemerality.** Ephemeral events bypass REST backfill and ar
 | `user_prompt` | **user** | durable | run | `ai_run_id` + `seq` |
 | `ai_text_delta` | claude | **ephemeral** | run | `ai_run_id`; **null `seq`**, null `id` |
 | `ai_text` | claude | durable | run | `ai_run_id` + `seq` |
+| `ai_thinking_delta` | claude | **ephemeral** | run | `ai_run_id`; **null `seq`**, null `id` |
 | `ai_thinking` | claude | durable | run | `ai_run_id` + `seq` |
 | `tool_started` | claude | durable | run | `ai_run_id` + `seq` |
 | `tool_finished` | claude | durable | run | `ai_run_id` + `seq` |
