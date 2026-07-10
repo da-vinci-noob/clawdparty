@@ -34,6 +34,35 @@ RSpec.describe('POST /api/sessions (create)') do
     expect(event.payload).to(include('name' => 'Alice', 'role' => 'owner'))
   end
 
+  describe 'run mode (review default | chat)' do
+    it 'defaults to review mode' do
+      post('/api/sessions', params: { title: 'T', name: 'A' })
+      expect(Session.last.mode).to(eq('review'))
+    end
+
+    it 'creates a chat session with the repo root as the default working dir' do
+      post('/api/sessions', params: { title: 'T', name: 'A', mode: 'chat' })
+      expect(response).to(have_http_status(:created))
+      session = Session.last
+      expect(session.mode).to(eq('chat'))
+      expect(session.repository_path).to(eq(File.realpath(Git::WorktreeManager.repo_root)))
+    end
+
+    it 'refuses an unknown mode with 422' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', mode: 'wild' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
+
+    it 'refuses a chat working directory that escapes the repo root with 422' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', mode: 'chat', repository_path: '../../etc' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
+  end
+
   it 'refuses a blank title with 422 and creates nothing' do
     expect do
       post('/api/sessions', params: { title: '  ', name: 'Alice' })

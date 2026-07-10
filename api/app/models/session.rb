@@ -27,6 +27,10 @@
 #
 class Session < ApplicationRecord
   STATUSES = %w[active archived].freeze
+  # Run mode. `review` = git-backed (per-session worktree + diff + approve/reject).
+  # `chat` = run Claude live in `repository_path` (the session working directory —
+  # git repo OR plain dir), with no worktree / diff / approval.
+  MODES = %w[review chat].freeze
 
   belongs_to :host, class_name: 'User', optional: true
 
@@ -39,6 +43,7 @@ class Session < ApplicationRecord
   has_many :events, dependent: :destroy
 
   enum :status, STATUSES.index_with(&:itself), default: 'active', validate: true
+  enum :mode, MODES.index_with(&:itself), default: 'review', validate: true
 
   validates :title, presence: true
 end

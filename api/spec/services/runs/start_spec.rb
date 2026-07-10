@@ -79,6 +79,21 @@ RSpec.describe(Runs::Start) do
     expect { start }.to(raise_error(Runs::Start::DirtyWorktree))
   end
 
+  describe 'chat mode (no worktree; cwd = working directory)' do
+    let(:session) { create(:session, mode: 'chat', repository_path: '/repo/some/dir') }
+
+    it 'does NOT create a worktree and pins cwd to the session working directory' do
+      expect(worktree).not_to(receive(:ensure_worktree!))
+      start
+      expect(posted.last[:repo_path]).to(eq('/repo/some/dir'))
+    end
+
+    it 'still enforces one-active-run' do
+      create(:ai_run, session: session, status: 'running')
+      expect { start }.to(raise_error(Runs::Start::ActiveRunExists))
+    end
+  end
+
   describe 'sidecar rejects the start (must not orphan a queued run)' do
     let(:client) do
       Class.new do

@@ -31,17 +31,31 @@ module Runs
       when 'run_started'
         run.update!(status: 'running') if run.status == 'queued'
       when 'run_finished'
-        run.update!(status: changeset_ready?(run) ? 'awaiting_review' : 'completed_clean')
+        run.update!(status: finished_status(run))
       when 'run_failed'
         run.update!(status: 'failed')
       when 'run_interrupted'
-        run.update!(status: worktree_dirty?(run) ? 'awaiting_review' : 'completed_clean')
+        run.update!(status: interrupted_status(run))
       when 'changeset_ready'
         run.update!(status: 'awaiting_review')
       end
     end
 
     private
+
+    # A `chat` run has no changeset to review → always completed_clean. A `review`
+    # run enters awaiting_review only when a changeset is ready.
+    def finished_status(run)
+      return 'completed_clean' if run.session.mode == 'chat'
+
+      changeset_ready?(run) ? 'awaiting_review' : 'completed_clean'
+    end
+
+    def interrupted_status(run)
+      return 'completed_clean' if run.session.mode == 'chat'
+
+      worktree_dirty?(run) ? 'awaiting_review' : 'completed_clean'
+    end
 
     # A changeset_ready event for this run means there is something to review.
     def changeset_ready?(run)
