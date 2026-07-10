@@ -174,6 +174,13 @@ export class Runner {
       }
     } catch (err) {
       this.transport.logger.error({ err: String(err) }, "run drain error");
+      // Emit run_failed so Rails finalizes the run (→ failed). Without a terminal
+      // event the run stays "active" forever and every next message 409s.
+      try {
+        await this.ship([run.normalizer.runFailed(`run error: ${String(err)}`)]);
+      } catch (shipErr) {
+        this.transport.logger.error({ err: String(shipErr) }, "failed to ship run_failed");
+      }
     } finally {
       run.input.close();
       if (this.active?.runId === run.runId) {

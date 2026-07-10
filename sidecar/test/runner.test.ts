@@ -83,6 +83,35 @@ describe("Runner", () => {
     expect(runner.activeRunIds()).toEqual([]); // cleared after drain
   });
 
+  it("ships run_failed and frees the slot when the query throws mid-drain", async () => {
+    // If the SDK query errors (auth/crash/connection) WITHOUT emitting a result,
+    // the runner must still emit run_failed so Rails finalizes the run — otherwise
+    // it stays active forever and every next message 409s ("a run is already
+    // active") with no error surfaced.
+    const { transport, durable } = captureTransport();
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        yield {
+          type: "system",
+          subtype: "init",
+          model: "m",
+          cwd: "/repo",
+          permissionMode: "acceptEdits",
+          session_id: "x",
+        };
+        throw new Error("sdk exploded");
+      })(),
+      { interrupt: () => Promise.resolve() },
+    ) as unknown as QueryHandle;
+    const runner = new Runner(transport, () => handle);
+
+    runner.startRun(baseInput);
+    await vi.waitFor(() => expect(durable.some((e) => e.type === "run_failed")).toBe(true));
+    await vi.waitFor(() => expect(runner.activeRunIds()).toEqual([]));
+    // A fresh run can start once the failed run freed the slot.
+    expect(() => runner.startRun({ ...baseInput, run_id: "r2" })).not.toThrow();
+  });
+
   it("clears the active slot after run_finished even when the input stream stays open", async () => {
     // Mimics the REAL SDK in streaming-input mode: it yields init + result and
     // then keeps the generator open awaiting more input (the pushable input
