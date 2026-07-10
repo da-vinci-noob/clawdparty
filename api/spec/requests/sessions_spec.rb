@@ -27,6 +27,13 @@ RSpec.describe('POST /api/sessions (create)') do
     expect(Session.last.repository_path).to(eq('/repo'))
   end
 
+  it 'emits a participant_joined event carrying the name + role (for client attribution)' do
+    post('/api/sessions', params: { title: 'T', name: 'Alice' })
+    event = Session.last.events.find_by(event_type: 'participant_joined')
+    expect(event).to(be_present)
+    expect(event.payload).to(include('name' => 'Alice', 'role' => 'owner'))
+  end
+
   it 'refuses a blank title with 422 and creates nothing' do
     expect do
       post('/api/sessions', params: { title: '  ', name: 'Alice' })

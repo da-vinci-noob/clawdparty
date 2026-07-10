@@ -14,6 +14,7 @@ class SessionsController < ApplicationController
     return render_blank('Name') if name.empty?
 
     participant = create_session_as_owner!(title: title, name: name)
+    announce_participant_joined(participant)
     cookies.signed[COOKIE_NAME] = cookie_options(participant.user_id)
     render(json: participant_json(participant), status: :created)
   end

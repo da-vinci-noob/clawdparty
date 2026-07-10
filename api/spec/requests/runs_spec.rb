@@ -66,6 +66,15 @@ RSpec.describe('Run control') do
       expect(response).to(have_http_status(:bad_gateway))
       expect(response.parsed_body['errors']).to(be_present)
     end
+
+    it 'surfaces a worktree/git failure as a clean error (not an unhandled 500) with no queued run' do
+      join_as(session, role: 'owner')
+      allow_any_instance_of(Git::WorktreeManager).to(receive(:ensure_worktree!)
+        .and_raise(Git::WorktreeManager::GitError, 'not a git repository'))
+      expect { start_run }.not_to(change { AiRun.where(status: 'queued').count })
+      expect(response).to(have_http_status(:unprocessable_content))
+      expect(response.parsed_body['errors'].first['message']).to(be_present)
+    end
   end
 
   describe 'POST /api/runs/:id/messages and /interrupt' do

@@ -32,6 +32,24 @@ class ApplicationController < ActionController::API
     session.participants.find_by(user_id: current_user.id)
   end
 
+  # Announce a newly-created participant on the session stream so every client
+  # (including late joiners, via backfill) can resolve actor.id → display name +
+  # role. Session-scoped durable event (null ai_run_id/seq), broadcast by Append.
+  def announce_participant_joined(participant)
+    Events::Append.call(
+      session: participant.session,
+      event: {
+        type: 'participant_joined',
+        actor: { kind: 'user', id: participant.id },
+        payload: {
+          participant_id: participant.id.to_s,
+          name: participant.user.name,
+          role: participant.role
+        }
+      }
+    )
+  end
+
   # Cross-session / unknown resource => 404 (anti-enumeration), never 403.
   def authorize!(action, session)
     participant = participant_for(session)

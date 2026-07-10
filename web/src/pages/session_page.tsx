@@ -7,6 +7,7 @@ import { InterruptButton } from "../components/interrupt_button";
 import { InvitePanel } from "../components/invite_panel";
 import { ParticipantList } from "../components/participant_list";
 import { PromptComposer } from "../components/prompt_composer";
+import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 import { useSessionEvents } from "../hooks/use_session_events";
 
 // The full session workspace: live activity feed (center) + prompt composer and
@@ -17,6 +18,7 @@ import { useSessionEvents } from "../hooks/use_session_events";
 export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const status = useSessionEvents(sessionId ?? "");
+  useHydrateParticipant(sessionId ?? "");
 
   if (!sessionId) {
     return <p data-testid="session-placeholder">No session</p>;
