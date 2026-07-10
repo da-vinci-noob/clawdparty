@@ -29,4 +29,14 @@ else
   echo "[rails-entrypoint] no Rails app present yet — skipping db:prepare (rails-foundation not landed)"
 fi
 
+# Clear a stale Puma pid left by a PREVIOUS container instance. `tmp/` lives on
+# the bind-mounted app dir, so tmp/pids/server.pid survives a container restart
+# and a fresh Puma refuses to boot ("A server is already running (pid: 1)").
+# Scope this to the web server only: the `jobs` service shares this image + the
+# same bind-mounted tmp/, and must NOT delete the live server's pid.
+if [[ "${1:-}" == "bin/rails" && "${2:-}" == "server" ]]; then
+  echo "[rails-entrypoint] clearing any stale tmp/pids/server.pid"
+  rm -f tmp/pids/server.pid
+fi
+
 exec "$@"
