@@ -54,7 +54,14 @@ class RunsController < ApplicationController
   def interrupt
     run = find_run!
     participant = authorize_action!(:interrupt, run.session)
-    Sidecar::Client.new.interrupt(run.id, requested_by: participant.id.to_s)
+    begin
+      Sidecar::Client.new.interrupt(run.id, requested_by: participant.id.to_s)
+    rescue Sidecar::Client::UnknownRun
+      # The sidecar has no such active run (it restarted / the run already ended),
+      # but Rails still shows it active. Reconcile: synthesize run_interrupted so
+      # the run finalizes and the session unblocks — never a dead-end 404.
+      reconcile_interrupted(run, participant)
+    end
     render(json: { run_id: run.id.to_s, accepted: true }, status: :ok)
   end
 
@@ -76,6 +83,22 @@ class RunsController < ApplicationController
 
   def find_run!
     AiRun.find_by(id: params[:id]) || raise(ActiveRecord::RecordNotFound)
+  end
+
+  # Sidecar-less finalize: ingest a synthetic run_interrupted (Rails owns the next
+  # seq since the sidecar is no longer emitting for this run) so it persists,
+  # broadcasts (clients drop it from active), and Runs::Finalize transitions it.
+  def reconcile_interrupted(run, participant)
+    return unless run.active?
+
+    Events::Ingest.call(
+      'session_id' => run.session_id,
+      'ai_run_id' => run.id,
+      'seq' => (run.events.maximum(:seq) || 0) + 1,
+      'type' => 'run_interrupted',
+      'actor' => { 'kind' => 'user', 'id' => participant.id },
+      'payload' => {}
+    )
   end
 
   # 404 for a non-participant/unknown session; 403 for a participant whose role
