@@ -22,7 +22,8 @@ Local dev runs under **Docker Compose — one container per process** (`bin/star
   └── inherits host Claude/AWS auth env — uses the dev's EXISTING login (API key | subscription/enterprise OAuth | Bedrock), auth-method-agnostic
 [dev only, container: vite] Vite :5173 (UNPUBLISHED). Dev request flow: the browser hits rails:3000 only; Rails serves /api + /~cable and reverse-proxies SPA + Vite HMR ws to the vite container (in prod Rails serves the built SPA). Vite sets server.host:true + hmr.clientPort:3000 so HMR survives the proxy hop.
 Rails reaches the sidecar at http://sidecar:8787 (compose DNS; configurable via SIDECAR_URL)
-Git worktrees (bind-mounted): <repo>/.clawdparty/worktrees/session-<id>  (branch clawd/session-<id>)
+Git worktrees (bind-mounted): <REPO_ROOT>/.clawdparty/worktrees/session-<id>  (branch clawd/session-<id>, created FROM the session's picked repo)
+The target dir (TARGET_REPO_PATH, the PARENT of your repos) is mounted at the IDENTICAL host path in-container (host path == container path), and REPO_ROOT = that path. Identical paths are load-bearing: git worktree metadata stores ABSOLUTE gitdir paths, so a worktree created in the container is only valid on the host (GitHub Desktop / host git worktree) when the two paths match.
 ```
 
 The three code streams and **who owns which file** (operate in the stream that owns the file — do not put Rails logic in the sidecar or vice-versa):
