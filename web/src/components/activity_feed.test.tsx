@@ -85,6 +85,37 @@ describe("ActivityFeed", () => {
     expect(banner.compareDocumentPosition(claude) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("resolves actor ids to display names from participant_joined (no #id in the feed)", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany([
+        {
+          id: 1,
+          session_id: "sess_demo",
+          ai_run_id: null,
+          seq: null,
+          type: "participant_joined",
+          actor: { kind: "user", id: "42" },
+          ts: "2026-06-28T20:10:00.000Z",
+          payload: { participant_id: "42", name: "Alice", role: "owner" },
+        },
+        {
+          id: 2,
+          session_id: "sess_demo",
+          ai_run_id: "run_demo",
+          seq: 1,
+          type: "user_prompt",
+          actor: { kind: "user", id: "42" },
+          ts: "2026-06-28T20:11:00.000Z",
+          payload: { text: "do it" },
+        },
+      ]),
+    );
+    const prompt = screen.getByTestId("feed-user-prompt");
+    expect(prompt).toHaveTextContent("Alice");
+    expect(prompt).not.toHaveTextContent("#42");
+  });
+
   it("renders an ai_raw / unknown type via the safe fallback (no crash)", () => {
     renderFeed();
     act(() =>

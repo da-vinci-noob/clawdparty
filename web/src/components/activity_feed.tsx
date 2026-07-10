@@ -9,6 +9,7 @@ import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
 import { ToolChip } from "./feed/tool_chip";
 import { UserPromptBlock } from "./feed/user_prompt_block";
+import { useParticipantList } from "./participant_list";
 
 // Cap the rendered durable set so a long run doesn't render thousands of nodes.
 const FEED_CAP = 500;
@@ -28,7 +29,12 @@ interface Props {
 // The center-pane activity feed: renders the cable-client store's durable log
 // richly (per the frozen taxonomy) plus the trailing in-progress streamed text.
 // Read-only; no shell input path. Unknown/ai_raw types degrade to a safe fallback.
-export const ActivityFeed: FC<Props> = ({ names = new Map() }) => {
+// Resolves actor ids → display names from participant_joined events (same source
+// as the chat panel), so run banners + user prompts show names, not "#<id>". The
+// `names` prop overrides that (tests inject a fixed map).
+export const ActivityFeed: FC<Props> = ({ names }) => {
+  const listNames = useParticipantList();
+  const resolvedNames = names ?? listNames;
   const durable = useEventStore(selectDurableEvents);
   const textByBlock = useEventStore((s) => s.textByBlock);
 
@@ -47,7 +53,7 @@ export const ActivityFeed: FC<Props> = ({ names = new Map() }) => {
     <div data-testid="activity-feed" className="space-y-2">
       {windowed.map((event) => (
         <div key={event.id ?? `${event.type}-${event.ts}`}>
-          {renderEvent(event, finishByToolId, names)}
+          {renderEvent(event, finishByToolId, resolvedNames)}
         </div>
       ))}
       {[...textByBlock.entries()].map(([block, text]) => (
