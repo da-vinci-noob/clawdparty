@@ -74,6 +74,28 @@ RSpec.describe(Runs::Start) do
     end
   end
 
+  describe 'fresh follow-ups resume the prior session (context persists across runs)' do
+    it "passes the most recent prior run's claude_session_id on a fresh follow-up" do
+      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-prev')
+      start
+      expect(posted.last[:claude_session_id]).to(eq('sess-prev'))
+    end
+
+    it 'resumes from the latest prior run when several exist' do
+      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-1')
+      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-2')
+      start
+      expect(posted.last[:claude_session_id]).to(eq('sess-2'))
+    end
+
+    it 'does NOT resume when the most recent run was rejected (reject still severs)' do
+      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-old')
+      create(:ai_run, session: session, status: 'rejected', claude_session_id: 'sess-rejected')
+      start
+      expect(posted.last).not_to(have_key(:claude_session_id))
+    end
+  end
+
   it 'refuses a fresh start on a dirty worktree' do
     allow(worktree).to(receive(:dirty?).and_return(true))
     expect { start }.to(raise_error(Runs::Start::DirtyWorktree))
@@ -92,6 +114,12 @@ RSpec.describe(Runs::Start) do
     it 'still enforces one-active-run' do
       create(:ai_run, session: session, status: 'running')
       expect { start }.to(raise_error(Runs::Start::ActiveRunExists))
+    end
+
+    it 'resumes the prior run session id on a follow-up (chat context persists)' do
+      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'chat-sess')
+      start
+      expect(posted.last[:claude_session_id]).to(eq('chat-sess'))
     end
   end
 

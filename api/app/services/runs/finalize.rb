@@ -29,7 +29,7 @@ module Runs
 
       case @event.event_type
       when 'run_started'
-        run.update!(status: 'running') if run.status == 'queued'
+        finalize_run_started(run)
       when 'run_finished'
         run.update!(status: finished_status(run))
       when 'run_failed'
@@ -42,6 +42,17 @@ module Runs
     end
 
     private
+
+    # Transition queued → running and capture the Claude session id the sidecar
+    # reports in run_started, so a later follow-up can resume that session. Both
+    # writes are combined into one update! (payload keys are strings).
+    def finalize_run_started(run)
+      attrs = {}
+      attrs[:status] = 'running' if run.status == 'queued'
+      sid = @event.payload['claude_session_id'].presence
+      attrs[:claude_session_id] = sid if sid && run.claude_session_id.blank?
+      run.update!(attrs) unless attrs.empty?
+    end
 
     # A `chat` run has no changeset to review → always completed_clean. A `review`
     # run enters awaiting_review only when a changeset is ready.
