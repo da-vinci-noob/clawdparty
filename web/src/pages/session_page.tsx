@@ -4,12 +4,14 @@ import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
 import { ChangeDirectory } from "../components/change_directory";
 import { ChatPanel } from "../components/chat_panel";
+import { DiffView } from "../components/diff_view";
 import { InterruptButton } from "../components/interrupt_button";
 import { InvitePanel } from "../components/invite_panel";
 import { ParticipantList } from "../components/participant_list";
 import { PromptComposer } from "../components/prompt_composer";
 import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 import { useSessionEvents } from "../hooks/use_session_events";
+import { selectAwaitingReviewRunId, useEventStore } from "../stores/event_store";
 
 // The full session workspace: live activity feed (center) + prompt composer and
 // interrupt (footer, role-gated), chat panel + participant list (right sidebar).
@@ -20,6 +22,7 @@ export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const status = useSessionEvents(sessionId ?? "");
   useHydrateParticipant(sessionId ?? "");
+  const reviewRunId = useEventStore(selectAwaitingReviewRunId);
 
   if (!sessionId) {
     return <p data-testid="session-placeholder">No session</p>;
@@ -63,7 +66,14 @@ export const SessionPage: FC = () => {
         </div>
       }
     >
-      <ActivityFeed />
+      <div className="space-y-4">
+        {reviewRunId && (
+          <div className="rounded border border-neutral-800 bg-neutral-900/30 p-3">
+            <DiffView runId={reviewRunId} />
+          </div>
+        )}
+        <ActivityFeed />
+      </div>
     </AppShell>
   );
 };

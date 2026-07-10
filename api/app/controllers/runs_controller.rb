@@ -17,6 +17,9 @@ class RunsController < ApplicationController
   rescue_from Sidecar::Client::UnknownRun do
     render_not_found
   end
+  rescue_from Runs::Approve::NotReviewable, Runs::Reject::NotReviewable do
+    render(json: { errors: [{ message: 'Run is not awaiting review' }] }, status: :conflict)
+  end
   rescue_from Sidecar::Client::TransportError do
     render(json: { errors: [{ message: 'The Claude sidecar is unavailable; try again' }] }, status: :bad_gateway)
   end
@@ -77,6 +80,24 @@ class RunsController < ApplicationController
              files: result.files.map(&:to_h),
              patch: result.patch
            }, status: :ok)
+  end
+
+  # POST /api/runs/:id/approve — owner keeps the reviewed changeset. The run
+  # becomes approved + a changeset_approved event; the worktree is untouched.
+  def approve
+    run = find_run!
+    participant = authorize_action!(:approve, run.session)
+    result = Runs::Approve.call(run: run, reviewed_by: participant)
+    render(json: { id: result.id.to_s, status: result.status }, status: :ok)
+  end
+
+  # POST /api/runs/:id/reject — owner discards the reviewed changeset. The
+  # worktree is reverted, the run becomes rejected + a changeset_rejected event.
+  def reject
+    run = find_run!
+    participant = authorize_action!(:reject, run.session)
+    result = Runs::Reject.call(run: run, reviewed_by: participant)
+    render(json: { id: result.id.to_s, status: result.status }, status: :ok)
   end
 
   private

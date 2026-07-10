@@ -11,6 +11,8 @@ const LABELS: Record<string, string> = {
   run_failed: "run failed",
   run_interrupted: "interrupted the run",
   changeset_ready: "changeset ready for review",
+  changeset_approved: "approved the changes",
+  changeset_rejected: "rejected the changes",
 };
 
 export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = ({

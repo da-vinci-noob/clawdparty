@@ -43,6 +43,9 @@ Rails.application.routes.draw do
       member do
         post :messages
         post :interrupt
+        # Review loop (owner-gated): keep or revert the run's changeset.
+        post :approve
+        post :reject
         # Run diff (REST only, never cable): GET /api/runs/:id/diff
         get :diff
       end
