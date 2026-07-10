@@ -2,6 +2,7 @@ import type { FC } from "react";
 import { useParams } from "react-router-dom";
 import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
+import { ChangeDirectory } from "../components/change_directory";
 import { ChatPanel } from "../components/chat_panel";
 import { InterruptButton } from "../components/interrupt_button";
 import { InvitePanel } from "../components/invite_panel";
@@ -49,6 +50,7 @@ export const SessionPage: FC = () => {
         <>
           <ParticipantList />
           <InvitePanel sessionId={sessionId} />
+          <ChangeDirectory sessionId={sessionId} />
         </>
       }
       chat={<ChatPanel sessionId={sessionId} />}

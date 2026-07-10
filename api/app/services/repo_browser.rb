@@ -64,25 +64,13 @@ class RepoBrowser
 
   attr_reader :session, :worktree
 
-  # Resolve the requested path against the worktree root and confirm the RESOLVED
-  # absolute path stays inside the worktree (realpath follows symlinks + collapses
-  # `..`, so neither `../escape` nor a symlink pointing outside can smuggle past).
+  # Resolve the requested path against the worktree root via the shared
+  # containment rule (RepoPaths), mapping its Escape to this browser's NotFound
+  # so a traversal/symlink escape or missing file stays a 404.
   def contained_path!(path)
-    root = File.realpath(worktree.worktree_path)
-    candidate = File.expand_path(File.join(root, path))
-    # Realpath the candidate (resolves symlinks); a missing target raises -> NotFound.
-    resolved = File.realpath(candidate)
-    raise(NotFound, 'escapes worktree') unless contained?(resolved, root)
-
-    resolved
-  rescue SystemCallError
-    # ENOENT (missing), ENOTDIR (a non-dir on the path, e.g. the worktree's .git
-    # file), ELOOP (symlink cycle) — all are "not a readable contained file".
-    raise(NotFound, 'unresolvable path')
-  end
-
-  def contained?(resolved, root)
-    resolved == root || resolved.start_with?("#{root}#{File::SEPARATOR}")
+    RepoPaths.contain!(worktree.worktree_path, path)
+  rescue RepoPaths::Escape
+    raise(NotFound, 'unresolvable or escaping path')
   end
 
   def denylisted?(path)

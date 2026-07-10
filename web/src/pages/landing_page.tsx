@@ -1,5 +1,6 @@
 import { type FC, type FormEvent, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { DirectoryPicker } from "../components/directory_picker";
 import { type CurrentParticipant, useParticipantStore } from "../stores/participant_store";
 
 type Mode = "join" | "create";
@@ -19,7 +20,7 @@ export const LandingPage: FC = () => {
   const [token, setToken] = useState(() => searchParams.get("token") ?? "");
   const [title, setTitle] = useState("");
   const [name, setName] = useState("");
-  // Session run mode + (chat-only) working directory for the create form.
+  // Session run mode + working directory (both modes) for the create form.
   const [sessionMode, setSessionMode] = useState<"review" | "chat">("review");
   const [directory, setDirectory] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export const LandingPage: FC = () => {
   const onCreate = (e: FormEvent): void => {
     e.preventDefault();
     const body: Record<string, string> = { title, name, mode: sessionMode };
-    if (sessionMode === "chat" && directory.trim()) {
+    if (directory.trim()) {
       body.repository_path = directory.trim();
     }
     void submit("/api/sessions", body, "Create");
@@ -139,15 +140,7 @@ export const LandingPage: FC = () => {
               <option value="review">Review (git diff + approve/reject)</option>
               <option value="chat">Chat (run in a directory, no git)</option>
             </select>
-            {sessionMode === "chat" && (
-              <input
-                aria-label="Working directory"
-                placeholder="Working directory (optional, defaults to repo root)"
-                value={directory}
-                onChange={(e) => setDirectory(e.target.value)}
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
-              />
-            )}
+            <DirectoryPicker value={directory} onChange={setDirectory} />
             <button
               type="submit"
               disabled={busy}

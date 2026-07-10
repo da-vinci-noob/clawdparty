@@ -14,9 +14,13 @@ Rails.application.routes.draw do
     # Join a session via an invite token → signed clawd_uid cookie.
     resources :participants, only: :create
 
-    # Create a session (bootstrap entry: unauthenticated on the trusted LAN, like
-    # join). The creator becomes the owner + gets the clawd_uid cookie.
-    resources :sessions, only: :create do
+    # Folder picker: git-flagged immediate subdirs under the repo root (any
+    # participant). GET /api/directories?path=…
+    get 'directories', to: 'directories#index'
+
+    # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
+    # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id
+    resources :sessions, only: %i[create update] do
       # Who am I in this session (re-hydrate the client from the clawd_uid cookie
       # after a refresh): GET /api/sessions/:session_id/participant
       get 'participant', to: 'participants#show'
