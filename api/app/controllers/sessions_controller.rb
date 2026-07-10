@@ -10,6 +10,9 @@
 class SessionsController < ApplicationController
   class DirectoryEscape < StandardError; end
 
+  # Only #update requires an identity; #create is the unauthenticated bootstrap.
+  before_action :require_user, only: :update
+
   rescue_from DirectoryEscape do
     render(json: { errors: [{ message: 'Working directory must be inside the repo root' }] },
            status: :unprocessable_content)
@@ -23,6 +26,19 @@ class SessionsController < ApplicationController
     return render_bad_mode unless Session::MODES.include?(mode_param)
 
     render_created(create_session_as_owner!(title: title, name: name))
+  end
+
+  # PATCH /api/sessions/:id — change the working directory (owner only). The new
+  # directory is realpath-contained within the repo root and applies to the
+  # session's SUBSEQUENT runs (it does not touch an in-flight run). A
+  # non-participant/unknown session is 404 (anti-enumeration); a non-owner is 403.
+  def update
+    session = Session.find_by(id: params[:id])
+    raise(ActiveRecord::RecordNotFound) if session.nil?
+
+    authorize!(:manage_session, session)
+    session.update!(repository_path: contained_repository_path)
+    render(json: session_json(session), status: :ok)
   end
 
   private
@@ -54,16 +70,29 @@ class SessionsController < ApplicationController
   def working_directory
     given = params[:repository_path].presence
     return given unless mode_param == 'chat'
+    return File.realpath(Git::WorktreeManager.repo_root) if given.nil?
 
-    root = File.realpath(Git::WorktreeManager.repo_root)
-    return root if given.nil?
+    contain_in_repo!(given)
+  end
 
-    resolved = File.realpath(File.expand_path(File.join(root, given)))
-    raise(DirectoryEscape) unless resolved == root || resolved.start_with?("#{root}#{File::SEPARATOR}")
+  # The contained working directory for #update (default: the repo root when
+  # blank). Always containment-checked, for both modes.
+  def contained_repository_path
+    given = params[:repository_path].presence
+    return File.realpath(Git::WorktreeManager.repo_root) if given.nil?
 
-    resolved
-  rescue Errno::ENOENT, Errno::ENOTDIR
+    contain_in_repo!(given)
+  end
+
+  # Shared realpath-containment against the repo root; a refusal is a 422.
+  def contain_in_repo!(path)
+    RepoPaths.contain!(Git::WorktreeManager.repo_root, path)
+  rescue RepoPaths::Escape
     raise(DirectoryEscape)
+  end
+
+  def session_json(session)
+    { id: session.id.to_s, mode: session.mode, repository_path: session.repository_path }
   end
 
   def cookie_options(user_id)
