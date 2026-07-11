@@ -99,18 +99,19 @@ interface RawBlock {
   content?: unknown;
   is_error?: boolean;
 }
-// A streaming content-block delta (SDKPartialAssistantMessage.event) — the only
-// stream_event we map. `delta.text` for text_delta, `delta.thinking` for thinking_delta.
+// A streaming content-block delta (SDKPartialAssistantMessage.event). We map
+// `content_block_delta` (delta.text / delta.thinking) and read `message.id` off
+// `message_start` — the stable per-turn id the deltas themselves never carry.
 interface RawStreamEvent {
   type?: string;
-  index?: number;
   delta?: { type?: string; text?: string; thinking?: string };
+  message?: { id?: string };
 }
 interface RawMessage {
   type?: string;
   subtype?: string;
   uuid?: string;
-  message?: { content?: RawBlock[] };
+  message?: { id?: string; content?: RawBlock[] };
   event?: RawStreamEvent; // stream_event (partial assistant message)
   // result fields
   stop_reason?: string;
@@ -135,11 +136,21 @@ export class Normalizer {
   // thinking block is signature-only (thinking: ""), so the durable ai_thinking
   // must reconstruct its text from the thinking_deltas seen for that block.
   private readonly thinkingByBlock = new Map<string, string>();
+  // The stable per-turn id (SDK `message.id`), latched from each `message_start`
+  // stream event. Every emission/delta of one turn shares it; the per-emission
+  // top-level `uuid` does NOT (see raw_run.jsonl:2-4), so it can't key blocks.
+  private currentMessageId = "";
 
   constructor(private readonly ctx: NormalizeContext) {}
 
   isEphemeral(type: EnvelopeType): boolean {
     return EPHEMERAL_TYPES.has(type);
+  }
+
+  // Block key = "<message.id>:<block_type>" — shared by a turn's live deltas and
+  // the durable block that settles them (thinking and text are distinct blocks).
+  private blockKey(messageId: string, kind: "text" | "thinking"): string {
+    return `${messageId || "msg"}:${kind}`;
   }
 
   private envelope(
@@ -191,20 +202,31 @@ export class Normalizer {
     }
   }
 
-  // Live streaming: map ONLY content_block_delta (text/thinking); every other
-  // stream-event subtype (message_start/stop, content_block_start/stop,
-  // message_delta) yields nothing — never ai_raw noise. Block key
-  // "<uuid>:<index>" matches the durable ai_text/ai_thinking that settles it.
+  // Live streaming. `message_start` carries the per-turn `message.id` (which the
+  // content_block_deltas themselves do NOT) — latch it so every delta of the turn
+  // keys to the same block. Map ONLY content_block_delta (text/thinking); every
+  // other subtype (message_start/stop, content_block_start/stop, message_delta)
+  // yields nothing — never ai_raw noise. The block key
+  // "<message.id>:<block_type>" matches the durable ai_text/ai_thinking.
   private mapStreamEvent(msg: RawMessage, nowMs: number): EventEnvelope[] {
     const ev = msg.event;
-    if (!ev || ev.type !== "content_block_delta" || !ev.delta) {
+    if (!ev) {
       return [];
     }
-    const block = `${msg.uuid ?? "msg"}:${ev.index ?? 0}`;
+    if (ev.type === "message_start") {
+      this.currentMessageId = ev.message?.id ?? this.currentMessageId;
+      return [];
+    }
+    if (ev.type !== "content_block_delta" || !ev.delta) {
+      return [];
+    }
     if (ev.delta.type === "text_delta") {
-      return [this.textDelta(block, ev.delta.text ?? "", nowMs)];
+      return [
+        this.textDelta(this.blockKey(this.currentMessageId, "text"), ev.delta.text ?? "", nowMs),
+      ];
     }
     if (ev.delta.type === "thinking_delta") {
+      const block = this.blockKey(this.currentMessageId, "thinking");
       this.thinkingByBlock.set(
         block,
         (this.thinkingByBlock.get(block) ?? "") + (ev.delta.thinking ?? ""),
@@ -231,8 +253,12 @@ export class Normalizer {
   private mapAssistant(msg: RawMessage, nowMs: number): EventEnvelope[] {
     const out: EventEnvelope[] = [];
     const blocks = msg.message?.content ?? [];
-    blocks.forEach((block, index) => {
-      const blockKey = `${msg.uuid ?? "msg"}:${index}`;
+    // The real SDK splits one turn across several assistant messages that share
+    // `message.id` but each carry a distinct top-level `uuid` (raw_run.jsonl:2-4).
+    // Key by the stable `message.id` (+ block type) so the durable blocks match
+    // the deltas the runner already streamed under those same keys.
+    const messageId = msg.message?.id ?? this.currentMessageId;
+    for (const block of blocks) {
       if (block.type === "text") {
         // Durable ai_text on block stop. (Live streaming deltas are emitted by the
         // runner's partial-message path; this maps the completed block.)
@@ -240,19 +266,20 @@ export class Normalizer {
           this.envelope(
             "ai_text",
             { kind: "claude" },
-            { block: blockKey, text: block.text ?? "" },
+            { block: this.blockKey(messageId, "text"), text: block.text ?? "" },
             nowMs,
           ),
         );
       } else if (block.type === "thinking") {
         // The finalized block is usually signature-only (thinking: ""); fall back
         // to the accumulated thinking_deltas so the durable event carries the text.
+        const thinkingKey = this.blockKey(messageId, "thinking");
         const text =
           block.thinking && block.thinking.length > 0
             ? block.thinking
-            : (this.thinkingByBlock.get(blockKey) ?? "");
+            : (this.thinkingByBlock.get(thinkingKey) ?? "");
         out.push(
-          this.envelope("ai_thinking", { kind: "claude" }, { block: blockKey, text }, nowMs),
+          this.envelope("ai_thinking", { kind: "claude" }, { block: thinkingKey, text }, nowMs),
         );
       } else if (block.type === "tool_use") {
         const id = block.id ?? "";
@@ -278,7 +305,7 @@ export class Normalizer {
           );
         }
       }
-    });
+    }
     return out;
   }
 

@@ -47,6 +47,7 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
         type: "assistant",
         uuid: "u1",
         message: {
+          id: "M1",
           content: [
             { type: "text", text: "hello" },
             { type: "thinking", thinking: "hmm" },
@@ -55,7 +56,9 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
       },
     ]);
     expect(out.map((e) => e.type)).toEqual(["ai_text", "ai_thinking"]);
-    expect(first(out).payload).toMatchObject({ block: "u1:0", text: "hello" });
+    // Keyed by the stable message.id + block type, not the per-emission uuid.
+    expect(first(out).payload).toMatchObject({ block: "M1:text", text: "hello" });
+    expect(out[1]?.payload).toMatchObject({ block: "M1:thinking", text: "hmm" });
   });
 
   it("durable ai_thinking carries the accumulated thinking_delta text when the final block is empty", () => {
@@ -65,7 +68,12 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
     const out = normalizeAll([
       {
         type: "stream_event",
-        uuid: "u1",
+        uuid: "u-start",
+        event: { type: "message_start", message: { id: "M1" } },
+      },
+      {
+        type: "stream_event",
+        uuid: "u-a",
         event: {
           type: "content_block_delta",
           index: 0,
@@ -74,21 +82,30 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
       },
       {
         type: "stream_event",
-        uuid: "u1",
+        uuid: "u-b",
         event: {
           type: "content_block_delta",
           index: 0,
           delta: { type: "thinking_delta", thinking: "think about it" },
         },
       },
-      { type: "assistant", uuid: "u1", message: { content: [{ type: "thinking", thinking: "" }] } },
+      {
+        type: "assistant",
+        uuid: "u-x",
+        message: { id: "M1", content: [{ type: "thinking", thinking: "" }] },
+      },
     ]);
     const durable = out.find((e) => e.type === "ai_thinking");
-    expect(durable?.payload).toMatchObject({ block: "u1:0", text: "let me think about it" });
+    expect(durable?.payload).toMatchObject({ block: "M1:thinking", text: "let me think about it" });
   });
 
   it("durable ai_thinking prefers a non-empty block.thinking over accumulated deltas", () => {
     const out = normalizeAll([
+      {
+        type: "stream_event",
+        uuid: "u-start",
+        event: { type: "message_start", message: { id: "M9" } },
+      },
       {
         type: "stream_event",
         uuid: "u9",
@@ -100,12 +117,90 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
       },
       {
         type: "assistant",
-        uuid: "u9",
-        message: { content: [{ type: "thinking", thinking: "full thought" }] },
+        uuid: "u9b",
+        message: { id: "M9", content: [{ type: "thinking", thinking: "full thought" }] },
       },
     ]);
     const durable = out.find((e) => e.type === "ai_thinking");
-    expect(durable?.payload).toMatchObject({ block: "u9:0", text: "full thought" });
+    expect(durable?.payload).toMatchObject({ block: "M9:thinking", text: "full thought" });
+  });
+
+  it("keys every delta AND durable block of one turn by message.id + block type (not per-emission uuid)", () => {
+    // The real SDK gives EVERY streamed message/delta a UNIQUE top-level `uuid`
+    // (raw_run.jsonl:2-4: one turn's three assistant messages share message.id but
+    // have three different uuids). The stable per-turn id is `message.id`, carried
+    // ONLY on the `message_start` stream_event; content_block_deltas do not carry it.
+    // Within a message, blocks are distinguished by type (thinking vs text). So all
+    // deltas + the durable block of one turn must share `<message.id>:<block_type>`.
+    const out = normalizeAll([
+      {
+        type: "stream_event",
+        uuid: "u-start",
+        event: { type: "message_start", message: { id: "M1" } },
+      },
+      {
+        type: "stream_event",
+        uuid: "u-a",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "let me " },
+        },
+      },
+      {
+        type: "stream_event",
+        uuid: "u-b",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "think" },
+        },
+      },
+      {
+        type: "stream_event",
+        uuid: "u-c",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "Hello " },
+        },
+      },
+      {
+        type: "stream_event",
+        uuid: "u-d",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "**world**" },
+        },
+      },
+      {
+        type: "assistant",
+        uuid: "u-x",
+        message: { id: "M1", content: [{ type: "thinking", thinking: "" }] },
+      },
+      {
+        type: "assistant",
+        uuid: "u-y",
+        message: { id: "M1", content: [{ type: "text", text: "Hello **world**" }] },
+      },
+    ]);
+
+    const blocksOf = (type: string) =>
+      out.filter((e) => e.type === type).map((e) => (e.payload as { block: string }).block);
+    // Both thinking deltas share one block; both text deltas share another — no fragmentation.
+    expect(blocksOf("ai_thinking_delta")).toEqual(["M1:thinking", "M1:thinking"]);
+    expect(blocksOf("ai_text_delta")).toEqual(["M1:text", "M1:text"]);
+
+    // The durable blocks use the SAME keys, so the thinking reconstruction resolves.
+    expect(out.find((e) => e.type === "ai_thinking")?.payload).toEqual({
+      block: "M1:thinking",
+      text: "let me think",
+    });
+    expect(out.find((e) => e.type === "ai_text")?.payload).toEqual({
+      block: "M1:text",
+      text: "Hello **world**",
+    });
   });
 
   it("maps tool_use → tool_started with SUMMARIZED input (never the full payload) + file_changed for Write", () => {

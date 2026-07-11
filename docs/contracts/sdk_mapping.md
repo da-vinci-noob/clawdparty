@@ -53,27 +53,37 @@ fresh run the prompt is `seq 1` and `run_started` is `seq 2`). Added additively 
 
 Enabled by `includePartialMessages: true` + `thinking: { type: "adaptive" }` in the run options. The SDK then
 interleaves `SDKPartialAssistantMessage` (`type: "stream_event"`, `event: BetaRawMessageStreamEvent`) with the
-complete messages. The runner maps only `event.type === "content_block_delta"`:
+complete messages. The runner maps only `event.type === "content_block_delta"`, and reads `message.id` off
+`event.type === "message_start"`:
 
+- `event.type === "message_start"` → latch the turn's stable id (`event.message.id`); emits nothing
 - `delta.type === "text_delta"` (`delta.text`) → **`ai_text_delta`**
 - `delta.type === "thinking_delta"` (`delta.thinking`) → **`ai_thinking_delta`**
 
-Other stream-event subtypes (`message_start`/`stop`, `content_block_start`/`stop`, `message_delta`) are ignored
-(no `ai_raw`). `block` = `"<uuid>:<index>"` where `uuid` is the partial message's `uuid` (equals the eventual
-assistant message `uuid`) and `index` is `event.index` — so a delta shares the block key of the durable
-`ai_text`/`ai_thinking` that settles the block.
+The other stream-event subtypes (`message_start` also `stop`, `content_block_start`/`stop`, `message_delta`) emit
+no event (no `ai_raw`).
+
+**Block key = `"<message.id>:<block_type>"`** (`block_type` ∈ `text` \| `thinking`). The key is NOT built from the
+top-level `uuid`: the real SDK gives **every** streamed message and delta a **unique** top-level `uuid`, and it
+splits one assistant turn across several messages that share `message.id` but each carry a different `uuid`
+(see `sidecar/test/fixtures/raw_run.jsonl:2-4` — three messages, one `message.id`, three `uuid`s). Keying by
+`uuid` therefore fragments every delta into its own block and orphans the durable-block reconstruction. The
+stable per-turn id is `message.id` (carried on `message_start`; the `content_block_delta`s do NOT carry it — the
+normalizer latches it as `currentMessageId`); within a message, a `thinking` and a `text` block are told apart by
+type. So all of a turn's text deltas share `"<message.id>:text"`, all its thinking deltas share
+`"<message.id>:thinking"`, and the durable `ai_text`/`ai_thinking` reuse those exact keys to settle the block.
 
 ### `ai_text_delta` — ephemeral, from `content_block_delta` `text_delta`
 ```jsonc
 { "block": string, "text": string }
 ```
-`block` = `"<uuid>:<block_index>"` (the key the web reducer accumulates by). Ephemeral: null `id`, null `seq`.
+`block` = `"<message.id>:text"` (the key the web reducer accumulates by). Ephemeral: null `id`, null `seq`.
 
 ### `ai_thinking_delta` — ephemeral, from `content_block_delta` `thinking_delta`
 ```jsonc
 { "block": string, "text": string }
 ```
-Same `block` scheme as `ai_text_delta`; `text` carries the `delta.thinking` chunk. Ephemeral: null `id`/`seq`.
+`block` = `"<message.id>:thinking"`; `text` carries the `delta.thinking` chunk. Ephemeral: null `id`/`seq`.
 
 ### `ai_text` — durable, from a completed `text` block
 ```jsonc
@@ -155,6 +165,7 @@ Redact-credentials-FIRST-then-truncate (8KB), per `sidecar-normalizer-v1`.
 - The raw `tool_use.input` carries full content (the spike's `Write` included the whole file body) — confirming
   the **summarization obligation**: `input_summary`, never `input`.
 - `total_cost_usd` and the token `usage` are on the `result` message → `run_finished`, per the PLAN obligation.
-- `block` = `"<assistant_message_uuid>:<content_block_index>"` — the resolved accumulation key.
+- `block` = `"<message.id>:<block_type>"` — the resolved accumulation key. NOT the top-level `uuid` (which is
+  per-emission-unique and splits a single turn across messages that share one `message.id`).
 - `changeset_ready`/`changeset_approved`/`changeset_rejected`/`task_*`/`participant_joined`/`presence_changed`/
   `chat_message` have NO SDK producer — they originate in Rails (`Events::Append`) or W3, not the normalizer.

@@ -33,8 +33,10 @@ describe("live streaming — content_block_delta → ephemeral deltas", () => {
     event: over,
   });
 
-  it("maps a text_delta to ai_text_delta keyed <uuid>:<index>", () => {
+  it("maps a text_delta to ai_text_delta keyed <message.id>:text", () => {
     const n = new Normalizer(ctx);
+    // The stable message.id arrives on message_start; the delta itself never carries it.
+    n.normalize(streamEvent({ type: "message_start", message: { id: "M1" } }), 0);
     const e = n.normalize(
       streamEvent({
         type: "content_block_delta",
@@ -44,13 +46,14 @@ describe("live streaming — content_block_delta → ephemeral deltas", () => {
       0,
     )[0];
     expect(e?.type).toBe("ai_text_delta");
-    expect(e?.payload).toEqual({ block: "msg_abc:1", text: "Hel" });
+    expect(e?.payload).toEqual({ block: "M1:text", text: "Hel" });
     expect(e?.seq).toBeNull(); // ephemeral
     expect(e?.id).toBeNull();
   });
 
   it("maps a thinking_delta to ai_thinking_delta (same block scheme)", () => {
     const n = new Normalizer(ctx);
+    n.normalize(streamEvent({ type: "message_start", message: { id: "M1" } }), 0);
     const e = n.normalize(
       streamEvent({
         type: "content_block_delta",
@@ -60,7 +63,7 @@ describe("live streaming — content_block_delta → ephemeral deltas", () => {
       0,
     )[0];
     expect(e?.type).toBe("ai_thinking_delta");
-    expect(e?.payload).toEqual({ block: "msg_abc:0", text: "hmm" });
+    expect(e?.payload).toEqual({ block: "M1:thinking", text: "hmm" });
     expect(e?.seq).toBeNull();
   });
 
@@ -79,6 +82,7 @@ describe("live streaming — content_block_delta → ephemeral deltas", () => {
 
   it("does not advance the durable seq (a later durable event still gets seq 1)", () => {
     const n = new Normalizer(ctx);
+    n.normalize(streamEvent({ type: "message_start", message: { id: "M1" } }), 0);
     n.normalize(
       streamEvent({
         type: "content_block_delta",
@@ -91,13 +95,13 @@ describe("live streaming — content_block_delta → ephemeral deltas", () => {
       {
         type: "assistant",
         uuid: "msg_abc",
-        message: { content: [{ type: "text", text: "done" }] },
+        message: { id: "M1", content: [{ type: "text", text: "done" }] },
       },
       0,
     );
     const aiText = events.find((e) => e.type === "ai_text");
     expect(aiText?.seq).toBe(1);
-    expect(aiText?.payload).toMatchObject({ block: "msg_abc:0" }); // same key as the deltas
+    expect(aiText?.payload).toMatchObject({ block: "M1:text" }); // same key as the deltas
   });
 });
 
