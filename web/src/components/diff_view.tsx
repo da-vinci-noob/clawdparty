@@ -1,6 +1,7 @@
 import { type FC, type ReactNode, useEffect, useState } from "react";
 import { Diff, Hunk, parseDiff } from "react-diff-view";
 import "react-diff-view/style/index.css";
+import "./diff_view.css";
 import { ReviewControls } from "./review_controls";
 
 // One changed file as reported by GET /api/runs/:id/diff (Git::Diff#to_h). A
