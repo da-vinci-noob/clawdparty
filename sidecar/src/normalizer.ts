@@ -253,11 +253,11 @@ export class Normalizer {
   private mapAssistant(msg: RawMessage, nowMs: number): EventEnvelope[] {
     const out: EventEnvelope[] = [];
     const blocks = msg.message?.content ?? [];
-    // The real SDK splits one turn across several assistant messages that share
-    // `message.id` but each carry a distinct top-level `uuid` (raw_run.jsonl:2-4).
-    // Key by the stable `message.id` (+ block type) so the durable blocks match
-    // the deltas the runner already streamed under those same keys.
-    const messageId = msg.message?.id ?? this.currentMessageId;
+    // Key by the SAME id the streaming deltas used — `currentMessageId`, latched
+    // from message_start — NOT the final message's own id (which can differ from,
+    // or be absent alongside, the streamed one). This guarantees the durable
+    // block matches the deltas already accumulated under that key.
+    const messageId = this.currentMessageId || (msg.message?.id ?? "");
     for (const block of blocks) {
       if (block.type === "text") {
         // Durable ai_text on block stop. (Live streaming deltas are emitted by the
@@ -274,10 +274,11 @@ export class Normalizer {
         // The finalized block is usually signature-only (thinking: ""); fall back
         // to the accumulated thinking_deltas so the durable event carries the text.
         const thinkingKey = this.blockKey(messageId, "thinking");
-        const text =
-          block.thinking && block.thinking.length > 0
-            ? block.thinking
-            : (this.thinkingByBlock.get(thinkingKey) ?? "");
+        const accumulated = this.thinkingByBlock.get(thinkingKey) ?? "";
+        const text = block.thinking && block.thinking.length > 0 ? block.thinking : accumulated;
+        // Consume the accumulation so a later turn (which may reuse the key when
+        // message_start is absent) starts fresh.
+        this.thinkingByBlock.delete(thinkingKey);
         out.push(
           this.envelope("ai_thinking", { kind: "claude" }, { block: thinkingKey, text }, nowMs),
         );
