@@ -76,13 +76,17 @@ module Git
     # the accepted changeset is PRESERVED and the tree returns CLEAN (a fresh run
     # requires a clean tree; without this, approve left the tree dirty and blocked
     # the next run). No-op on a clean tree. A fixed clawdparty identity so the
-    # commit never fails on missing git config. Returns the (new) HEAD sha.
+    # commit never fails on missing git config; `--no-verify` skips the TARGET
+    # repo's pre-commit/commit-msg hooks — this is clawdparty's internal approval
+    # commit on an isolated session branch, and the repo's dev hooks (e.g. the
+    # pre-commit framework) are not installed in the container and would abort it.
+    # Returns the (new) HEAD sha.
     def commit!(message)
       return base_sha unless dirty?
 
       run_git!('add', '-A', dir: worktree_path)
       run_git!('-c', 'user.name=clawdparty', '-c', 'user.email=clawdparty@local',
-               'commit', '-m', message, dir: worktree_path)
+               'commit', '--no-verify', '-m', message, dir: worktree_path)
       base_sha
     end
 

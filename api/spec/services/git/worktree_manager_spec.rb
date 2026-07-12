@@ -86,6 +86,18 @@ RSpec.describe(Git::WorktreeManager) do
     expect(manager.dirty?).to(be(false))
   end
 
+  it 'commit! bypasses repo git hooks so a failing pre-commit does not block approval' do
+    hooks = File.join(@repo, '.git', 'hooks')
+    FileUtils.mkdir_p(hooks)
+    File.write(File.join(hooks, 'pre-commit'), "#!/bin/sh\necho 'pre-commit: not found' >&2\nexit 1\n")
+    FileUtils.chmod(0o755, File.join(hooks, 'pre-commit'))
+
+    path = manager.ensure_worktree!
+    File.write(File.join(path, 'x.rb'), "1\n")
+    expect { manager.commit!('approve') }.not_to(raise_error)
+    expect(manager.dirty?).to(be(false))
+  end
+
   describe 'per-repo worktree (roots at the session repository_path)' do
     # Mirror production: a NON-git parent mount holding git subdir repos. The
     # worktree must be created FROM the selected repo, with its working files
