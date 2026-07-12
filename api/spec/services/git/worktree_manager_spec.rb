@@ -68,6 +68,24 @@ RSpec.describe(Git::WorktreeManager) do
     expect(File.exist?(File.join(path, 'new_file.txt'))).to(be(false))
   end
 
+  it 'commit! commits the dirty worktree, returns a clean tree, and preserves the change' do
+    path = manager.ensure_worktree!
+    File.write(File.join(path, 'approved.rb'), "kept = true\n")
+    expect(manager.dirty?).to(be(true))
+
+    sha = manager.commit!('approve changeset')
+    expect(manager.dirty?).to(be(false))
+    expect(sha).to(match(/\A[0-9a-f]{7,40}\z/))
+    show, _e, _s = Open3.capture3('git', '-C', path, 'show', '--stat', 'HEAD')
+    expect(show).to(include('approved.rb'))
+  end
+
+  it 'commit! is a no-op on a clean worktree (returns HEAD)' do
+    manager.ensure_worktree!
+    expect { manager.commit!('nothing') }.not_to(raise_error)
+    expect(manager.dirty?).to(be(false))
+  end
+
   describe 'per-repo worktree (roots at the session repository_path)' do
     # Mirror production: a NON-git parent mount holding git subdir repos. The
     # worktree must be created FROM the selected repo, with its working files

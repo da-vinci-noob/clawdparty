@@ -72,6 +72,20 @@ module Git
       worktree_path
     end
 
+    # Approve path: commit everything in the worktree onto the session branch so
+    # the accepted changeset is PRESERVED and the tree returns CLEAN (a fresh run
+    # requires a clean tree; without this, approve left the tree dirty and blocked
+    # the next run). No-op on a clean tree. A fixed clawdparty identity so the
+    # commit never fails on missing git config. Returns the (new) HEAD sha.
+    def commit!(message)
+      return base_sha unless dirty?
+
+      run_git!('add', '-A', dir: worktree_path)
+      run_git!('-c', 'user.name=clawdparty', '-c', 'user.email=clawdparty@local',
+               'commit', '-m', message, dir: worktree_path)
+      base_sha
+    end
+
     def worktree_exists?
       File.directory?(File.join(worktree_path, '.git')) || File.exist?(File.join(worktree_path, '.git'))
     end
