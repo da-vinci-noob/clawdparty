@@ -13,7 +13,11 @@ export const ThinkingBlock: FC<{ text: string; streaming?: boolean }> = ({ text,
     return null;
   }
   return (
-    <details open data-testid="feed-thinking" className="rounded bg-neutral-900/40 px-2 py-1 text-xs">
+    <details
+      open
+      data-testid="feed-thinking"
+      className="rounded bg-neutral-900/40 px-2 py-1 text-xs"
+    >
       <summary className="cursor-pointer select-none text-neutral-500">
         Thinking{streaming ? "…" : ""}
       </summary>
