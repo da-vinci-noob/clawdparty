@@ -69,10 +69,21 @@ describe("ai_raw bounding — redact FIRST, then truncate", () => {
 describe("seq + ephemeral classification", () => {
   it("assigns per-run monotonic seq to durable events only", () => {
     const n = new Normalizer(ctx);
-    const a = n.runStarted(0);
-    const b = n.toAiRaw({ x: 1 }, 0);
+    const a = n.toAiRaw({ x: 1 }, 0);
+    const b = n.toAiRaw({ x: 2 }, 0);
     expect(a.seq).toBe(1);
     expect(b.seq).toBe(2);
+  });
+
+  it("ephemeral ai_text_delta carries null seq + null id and does not advance seq", () => {
+    const n = new Normalizer(ctx);
+    const before = n.toAiRaw({ x: 1 }, 0); // seq 1
+    const delta = n.textDelta("blk", "hi", 0);
+    const after = n.toAiRaw({ x: 2 }, 0); // seq 2 — delta did NOT consume one
+    expect(before.seq).toBe(1);
+    expect(delta.seq).toBeNull();
+    expect(delta.id).toBeNull();
+    expect(after.seq).toBe(2);
   });
 
   it("classifies ai_text_delta/presence_changed as ephemeral", () => {
@@ -84,14 +95,13 @@ describe("seq + ephemeral classification", () => {
 });
 
 describe("actor stamping", () => {
-  it("stamps run_started and run_interrupted as user via requested_by", () => {
+  it("stamps run_interrupted as user via requested_by", () => {
     const n = new Normalizer(ctx);
-    expect(n.runStarted(0).actor).toEqual({ kind: "user", id: "part_1" });
     expect(n.runInterrupted(0).actor).toEqual({ kind: "user", id: "part_1" });
   });
 
   it("emits ts as ISO-8601 ms+Z", () => {
     const n = new Normalizer(ctx);
-    expect(n.runStarted(0).ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(n.runInterrupted(0).ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 });

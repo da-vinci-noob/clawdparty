@@ -47,6 +47,11 @@ export class Transport {
     return this.fatal;
   }
 
+  // Structured logger for callers (e.g. the runner) to report run-drain errors.
+  get logger(): Logger {
+    return this.opts.logger;
+  }
+
   // Durable delivery: try to POST the batch (plus anything already buffered). On
   // transient failure the events are retained for a later flush.
   async deliverDurable(events: EventEnvelope[]): Promise<DeliveryOutcome> {
