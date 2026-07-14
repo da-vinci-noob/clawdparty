@@ -16,7 +16,7 @@ module Internal
       batch.each do |event_attrs|
         result = Events::Ingest.call(event_attrs)
         accepted += 1 if result.accepted? || result.broadcast?
-        skipped += 1 if result.skipped?
+        skipped += 1 if result.skipped? || result.rejected?
       end
 
       render(json: { accepted: accepted, skipped: skipped }, status: :ok)
@@ -43,7 +43,15 @@ module Internal
     end
 
     def malformed?(event)
-      REQUIRED_FIELDS.any? { |f| event[f].nil? || (event[f].respond_to?(:empty?) && event[f].empty?) }
+      REQUIRED_FIELDS.any? { |f| event[f].nil? || (event[f].respond_to?(:empty?) && event[f].empty?) } ||
+        user_actor_missing_participant?(event)
+    end
+
+    # A `user` actor MUST carry a participant id; without one the event can never
+    # satisfy the DB check, so reject the whole batch up front (atomic 422).
+    def user_actor_missing_participant?(event)
+      actor = event[:actor]
+      actor.is_a?(Hash) && actor[:kind] == 'user' && actor[:id].nil?
     end
 
     def render_malformed

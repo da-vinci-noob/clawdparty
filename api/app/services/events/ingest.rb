@@ -12,6 +12,7 @@ module Events
       def accepted? = status == :accepted
       def skipped? = status == :skipped
       def broadcast? = status == :broadcast
+      def rejected? = status == :rejected
     end
 
     # `attrs` is a Contract-1 envelope hash (string or symbol keys). `ai_run_id`,
@@ -57,6 +58,10 @@ module Events
     rescue ActiveRecord::RecordNotUnique
       # Idempotent: a duplicate (ai_run_id, seq) is silently skipped, never raised.
       Result.new(status: :skipped, event: nil)
+    rescue ActiveRecord::RecordInvalid
+      # A malformed envelope (e.g. a user actor with no participant) is rejected
+      # cleanly — never persisted, never broadcast, never a StatementInvalid 500.
+      Result.new(status: :rejected, event: nil)
     end
 
     def build_event

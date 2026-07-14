@@ -53,6 +53,7 @@ class Event < ApplicationRecord
   enum :actor_kind, ACTOR_KINDS.index_with(&:itself), validate: true
 
   validates :event_type, presence: true
+  validate :actor_participant_consistency
 
   # Append-only: no updates or destroys in normal operation.
   def readonly?
@@ -93,5 +94,16 @@ class Event < ApplicationRecord
   # ISO-8601 UTC, millisecond precision, Z suffix (e.g. 2026-06-28T20:11:05.123Z).
   def self.iso_ms(time)
     "#{time.utc.strftime('%Y-%m-%dT%H:%M:%S.%L')}Z"
+  end
+
+  private
+
+  # Mirrors the DB check `events_user_actor_has_participant`: an event is valid
+  # iff (actor_kind == 'user') == actor_participant_id.present?.
+  def actor_participant_consistency
+    return if (actor_kind == 'user') == actor_participant_id.present?
+
+    message = actor_kind == 'user' ? 'must be present for a user actor' : 'is only allowed for a user actor'
+    errors.add(:actor_participant_id, message)
   end
 end

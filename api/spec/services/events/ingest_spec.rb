@@ -103,4 +103,28 @@ RSpec.describe(Events::Ingest) do
       end.not_to(change { ai_run.reload.status })
     end
   end
+
+  describe 'a user actor missing its participant id (malformed envelope)' do
+    # Repro: a chat_message whose actor is { kind: "user" } with NO id. The
+    # "user actor MUST carry a participant" rule lived only in the DB check
+    # constraint, so this hit Postgres as an uncatchable StatementInvalid (500)
+    # and dropped the event. Ingest must reject it cleanly instead.
+    def bad_user_attrs
+      { 'session_id' => session.id, 'type' => 'chat_message',
+        'actor' => { 'kind' => 'user' }, 'payload' => {} }
+    end
+
+    it 'is rejected without raising, and persists nothing' do
+      result = nil
+      expect { result = described_class.call(bad_user_attrs) }.not_to(raise_error)
+      expect(result).to(be_rejected)
+      expect(Event.count).to(eq(0))
+    end
+
+    it 'does not broadcast a rejected event' do
+      expect { described_class.call(bad_user_attrs) }.not_to(
+        have_broadcasted_to(session).from_channel(SessionChannel)
+      )
+    end
+  end
 end

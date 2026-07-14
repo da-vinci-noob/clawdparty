@@ -24,12 +24,12 @@ RSpec.describe(Events::Append) do
     expect do
       described_class.call(
         session: session,
-        # actor_kind user without a participant id violates the check constraint
+        # actor_kind user without a participant id fails the model validation
         event: { type: 'chat_message', actor: { kind: 'user' } }
       ) do
         Message.create!(session: session, author: participant, kind: 'user', body: 'hi')
       end
-    end.to(raise_error(ActiveRecord::StatementInvalid))
+    end.to(raise_error(ActiveRecord::RecordInvalid))
 
     expect(Message.count).to(eq(messages_before))
     expect(Event.count).to(eq(events_before))
