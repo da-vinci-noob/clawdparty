@@ -28,6 +28,17 @@ RSpec.describe(Git::WorktreeManager) do
     end
   end
 
+  describe '.repo_root (the in-container path is always /repo, per the frozen convention)' do
+    it 'does NOT read the host-side TARGET_REPO_PATH bind-mount source' do
+      allow(ENV).to(receive(:fetch).and_call_original)
+      # TARGET_REPO_PATH is the HOST mount source for /repo; reading it as the
+      # in-container repo root points at a host path that does not exist in the
+      # container (the picker/worktrees then 500). repo_root must stay /repo.
+      allow(ENV).to(receive(:fetch).with('TARGET_REPO_PATH', anything).and_return('/Users/someone/Developer'))
+      expect(described_class.repo_root).to(eq('/repo'))
+    end
+  end
+
   it 'creates the worktree at the frozen path + branch' do
     path = manager.ensure_worktree!
     expect(path).to(eq(File.join(@repo, '.clawdparty', 'worktrees', "session-#{session.id}")))
