@@ -4,7 +4,7 @@
 
 clawdparty turns a single Claude Code session into a shared room. Any number of developers join from their browser and watch Claude work live on a repo — streaming activity, file/diff viewers, a shared chat sidebar, and a human approval flow for every change Claude makes. One Mac hosts everything; **everyone, including the host, drives Claude through the web UI.** Nobody touches a terminal.
 
-> **Status: early / greenfield.** The design is finalized in [`docs/PLAN.md`](docs/PLAN.md); the implementation is being built against it. The `api/`, `sidecar/`, and `web/` directories described below are the target layout and may not all exist yet. `docs/PLAN.md` is the source of truth.
+> **Status: MVP implemented and running (LAN-only).** The full core loop — create/join a session, chat, watch the live activity stream, interrupt, and review + approve (commit) / reject (revert) diffs — is working, along with no-git chat mode, the folder picker + per-repo review worktrees, and live-streaming text/thinking. [`docs/PLAN.md`](docs/PLAN.md) is the authoritative design; the living per-capability spec is in [`openspec/specs/`](openspec/specs/).
 
 ## Why
 
