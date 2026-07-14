@@ -78,4 +78,39 @@ RSpec.describe(Runs::Start) do
     allow(worktree).to(receive(:dirty?).and_return(true))
     expect { start }.to(raise_error(Runs::Start::DirtyWorktree))
   end
+
+  describe 'sidecar rejects the start (must not orphan a queued run)' do
+    let(:client) do
+      Class.new do
+        def start_run(_payload)
+          raise(Sidecar::Client::ActiveRunConflict, 'sidecar reports a run already active')
+        end
+      end.new
+    end
+
+    it 'does not leave a queued run behind when the sidecar returns 409' do
+      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+      expect(session.ai_runs.where(status: 'queued')).to(be_empty)
+    end
+
+    it 'frees the session so a later start can succeed once the sidecar is free' do
+      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+      expect(session.reload.ai_runs.active).to(be_empty)
+    end
+  end
+
+  context 'when the sidecar is unreachable (transport error)' do
+    let(:client) do
+      Class.new do
+        def start_run(_payload)
+          raise(Sidecar::Client::TransportError, 'sidecar /runs failed: connection refused')
+        end
+      end.new
+    end
+
+    it 'does not orphan a queued run' do
+      expect { start }.to(raise_error(Sidecar::Client::TransportError))
+      expect(session.ai_runs.where(status: 'queued')).to(be_empty)
+    end
+  end
 end

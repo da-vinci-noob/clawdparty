@@ -8,13 +8,13 @@ import { AppProvider } from "./providers/app_provider";
 import { AppRoutes } from "./routes";
 
 describe("AppRoutes", () => {
-  it("resolves the landing route to its placeholder", () => {
+  it("resolves the landing route to the join form", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
         <AppRoutes />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("landing-placeholder")).toBeInTheDocument();
+    expect(screen.getByTestId("join-form")).toBeInTheDocument();
   });
 
   it("resolves the session route to the live activity feed", async () => {

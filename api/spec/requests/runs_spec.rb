@@ -57,6 +57,15 @@ RSpec.describe('Run control') do
       start_run
       expect(response).to(have_http_status(:conflict))
     end
+
+    it 'surfaces a sidecar transport failure as 502 (not an unhandled 500) and leaves no queued run' do
+      join_as(session, role: 'owner')
+      allow_any_instance_of(Sidecar::Client).to(receive(:start_run)
+        .and_raise(Sidecar::Client::TransportError, 'sidecar /runs failed: connection refused'))
+      expect { start_run }.not_to(change { AiRun.where(status: 'queued').count })
+      expect(response).to(have_http_status(:bad_gateway))
+      expect(response.parsed_body['errors']).to(be_present)
+    end
   end
 
   describe 'POST /api/runs/:id/messages and /interrupt' do

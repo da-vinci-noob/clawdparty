@@ -22,10 +22,13 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   return (
     <div
       data-testid="feed-run-banner"
-      className="rounded border-l-2 border-sky-600 bg-neutral-900 px-2 py-1 text-xs text-neutral-300"
+      className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900/50 px-2 py-1 text-xs text-neutral-400"
     >
-      {who}
-      {label}
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500" aria-hidden="true" />
+      <span>
+        {who}
+        {label}
+      </span>
     </div>
   );
 };

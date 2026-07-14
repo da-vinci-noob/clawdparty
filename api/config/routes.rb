@@ -17,6 +17,8 @@ Rails.application.routes.draw do
       resources :events, only: :index
       # Run start: POST /api/sessions/:session_id/runs
       resources :runs, only: :create
+      # Chat: POST /api/sessions/:session_id/messages
+      resources :messages, only: :create
     end
 
     # Run control: POST /api/runs/:id/messages, POST /api/runs/:id/interrupt
