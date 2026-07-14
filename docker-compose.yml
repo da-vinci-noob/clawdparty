@@ -115,6 +115,10 @@ services:
     volumes:
       - ./sidecar:/app:delegated
       - sidecar_node_modules:/app/node_modules
+      # The frozen contracts package: sidecar/package.json depends on it via
+      # file:../packages/contracts, which resolves to /packages/contracts here.
+      # Read-only — the sidecar only imports the TS source.
+      - ./packages:/packages:ro
       # Target repo READ-WRITE at the identical path /repo (Claude edits the
       # worktree; reject reverts it). Same path as rails so worktree gitdirs resolve.
       - ${TARGET_REPO_PATH:-./repo}:/repo
@@ -139,6 +143,10 @@ services:
     volumes:
       - ./web:/app:delegated
       - web_node_modules:/app/node_modules
+      # The frozen contracts package: web/package.json depends on it via
+      # file:../packages/contracts, which resolves to /packages/contracts here.
+      # Read-only — the SPA only imports the TS source.
+      - ./packages:/packages:ro
     # No `ports:` key — the browser reaches the SPA only via the rails reverse-proxy.
 
 volumes:
