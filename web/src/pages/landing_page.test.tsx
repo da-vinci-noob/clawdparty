@@ -25,6 +25,12 @@ function submitForm(testid: string) {
   fireEvent.click(within(screen.getByTestId(testid)).getByRole("button"));
 }
 
+// The create form embeds the DirectoryPicker (multiple buttons), so the submit
+// button is targeted by its accessible name instead of the single-button helper.
+function submitCreate() {
+  fireEvent.click(screen.getByRole("button", { name: "Create session" }));
+}
+
 describe("LandingPage — join flow", () => {
   beforeEach(() => useParticipantStore.getState().clear());
   afterEach(() => useParticipantStore.getState().clear());
@@ -76,7 +82,11 @@ describe("LandingPage — join flow", () => {
 });
 
 describe("LandingPage — create flow", () => {
-  beforeEach(() => useParticipantStore.getState().clear());
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    // The create form now embeds the DirectoryPicker, which lists on mount.
+    server.use(http.get("/api/directories", () => HttpResponse.json({ path: "", entries: [] })));
+  });
   afterEach(() => useParticipantStore.getState().clear());
 
   it("switches to create mode and creates a session, routing in as owner", async () => {
@@ -93,7 +103,7 @@ describe("LandingPage — create flow", () => {
 
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Ship it" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
-    submitForm("create-form");
+    submitCreate();
 
     await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
     expect(useParticipantStore.getState().current).toMatchObject({
@@ -102,9 +112,22 @@ describe("LandingPage — create flow", () => {
     });
   });
 
-  it("creates a chat-mode session with a working directory", async () => {
+  it("creates a chat-mode session with a working directory picked from the folder tree", async () => {
     let captured: Record<string, unknown> | null = null;
     server.use(
+      http.get("/api/directories", ({ request }) => {
+        const path = new URL(request.url).searchParams.get("path") ?? "";
+        if (path === "sub") {
+          return HttpResponse.json({
+            path: "sub",
+            entries: [{ name: "dir", path: "sub/dir", is_git_repo: false }],
+          });
+        }
+        return HttpResponse.json({
+          path: "",
+          entries: [{ name: "sub", path: "sub", is_git_repo: false }],
+        });
+      }),
       http.post("/api/sessions", async ({ request }) => {
         captured = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json(
@@ -118,8 +141,13 @@ describe("LandingPage — create flow", () => {
     fireEvent.change(screen.getByLabelText("Session mode"), { target: { value: "chat" } });
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Chatty" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
-    fireEvent.change(screen.getByLabelText("Working directory"), { target: { value: "sub/dir" } });
-    submitForm("create-form");
+
+    // Navigate sub → dir in the picker, then select it as the working directory.
+    fireEvent.click(await screen.findByRole("button", { name: "Open sub" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open dir" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use this folder" }));
+
+    submitCreate();
 
     await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
     expect(captured).toMatchObject({ mode: "chat", repository_path: "sub/dir", title: "Chatty" });
@@ -134,7 +162,7 @@ describe("LandingPage — create flow", () => {
     renderLanding();
     fireEvent.click(within(screen.getByTestId("landing-mode-toggle")).getByText("Create"));
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
-    submitForm("create-form");
+    submitCreate();
 
     expect(await screen.findByTestId("join-error")).toHaveTextContent("Title can't be blank");
     expect(screen.queryByTestId("session-route")).not.toBeInTheDocument();
