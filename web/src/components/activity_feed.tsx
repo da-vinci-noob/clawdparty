@@ -9,6 +9,7 @@ import { RunBanner } from "./feed/run_banner";
 import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
 import { ToolChip } from "./feed/tool_chip";
+import { UserPromptBlock } from "./feed/user_prompt_block";
 
 // Cap the rendered durable set so a long run doesn't render thousands of nodes.
 const FEED_CAP = 500;
@@ -72,6 +73,8 @@ function renderEvent(
   names: ParticipantNames,
 ) {
   switch (event.type) {
+    case "user_prompt":
+      return <UserPromptBlock event={event} names={names} />;
     case "ai_text":
       return <TextBlock event={event} />;
     case "tool_started": {

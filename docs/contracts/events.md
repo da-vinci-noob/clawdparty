@@ -44,26 +44,26 @@ and treat `payload` as opaque JSON without erroring.
 | `ts` | `string` | ISO-8601 UTC, **millisecond precision**, `Z` suffix (e.g. `2026-06-28T20:11:05.123Z`). **Display-only** — never used to order events (§4). Fixed ms precision avoids the classic cross-stream date-format mismatch. |
 | `payload` | JSON | Type-specific; per-type field schemas finalized at v1.1 (§8 + `sdk_mapping.md`). |
 
-## 2. The frozen taxonomy — exactly 20 names
+## 2. The frozen taxonomy — exactly 21 names
 
 ```
-run_started        ai_text_delta    ai_text          ai_thinking
-tool_started       tool_finished    tool_failed      terminal_output
-file_changed       run_finished     run_failed       run_interrupted
-changeset_ready    changeset_approved  changeset_rejected
+run_started        user_prompt      ai_text_delta    ai_text
+ai_thinking        tool_started     tool_finished    tool_failed
+terminal_output    file_changed     run_finished     run_failed
+run_interrupted    changeset_ready  changeset_approved  changeset_rejected
 chat_message       task_created     task_updated     participant_joined
 presence_changed
 ```
 
 Adding or removing a name is a **contract change** (CHANGELOG entry; see §8). The count of
-**exactly 20** is asserted in `events.ts` (`EVENT_TYPE_COUNT: 20`) so an accidental addition
+**exactly 21** is asserted in `events.ts` (`EVENT_TYPE_COUNT: 21`) so an accidental addition
 fails type-checking. Downstream specs reference this list **by name** rather than re-enumerating
-it, so a rename changes one place.
+it, so a rename changes one place. (`user_prompt` was added additively at v1.2 — see CHANGELOG.)
 
-## 3. The `ai_raw` fallback (not one of the 20)
+## 3. The `ai_raw` fallback (not one of the 21)
 
 Any SDK message the normalizer cannot map to a known type is emitted as **`ai_raw`** — never
-dropped, never a crash. It is **not** a member of the 20-name taxonomy; it is the safety valve
+dropped, never a crash. It is **not** a member of the 21-name taxonomy; it is the safety valve
 that keeps the normalizer total over an evolving SDK surface.
 
 ## 4. Two cursors — `seq` (per-run) and `id` (global)
@@ -121,6 +121,7 @@ A **null `id` marks ephemerality.** Ephemeral events bypass REST backfill and ar
 | type | actor.kind | durability | scope | carries |
 |---|---|---|---|---|
 | `run_started` | user | durable | run | `ai_run_id` + `seq` |
+| `user_prompt` | **user** | durable | run | `ai_run_id` + `seq` |
 | `ai_text_delta` | claude | **ephemeral** | run | `ai_run_id`; **null `seq`**, null `id` |
 | `ai_text` | claude | durable | run | `ai_run_id` + `seq` |
 | `ai_thinking` | claude | durable | run | `ai_run_id` + `seq` |
@@ -177,12 +178,18 @@ spike**; finalizing the payloads is an **additive** `minor` bump (see
 [`fixtures/sample_run.jsonl`](../../packages/contracts/fixtures/sample_run.jsonl) is the real
 spike-derived executable contract (concrete payloads), replacing the v1.0 envelope-only placeholder.
 
+**`user_prompt` (added v1.2 — sidecar-originated, not spike-derived):** payload
+`UserPromptPayload { text: string }` — the human's prompt text for the initial prompt and each
+follow-up. Attribution is on the envelope `actor` (`{ kind: "user", id }`), not the payload. Unlike
+the spike-derived types above, `user_prompt` is **not** a mapping of any SDK message — the sidecar
+synthesizes it from the prompt it pushes into the SDK input (see `sdk_mapping.md`).
+
 ## 9. Freeze history: v1.0 (envelope) vs v1.1 (payloads)
 
 | frozen at v1.0 (envelope) | finalized at v1.1 (from the spike) |
 |---|---|
 | envelope fields + scalar types | per-type `payload` field schemas |
-| the 20 type names + `ai_raw` | concrete `events.ts` payload interfaces |
+| the type names + `ai_raw` (21 as of v1.2) | concrete `events.ts` payload interfaces |
 | per-type actor / durability / scope | `ai_text_delta` `block` representation |
 | `(ai_run_id, seq)` idempotency, dual cursor | `fixtures/sample_run.jsonl` (real capture) |
 | ephemeral-vs-durable rule, `actor` union | (additive `minor` bump — envelope unchanged) |

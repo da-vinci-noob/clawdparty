@@ -58,6 +58,43 @@ describe("ActivityFeed", () => {
     expect(text).not.toContain("hello from the spike\nmore"); // no full file body
   });
 
+  it("renders user_prompt first, then run banner, then Claude text — a conversation", () => {
+    renderFeed();
+    const ev = (
+      over: Partial<EventEnvelope> & Pick<EventEnvelope, "type" | "seq" | "id">,
+    ): EventEnvelope => ({
+      session_id: "sess_demo",
+      ai_run_id: "run_demo",
+      actor: { kind: "claude" },
+      ts: "2026-06-28T20:11:00.000Z",
+      payload: {},
+      ...over,
+    });
+    act(() =>
+      useEventStore.getState().applyMany([
+        ev({
+          id: 1,
+          seq: 1,
+          type: "user_prompt",
+          actor: { kind: "user", id: "42" },
+          payload: { text: "do the thing" },
+        }),
+        ev({ id: 2, seq: 2, type: "run_started", actor: { kind: "user", id: "42" }, payload: {} }),
+        ev({ id: 3, seq: 3, type: "ai_text", payload: { block: "b:0", text: "doing it" } }),
+      ]),
+    );
+
+    const prompt = screen.getByTestId("feed-user-prompt");
+    expect(prompt).toHaveTextContent("do the thing");
+    // Distinct element from Claude's text block.
+    expect(prompt).not.toBe(screen.getByTestId("feed-text"));
+    // DOM order: prompt before banner before Claude text.
+    const banner = screen.getByTestId("feed-run-banner");
+    const claude = screen.getByTestId("feed-text");
+    expect(prompt.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(banner.compareDocumentPosition(claude) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders an ai_raw / unknown type via the safe fallback (no crash)", () => {
     renderFeed();
     act(() =>

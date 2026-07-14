@@ -345,6 +345,13 @@ export class Normalizer {
     return this.envelope("run_interrupted", this.userActor(), {}, nowMs);
   }
 
+  // The human's prompt (initial or follow-up). NOT an SDK message — the runner
+  // synthesizes it before pushing the user message into the SDK input, so it
+  // takes the next durable per-run seq (on a fresh run: seq 1, before run_started).
+  userPrompt(text: string, nowMs: number = Date.now()): EventEnvelope {
+    return this.envelope("user_prompt", this.userActor(), { text }, nowMs);
+  }
+
   private userActor(): Actor {
     if (!this.ctx.requestedBy) {
       throw new Error("requestedBy is required to stamp a user actor");
