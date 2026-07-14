@@ -1,14 +1,16 @@
+# frozen_string_literal: true
+
 Rails.application.routes.draw do
   # ActionCable mounted at /~cable (per the frozen http-api-contract).
-  mount ActionCable.server => "/~cable"
+  mount ActionCable.server => '/~cable'
 
   # Health check for load balancers / uptime monitors.
-  get "up" => "rails/health#show", as: :rails_health_check
+  get 'up' => 'rails/health#show', as: :rails_health_check
 
   # Client-facing REST under the /api path prefix (path scope, not a Ruby module
   # namespace — the app module is already `Api`, so a second `Api::` controller
   # namespace would be confusing and redundant).
-  scope "/api" do
+  scope '/api' do
     # Join a session via an invite token → signed clawd_uid cookie.
     resources :participants, only: :create
 
@@ -19,6 +21,10 @@ Rails.application.routes.draw do
       resources :runs, only: :create
       # Chat: POST /api/sessions/:session_id/messages
       resources :messages, only: :create
+      # Read-only repo browse: GET /api/sessions/:session_id/files (tree) and
+      # GET /api/sessions/:session_id/files/content?path=… (content via RepoBrowser).
+      get 'files', to: 'files#index'
+      get 'files/content', to: 'files#content'
     end
 
     # Run control: POST /api/runs/:id/messages, POST /api/runs/:id/interrupt
@@ -26,6 +32,8 @@ Rails.application.routes.draw do
       member do
         post :messages
         post :interrupt
+        # Run diff (REST only, never cable): GET /api/runs/:id/diff
+        get :diff
       end
     end
   end
@@ -33,6 +41,6 @@ Rails.application.routes.draw do
   # Bearer-authed sidecar→Rails callbacks.
   namespace :internal do
     resources :events, only: :create
-    post "sidecar/heartbeat", to: "heartbeats#create"
+    post 'sidecar/heartbeat', to: 'heartbeats#create'
   end
 end

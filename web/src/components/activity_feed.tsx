@@ -1,7 +1,6 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
 import type { FC } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
-import { useSessionEvents } from "../hooks/use_session_events";
 import { selectDurableEvents, useEventStore } from "../stores/event_store";
 import { FileChangedRow } from "./feed/file_changed_row";
 import { RawFallback } from "./feed/raw_fallback";
@@ -23,15 +22,13 @@ const RUN_LIFECYCLE = new Set([
 ]);
 
 interface Props {
-  sessionId: string;
   names?: ParticipantNames;
 }
 
 // The center-pane activity feed: renders the cable-client store's durable log
 // richly (per the frozen taxonomy) plus the trailing in-progress streamed text.
 // Read-only; no shell input path. Unknown/ai_raw types degrade to a safe fallback.
-export const ActivityFeed: FC<Props> = ({ sessionId, names = new Map() }) => {
-  useSessionEvents(sessionId);
+export const ActivityFeed: FC<Props> = ({ names = new Map() }) => {
   const durable = useEventStore(selectDurableEvents);
   const textByBlock = useEventStore((s) => s.textByBlock);
 

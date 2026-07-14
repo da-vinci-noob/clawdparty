@@ -12,6 +12,7 @@
 // makes the re-drain idempotent.
 
 import type { EventEnvelope } from "@clawdparty/contracts";
+import { BackfillNotFound } from "../helpers/backfill";
 
 // A minimal channel abstraction so the catch-up logic is testable with a fake
 // (no real WebSocket). A real subscription (action_cable_provider) adapts to this.
@@ -28,6 +29,9 @@ export interface CatchUpDeps {
   apply: (event: EventEnvelope) => void;
   // The store's current max applied durable id (0 on a fresh join). Read lazily.
   maxAppliedId: () => number;
+  // Called when the backfill reports the session is unknown / not joined (404), so
+  // the UI can show a not-found state instead of a blank working shell.
+  onNotFound?: () => void;
 }
 
 export interface CatchUpHandle {
@@ -104,12 +108,23 @@ export class CableController {
 
   // (Re-)run backfill+drain from the current cursor. Called initially and on each
   // reconnect. Sets live=false while draining so concurrent events are buffered.
+  // A BackfillNotFound (404) is terminal: stop and signal not-found rather than
+  // letting the rejection escape (which would leave a blank shell).
   async catchUp(): Promise<void> {
     if (this.stopped) {
       return;
     }
     this.live = false;
-    await backfillAndDrain(this.deps, this.buffer);
+    try {
+      await backfillAndDrain(this.deps, this.buffer);
+    } catch (err) {
+      if (err instanceof BackfillNotFound) {
+        this.stop();
+        this.deps.onNotFound?.();
+        return;
+      }
+      throw err;
+    }
     if (!this.stopped) {
       this.live = true;
     }
