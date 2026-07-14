@@ -83,8 +83,9 @@ RSpec.describe(Runs::Start) do
     let(:session) { create(:session, mode: 'chat', repository_path: '/repo/some/dir') }
 
     it 'does NOT create a worktree and pins cwd to the session working directory' do
-      expect(worktree).not_to(receive(:ensure_worktree!))
       start
+      # `worktree` is an instance_double (a spy) — assert ensure_worktree! was never called.
+      expect(worktree).not_to(have_received(:ensure_worktree!))
       expect(posted.last[:repo_path]).to(eq('/repo/some/dir'))
     end
 
