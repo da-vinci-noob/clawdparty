@@ -10,7 +10,7 @@ RSpec.describe(Runs::Finalize) do
 
   # Ingest a run-lifecycle event for `run` (the sidecar-emitted path). A user
   # actor carries the participant id (the DB check constraint requires it).
-  def ingest(type, seq:, actor_kind: 'system')
+  def ingest(type, seq:, actor_kind: 'system', payload: {})
     actor = actor_kind == 'user' ? { 'kind' => 'user', 'id' => participant.id } : { 'kind' => actor_kind }
     Events::Ingest.call(
       'session_id' => session.id,
@@ -18,13 +18,24 @@ RSpec.describe(Runs::Finalize) do
       'seq' => seq,
       'type' => type,
       'actor' => actor,
-      'payload' => {}
+      'payload' => payload
     )
   end
 
   it "transitions queued → running on the sidecar's run_started" do
     ingest('run_started', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('running'))
+  end
+
+  it 'captures claude_session_id from the run_started payload (so follow-ups can resume it)' do
+    ingest('run_started', seq: 1, actor_kind: 'user', payload: { 'claude_session_id' => 'sess-abc' })
+    expect(run.reload.claude_session_id).to(eq('sess-abc'))
+    expect(run.status).to(eq('running'))
+  end
+
+  it 'leaves claude_session_id nil when run_started carries none' do
+    ingest('run_started', seq: 1, actor_kind: 'user')
+    expect(run.reload.claude_session_id).to(be_nil)
   end
 
   it 'transitions running → failed on run_failed' do

@@ -60,13 +60,17 @@ module Runs
       path
     end
 
-    # Reject severs chaining: only a `revise` resumes the prior Claude session. A
-    # fresh start (incl. one after a reject) passes NO claude_session_id, so a new
-    # session begins against the (reverted) worktree.
+    # Resume the prior Claude session so context persists across runs. `revise`
+    # resumes the run being revised; a normal follow-up resumes the most recent
+    # prior run's session — EXCEPT a reject severs the chain (the reverted
+    # worktree no longer matches that session's context), so a fresh start whose
+    # most recent run was rejected begins a new session.
     def resume_session_id(revise)
-      return nil unless revise
+      last = @session.ai_runs.order(:id).last
+      return nil if last.nil?
+      return nil if !revise && last.status == 'rejected'
 
-      @session.ai_runs.where.not(claude_session_id: nil).order(:id).last&.claude_session_id
+      last.claude_session_id
     end
 
     # If the sidecar refuses the start, drop the just-created run so no
