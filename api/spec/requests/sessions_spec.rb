@@ -1,8 +1,20 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'tmpdir'
 
 RSpec.describe('POST /api/sessions (create)') do
+  # The test env has no bind-mounted /repo, so stub the repo root to a real
+  # temp dir — session create realpath-resolves it as the default working dir.
+  around do |example|
+    Dir.mktmpdir('clawd-sessions') do |dir|
+      @repo = File.realpath(dir)
+      example.run
+    end
+  end
+
+  before { allow(Git::WorktreeManager).to(receive(:repo_root).and_return(@repo)) }
+
   it 'creates a session + owner participant + host user and issues the clawd_uid cookie' do
     expect do
       post('/api/sessions', params: { title: 'Ship the thing', name: 'Alice' })
