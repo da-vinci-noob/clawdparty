@@ -50,6 +50,9 @@ module Events
       event = build_event
       event.save!
       broadcast(event.to_envelope)
+      # Rails owns run-state transitions, driven by the event stream (not polling):
+      # a run-lifecycle event advances the run via Runs::Finalize.
+      Runs::Finalize.call(event)
       Result.new(status: :accepted, event: event)
     rescue ActiveRecord::RecordNotUnique
       # Idempotent: a duplicate (ai_run_id, seq) is silently skipped, never raised.

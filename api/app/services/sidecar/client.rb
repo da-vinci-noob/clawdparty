@@ -1,0 +1,78 @@
+# frozen_string_literal: true
+
+require 'net/http'
+require 'json'
+require 'uri'
+
+module Sidecar
+  # The sole Rails→sidecar caller for the frozen sidecar-protocol control surface.
+  # Targets SIDECAR_URL (default http://sidecar:8787 over the compose network) —
+  # no hard-coded host, so a remote/Tailscale rebind is a config change only.
+  class Client
+    class ActiveRunConflict < StandardError; end
+    class UnknownRun < StandardError; end
+    class TransportError < StandardError; end
+
+    Result = Struct.new(:status, :body, keyword_init: true)
+
+    def self.base_url
+      ENV.fetch('SIDECAR_URL', 'http://sidecar:8787')
+    end
+
+    def initialize(base_url: self.class.base_url, http: nil)
+      @base_url = base_url
+      @http = http # injectable for tests; defaults to Net::HTTP
+    end
+
+    # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
+    def start_run(payload)
+      res = post('/runs', payload)
+      raise(ActiveRunConflict, 'sidecar reports a run already active') if res.status == 409
+
+      res
+    end
+
+    # POST /runs/:id/messages — 200 on accept; 404 unknown / 409 not-acceptable.
+    def send_message(run_id, message:, requested_by:)
+      res = post("/runs/#{run_id}/messages", { message: message, requested_by: requested_by })
+      raise(UnknownRun, "run #{run_id} unknown") if res.status == 404
+
+      res
+    end
+
+    # POST /runs/:id/interrupt — 200 on accept; 404/409 otherwise.
+    def interrupt(run_id, requested_by:)
+      res = post("/runs/#{run_id}/interrupt", { requested_by: requested_by })
+      raise(UnknownRun, "run #{run_id} unknown") if res.status == 404
+
+      res
+    end
+
+    private
+
+    attr_reader :base_url
+
+    def post(path, body)
+      uri = URI.join(base_url, path)
+      response = perform(uri, body.to_json)
+      parsed = response.body.to_s.empty? ? {} : JSON.parse(response.body)
+      Result.new(status: response.code.to_i, body: parsed)
+    rescue JSON::ParserError
+      Result.new(status: response.code.to_i, body: {})
+    rescue StandardError => e
+      raise(TransportError, "sidecar #{path} failed: #{e.message}")
+    end
+
+    def perform(uri, json)
+      return @http.call(uri, json) if @http # test seam
+
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.open_timeout = 5
+      http.read_timeout = 15
+      request = Net::HTTP::Post.new(uri)
+      request['content-type'] = 'application/json'
+      request.body = json
+      http.request(request)
+    end
+  end
+end
