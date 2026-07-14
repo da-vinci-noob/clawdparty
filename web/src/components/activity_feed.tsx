@@ -7,6 +7,7 @@ import { RawFallback } from "./feed/raw_fallback";
 import { RunBanner } from "./feed/run_banner";
 import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
+import { ThinkingBlock } from "./feed/thinking_block";
 import { ToolChip } from "./feed/tool_chip";
 import { UserPromptBlock } from "./feed/user_prompt_block";
 import { useParticipantList } from "./participant_list";
@@ -37,6 +38,7 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const resolvedNames = names ?? listNames;
   const durable = useEventStore(selectDurableEvents);
   const textByBlock = useEventStore((s) => s.textByBlock);
+  const thinkingByBlock = useEventStore((s) => s.thinkingByBlock);
 
   // Pair each tool_started with its tool_finished/tool_failed (same tool_use_id).
   const finishByToolId = new Map<string, EventEnvelope>();
@@ -54,6 +56,11 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
       {windowed.map((event) => (
         <div key={event.id ?? `${event.type}-${event.ts}`}>
           {renderEvent(event, finishByToolId, resolvedNames)}
+        </div>
+      ))}
+      {[...thinkingByBlock.entries()].map(([block, text]) => (
+        <div key={`think-${block}`}>
+          <ThinkingBlock text={text} streaming />
         </div>
       ))}
       {[...textByBlock.entries()].map(([block, text]) => (
@@ -80,6 +87,8 @@ function renderEvent(
       return <UserPromptBlock event={event} names={names} />;
     case "ai_text":
       return <TextBlock event={event} />;
+    case "ai_thinking":
+      return <ThinkingBlock text={(event.payload as { text?: string }).text ?? ""} />;
     case "tool_started": {
       const id = (event.payload as { tool_use_id?: string }).tool_use_id;
       return <ToolChip startEvent={event} finishEvent={id ? finishByToolId.get(id) : undefined} />;
@@ -96,7 +105,7 @@ function renderEvent(
       if (RUN_LIFECYCLE.has(event.type)) {
         return <RunBanner event={event} names={names} />;
       }
-      // ai_thinking (no rich UI yet), ai_raw, and anything else → safe fallback.
+      // ai_raw and anything else → safe fallback.
       return <RawFallback event={event} />;
   }
 }

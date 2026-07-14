@@ -117,9 +117,13 @@ services:
       # Target repo READ-WRITE at the identical path /repo (Claude edits the
       # worktree; reject reverts it). Same path as rails so worktree gitdirs resolve.
       - ${TARGET_REPO_PATH:-./repo}:/repo
-      # Host login, READ-ONLY (tamper-safety + JSONL resume). Targets the `node`
-      # user's home so `~/.claude` / `~/.aws` resolve to the mounts.
-      - ${HOME}/.claude:/home/node/.claude:ro
+      # Host login. Targets the `node` user's home so `~/.claude` / `~/.aws`
+      # resolve to the mounts. `~/.claude` is READ-WRITE: the Agent SDK writes
+      # runtime dirs there (session-env/<id> per run, and the resume JSONL under
+      # projects/ — the resume design wants that persisted to the host). A
+      # read-only mount fails the run with EROFS on session-env mkdir. `~/.aws`
+      # stays READ-ONLY (the Bedrock/AWS credentials — tamper-safe; not in ~/.claude).
+      - ${HOME}/.claude:/home/node/.claude
       - ${HOME}/.aws:/home/node/.aws:ro
     # No `ports:` key at all — reachable only on the compose network.
 

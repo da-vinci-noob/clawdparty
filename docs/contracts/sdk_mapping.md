@@ -49,13 +49,31 @@ durable; `actor` is `{ kind: "user", id: <requested_by> }`; `seq` is the next pe
 fresh run the prompt is `seq 1` and `run_started` is `seq 2`). Added additively at `CONTRACT_VERSION` 1.2
 (`user-prompt-event`); see `CHANGELOG.md [1.2.0]`.
 
-### `ai_text_delta` — ephemeral, from streaming `text` (partial assistant message)
+### Live streaming — `ai_text_delta` / `ai_thinking_delta` (added v1.3)
+
+Enabled by `includePartialMessages: true` + `thinking: { type: "adaptive" }` in the run options. The SDK then
+interleaves `SDKPartialAssistantMessage` (`type: "stream_event"`, `event: BetaRawMessageStreamEvent`) with the
+complete messages. The runner maps only `event.type === "content_block_delta"`:
+
+- `delta.type === "text_delta"` (`delta.text`) → **`ai_text_delta`**
+- `delta.type === "thinking_delta"` (`delta.thinking`) → **`ai_thinking_delta`**
+
+Other stream-event subtypes (`message_start`/`stop`, `content_block_start`/`stop`, `message_delta`) are ignored
+(no `ai_raw`). `block` = `"<uuid>:<index>"` where `uuid` is the partial message's `uuid` (equals the eventual
+assistant message `uuid`) and `index` is `event.index` — so a delta shares the block key of the durable
+`ai_text`/`ai_thinking` that settles the block.
+
+### `ai_text_delta` — ephemeral, from `content_block_delta` `text_delta`
 ```jsonc
 { "block": string, "text": string }
 ```
-`block` is the **text-block identity** the web reducer accumulates by: the assistant message `uuid` combined
-with the content-block index (`"<message_uuid>:<block_index>"`). Ephemeral: null `id`, null `seq`; coalesced
-~150ms in the sidecar. This resolves the previously-`pending-spike` `block` field.
+`block` = `"<uuid>:<block_index>"` (the key the web reducer accumulates by). Ephemeral: null `id`, null `seq`.
+
+### `ai_thinking_delta` — ephemeral, from `content_block_delta` `thinking_delta`
+```jsonc
+{ "block": string, "text": string }
+```
+Same `block` scheme as `ai_text_delta`; `text` carries the `delta.thinking` chunk. Ephemeral: null `id`/`seq`.
 
 ### `ai_text` — durable, from a completed `text` block
 ```jsonc
@@ -63,11 +81,12 @@ with the content-block index (`"<message_uuid>:<block_index>"`). Ephemeral: null
 ```
 Emitted on text-block stop; `block` matches the deltas that preceded it.
 
-### `ai_thinking` — from a `thinking` block
+### `ai_thinking` — durable, from a completed `thinking` block
 ```jsonc
 { "text": string }
 ```
-The `signature` field on the raw thinking block is dropped (internal; not rendered).
+The `signature` field on the raw thinking block is dropped (internal; not rendered). `ai_thinking_delta`s
+stream the same content live before this settles.
 
 ### `tool_started` — from a `tool_use` block
 ```jsonc

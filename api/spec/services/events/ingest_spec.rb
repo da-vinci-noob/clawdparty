@@ -29,6 +29,15 @@ RSpec.describe(Events::Ingest) do
                 'type' => 'ai_text_delta', 'actor' => { 'kind' => 'claude' }, 'payload' => {} }
       expect { described_class.call(attrs) }.not_to(change(Event, :count))
     end
+
+    it 'treats ai_thinking_delta as ephemeral (broadcast, not persisted)' do
+      attrs = { 'session_id' => session.id, 'ai_run_id' => ai_run.id, 'seq' => nil,
+                'type' => 'ai_thinking_delta', 'actor' => { 'kind' => 'claude' },
+                'payload' => { 'block' => 'm:0', 'text' => 'hmm' } }
+      result = nil
+      expect { result = described_class.call(attrs) }.not_to(change(Event, :count))
+      expect(result).to(be_broadcast)
+    end
   end
 
   describe 'broadcast (inside the service)' do
