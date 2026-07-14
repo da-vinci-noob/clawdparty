@@ -14,9 +14,12 @@ RSpec.describe('Run review (approve / reject)') do
   end
 
   describe 'POST /api/runs/:id/approve' do
-    it 'lets an owner approve an awaiting_review run (200 + approved + changeset_approved event)' do
+    it 'lets an owner approve an awaiting_review run (200 + approved + changeset_approved event + commit)' do
       participant = join_as(session, role: 'owner')
       run = awaiting_run
+      # Approve COMMITS the changeset onto the session branch (keeps the work AND
+      # leaves a clean tree so the next fresh run is not blocked as dirty).
+      expect_any_instance_of(Git::WorktreeManager).to(receive(:commit!))
       expect { post("/api/runs/#{run.id}/approve") }
         .to(change { events_of(run, 'changeset_approved').count }.by(1))
       expect(response).to(have_http_status(:ok))
