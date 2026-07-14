@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# bin/start — the single entry point for the clawdparty dev stack.
+#
+# Builds the images then brings the whole stack up. Build-before-up so a fresh
+# machine (no images yet) does not fail the `up` step on a missing image.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+if [[ ! -f ".env.local" ]]; then
+  echo "No .env.local found — run bin/setup first (generates SIDECAR_SHARED_SECRET)." >&2
+  exit 1
+fi
+
+docker compose build
+exec docker compose up --remove-orphans

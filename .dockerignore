@@ -1,0 +1,36 @@
+# VCS metadata
+.git
+.gitignore
+
+# Dependencies — installed into named volumes at entrypoint time, never baked in
+node_modules
+**/node_modules
+vendor/bundle
+**/vendor/bundle
+
+# Logs and scratch
+log
+**/log
+tmp
+**/tmp
+*.log
+
+# Build artifacts
+dist
+**/dist
+build
+**/build
+.vite
+**/.vite
+
+# Local secret env file (holds the generated SIDECAR_SHARED_SECRET) — never bake into an image layer
+.env.local
+*.env.local
+
+# Runtime worktrees created by Rails (not source)
+.clawdparty
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode

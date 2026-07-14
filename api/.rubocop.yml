@@ -1,0 +1,75 @@
+plugins:
+  - rubocop-rails
+  - rubocop-rspec
+
+AllCops:
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  Exclude:
+    - "bin/**/*"
+    - "db/schema.rb"
+    - "db/**/*_schema.rb"
+    - "config/**/*"
+    - "vendor/**/*"
+    - "tmp/**/*"
+    - "storage/**/*"
+
+# Project conventions (docs/PLAN.md §16 / CLAUDE.md): 120 cols, frozen string
+# literals, required parens on method calls with arguments.
+Layout/LineLength:
+  Max: 120
+  # annotaterb writes index/constraint definitions as comment lines that can
+  # exceed 120 (e.g. the partial-index predicate). Don't fight generated schema
+  # annotations over a comment's width.
+  AllowedPatterns:
+    - "^#  "
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
+
+Style/MethodCallWithArgsParentheses:
+  Enabled: true
+  EnforcedStyle: require_parentheses
+  AllowedMethods:
+    - require
+    - require_relative
+    - render
+    - redirect_to
+    - raise
+    - puts
+    - head
+
+# Migrations are declarative table definitions — length metrics are noise there.
+Metrics/MethodLength:
+  Exclude:
+    - "db/migrate/**/*"
+  Max: 15
+Metrics/AbcSize:
+  Exclude:
+    - "db/migrate/**/*"
+  Max: 22
+
+# RSpec specs are naturally long/expressive; relax the defaults that fight specs.
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"
+    - "lib/tasks/**/*"
+RSpec/ExampleLength:
+  Enabled: false
+RSpec/MultipleExpectations:
+  Enabled: false
+RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+# Request/integration specs legitimately describe a route string, not a class.
+RSpec/DescribeClass:
+  Enabled: false
+
+# `authorize!` follows the bang-on-side-effect convention, not a predicate.
+Naming/PredicateMethod:
+  AllowedMethods:
+    - authorize!
+
+# Documentation comments are not required for this MVP.
+Style/Documentation:
+  Enabled: false
