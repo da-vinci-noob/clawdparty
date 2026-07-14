@@ -20,6 +20,11 @@ class RunsController < ApplicationController
   rescue_from Sidecar::Client::TransportError do
     render(json: { errors: [{ message: 'The Claude sidecar is unavailable; try again' }] }, status: :bad_gateway)
   end
+  rescue_from Git::WorktreeManager::GitError do
+    render(json: { errors: [{ message: 'Could not prepare the session worktree — is the target ' \
+                                       'repo a git repository? (set TARGET_REPO_PATH to a repo with a commit)' }] },
+           status: :unprocessable_content)
+  end
 
   # POST /api/sessions/:session_id/runs
   def create

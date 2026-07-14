@@ -101,18 +101,14 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - RAILS_INTERNAL_URL=${RAILS_INTERNAL_URL:-http://rails:3000}
-      # Claude / AWS auth passthrough — only-when-set (no app-owned credential):
-      - ANTHROPIC_API_KEY
-      - ANTHROPIC_AUTH_TOKEN
-      - CLAUDE_CODE_OAUTH_TOKEN
-      - CLAUDE_CODE_USE_BEDROCK
-      - CLAUDE_CODE_USE_VERTEX
-      - AWS_PROFILE
-      - AWS_REGION
-      # ANTHROPIC_MODEL is intentionally NOT a host passthrough — it comes from
-      # .env.local (env_file) so the SAME value is authoritative for rails too.
-      # (A host-shell passthrough here would override .env.local and re-introduce
-      # the rails/sidecar model mismatch.)
+      # Claude / AWS auth + config (ANTHROPIC_MODEL, CLAUDE_CODE_USE_BEDROCK/VERTEX,
+      # AWS_PROFILE/AWS_REGION, or ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN /
+      # CLAUDE_CODE_OAUTH_TOKEN) live in .env.local (the env_file above) — NOT as bare
+      # host-shell passthroughs. A bare `- VAR` here OVERRIDES env_file, and when the
+      # host shell doesn't export VAR it injects an EMPTY value, which silently
+      # unset CLAUDE_CODE_USE_BEDROCK (→ "Not logged in"). The actual secrets are
+      # supplied by the read-only ~/.claude + ~/.aws mounts below; only the
+      # selectors/config live in .env.local.
     expose:
       - "8787"
     volumes:

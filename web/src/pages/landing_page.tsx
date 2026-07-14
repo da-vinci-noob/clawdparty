@@ -1,34 +1,42 @@
 import { type FC, type FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { type CurrentParticipant, useParticipantStore } from "../stores/participant_store";
 
-// Join flow: exchange an invite token + display name for the signed httpOnly
-// clawd_uid cookie (set by the server), then route into the session. The cookie
-// is httpOnly — the client never reads it; it tracks "joined" from the response.
+type Mode = "join" | "create";
+
+// Landing: two bootstrap entry points, both unauthenticated on the trusted LAN.
+//  - Join:   invite token + display name → POST /api/participants
+//  - Create: session title + display name → POST /api/sessions (creator = owner)
+// Both return the participant + set the signed httpOnly clawd_uid cookie; the
+// client never reads the cookie, it tracks "who am I" from the response and
+// routes into the session. An invite link (?token=…) opens straight in Join mode.
 export const LandingPage: FC = () => {
   const navigate = useNavigate();
   const setCurrent = useParticipantStore((s) => s.setCurrent);
-  const [token, setToken] = useState("");
+  const [searchParams] = useSearchParams();
+
+  const [mode, setMode] = useState<Mode>("join");
+  const [token, setToken] = useState(() => searchParams.get("token") ?? "");
+  const [title, setTitle] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const onSubmit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  const submit = async (url: string, body: Record<string, string>, verb: string): Promise<void> => {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch("/api/participants", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ token, name }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as {
+        const parsed = (await res.json().catch(() => null)) as {
           errors?: { message: string }[];
         } | null;
-        setError(body?.errors?.[0]?.message ?? `Join failed (${res.status})`);
+        setError(parsed?.errors?.[0]?.message ?? `${verb} failed (${res.status})`);
         return;
       }
       const participant = (await res.json()) as CurrentParticipant;
@@ -41,37 +49,96 @@ export const LandingPage: FC = () => {
     }
   };
 
+  const onJoin = (e: FormEvent): void => {
+    e.preventDefault();
+    void submit("/api/participants", { token, name }, "Join");
+  };
+  const onCreate = (e: FormEvent): void => {
+    e.preventDefault();
+    void submit("/api/sessions", { title, name }, "Create");
+  };
+
   return (
     <main className="grid h-screen place-items-center bg-neutral-950 text-neutral-100">
-      <form onSubmit={onSubmit} data-testid="join-form" className="w-80 space-y-3">
-        <h1 className="text-lg font-semibold">Join a clawdparty session</h1>
-        <input
-          aria-label="Invite token"
-          placeholder="Invite token"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
-        />
-        <input
-          aria-label="Display name"
-          placeholder="Display name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-sky-600 px-2 py-1 disabled:opacity-50"
+      <div className="w-80 space-y-3">
+        <div
+          className="flex gap-1 rounded bg-neutral-900 p-1 text-sm"
+          data-testid="landing-mode-toggle"
         >
-          {busy ? "Joining…" : "Join"}
-        </button>
+          <button
+            type="button"
+            onClick={() => setMode("join")}
+            className={`flex-1 rounded px-2 py-1 ${mode === "join" ? "bg-sky-600" : "text-neutral-400"}`}
+          >
+            Join
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("create")}
+            className={`flex-1 rounded px-2 py-1 ${mode === "create" ? "bg-sky-600" : "text-neutral-400"}`}
+          >
+            Create
+          </button>
+        </div>
+
+        {mode === "join" ? (
+          <form onSubmit={onJoin} data-testid="join-form" className="space-y-3">
+            <h1 className="text-lg font-semibold">Join a clawdparty session</h1>
+            <input
+              aria-label="Invite token"
+              placeholder="Invite token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+            />
+            <input
+              aria-label="Display name"
+              placeholder="Display name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded bg-sky-600 px-2 py-1 disabled:opacity-50"
+            >
+              {busy ? "Joining…" : "Join"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onCreate} data-testid="create-form" className="space-y-3">
+            <h1 className="text-lg font-semibold">Create a clawdparty session</h1>
+            <input
+              aria-label="Session title"
+              placeholder="Session title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+            />
+            <input
+              aria-label="Display name"
+              placeholder="Display name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+            />
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full rounded bg-emerald-600 px-2 py-1 disabled:opacity-50"
+            >
+              {busy ? "Creating…" : "Create session"}
+            </button>
+          </form>
+        )}
+
         {error && (
           <p data-testid="join-error" className="text-sm text-red-400">
             {error}
           </p>
         )}
-      </form>
+      </div>
     </main>
   );
 };

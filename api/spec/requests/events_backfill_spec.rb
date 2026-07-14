@@ -13,8 +13,10 @@ RSpec.describe('GET /api/sessions/:session_id/events (backfill)') do
   end
 
   it 'returns 200 with an ordered envelope array of events with id > cursor' do
-    events = seed_events(3)
+    # Join FIRST so its participant_joined event has the lowest id (below the
+    # cursor), leaving the assertion about the seeded events unaffected.
     join_as(session, role: 'viewer')
+    events = seed_events(3)
 
     get("/api/sessions/#{session.id}/events", params: { after: events.first.id })
 
@@ -25,11 +27,12 @@ RSpec.describe('GET /api/sessions/:session_id/events (backfill)') do
     expect(response.parsed_body.first['session_id']).to(eq(session.id.to_s))
   end
 
-  it 'returns all events when no cursor is given' do
-    seed_events(2)
-    join_as(session)
+  it 'returns all events when no cursor is given (incl. the join event)' do
+    join_as(session) # emits one participant_joined
+    events = seed_events(2)
     get("/api/sessions/#{session.id}/events")
-    expect(response.parsed_body.size).to(eq(2))
+    expect(response.parsed_body.pluck('id')).to(include(*events.map(&:id)))
+    expect(response.parsed_body.size).to(eq(3)) # 2 seeded + participant_joined
   end
 
   it 'refuses cross-session access with 404 (not 403)' do

@@ -29,7 +29,16 @@ export const useParticipantStore = create<ParticipantStoreState>((set) => ({
 // Presentation-only capability check, mirroring the frozen 4-role matrix. The
 // server enforces; this only hides buttons.
 const MATRIX: Record<Role, Set<string>> = {
-  owner: new Set(["view", "chat", "manage_tasks", "run", "interrupt", "approve", "reject"]),
+  owner: new Set([
+    "view",
+    "chat",
+    "manage_tasks",
+    "run",
+    "interrupt",
+    "approve",
+    "reject",
+    "manage_invites",
+  ]),
   editor: new Set(["view", "chat", "manage_tasks", "run", "interrupt"]),
   reviewer: new Set(["view", "chat", "manage_tasks"]),
   viewer: new Set(["view", "chat"]),

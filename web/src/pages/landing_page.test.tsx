@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,9 +6,9 @@ import { server } from "../../test/msw_server";
 import { useParticipantStore } from "../stores/participant_store";
 import { LandingPage } from "./landing_page";
 
-function renderJoin() {
+function renderLanding(entry = "/") {
   return render(
-    <MemoryRouter initialEntries={["/"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route
@@ -20,15 +20,20 @@ function renderJoin() {
   );
 }
 
-async function fillAndJoin() {
-  fireEvent.change(screen.getByLabelText("Invite token"), { target: { value: "tok" } });
-  fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
-  fireEvent.click(screen.getByText("Join"));
+// Click the submit button INSIDE a form (the mode-toggle also has "Join"/"Create").
+function submitForm(testid: string) {
+  fireEvent.click(within(screen.getByTestId(testid)).getByRole("button"));
 }
 
-describe("LandingPage (join flow)", () => {
+describe("LandingPage — join flow", () => {
   beforeEach(() => useParticipantStore.getState().clear());
   afterEach(() => useParticipantStore.getState().clear());
+
+  async function fillAndJoin() {
+    fireEvent.change(screen.getByLabelText("Invite token"), { target: { value: "tok" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    submitForm("join-form");
+  }
 
   it("on success: stores the participant and routes into the session", async () => {
     server.use(
@@ -39,7 +44,7 @@ describe("LandingPage (join flow)", () => {
         ),
       ),
     );
-    renderJoin();
+    renderLanding();
     await fillAndJoin();
 
     await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
@@ -56,11 +61,59 @@ describe("LandingPage (join flow)", () => {
         HttpResponse.json({ errors: [{ message: "Not found" }] }, { status: 404 }),
       ),
     );
-    renderJoin();
+    renderLanding();
     await fillAndJoin();
 
     expect(await screen.findByTestId("join-error")).toHaveTextContent("Not found");
     expect(screen.queryByTestId("session-route")).not.toBeInTheDocument();
     expect(useParticipantStore.getState().current).toBeNull();
+  });
+
+  it("prefills the token from ?token= (invite links deep-link into join)", () => {
+    renderLanding("/?token=abc123");
+    expect(screen.getByLabelText("Invite token")).toHaveValue("abc123");
+  });
+});
+
+describe("LandingPage — create flow", () => {
+  beforeEach(() => useParticipantStore.getState().clear());
+  afterEach(() => useParticipantStore.getState().clear());
+
+  it("switches to create mode and creates a session, routing in as owner", async () => {
+    server.use(
+      http.post("/api/sessions", () =>
+        HttpResponse.json(
+          { id: "1", session_id: "7", role: "owner", name: "Alice" },
+          { status: 201 },
+        ),
+      ),
+    );
+    renderLanding();
+    fireEvent.click(within(screen.getByTestId("landing-mode-toggle")).getByText("Create"));
+
+    fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Ship it" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    submitForm("create-form");
+
+    await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
+    expect(useParticipantStore.getState().current).toMatchObject({
+      session_id: "7",
+      role: "owner",
+    });
+  });
+
+  it("surfaces a create error and stays on the landing screen", async () => {
+    server.use(
+      http.post("/api/sessions", () =>
+        HttpResponse.json({ errors: [{ message: "Title can't be blank" }] }, { status: 422 }),
+      ),
+    );
+    renderLanding();
+    fireEvent.click(within(screen.getByTestId("landing-mode-toggle")).getByText("Create"));
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    submitForm("create-form");
+
+    expect(await screen.findByTestId("join-error")).toHaveTextContent("Title can't be blank");
+    expect(screen.queryByTestId("session-route")).not.toBeInTheDocument();
   });
 });

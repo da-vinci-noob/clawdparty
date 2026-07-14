@@ -4,8 +4,10 @@ import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
 import { ChatPanel } from "../components/chat_panel";
 import { InterruptButton } from "../components/interrupt_button";
+import { InvitePanel } from "../components/invite_panel";
 import { ParticipantList } from "../components/participant_list";
 import { PromptComposer } from "../components/prompt_composer";
+import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 import { useSessionEvents } from "../hooks/use_session_events";
 
 // The full session workspace: live activity feed (center) + prompt composer and
@@ -16,6 +18,7 @@ import { useSessionEvents } from "../hooks/use_session_events";
 export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const status = useSessionEvents(sessionId ?? "");
+  useHydrateParticipant(sessionId ?? "");
 
   if (!sessionId) {
     return <p data-testid="session-placeholder">No session</p>;
@@ -42,7 +45,12 @@ export const SessionPage: FC = () => {
 
   return (
     <AppShell
-      sidebar={<ParticipantList />}
+      sidebar={
+        <>
+          <ParticipantList />
+          <InvitePanel sessionId={sessionId} />
+        </>
+      }
       chat={<ChatPanel sessionId={sessionId} />}
       footer={
         <div className="flex items-center gap-2 border-t border-neutral-800 px-2 py-1">

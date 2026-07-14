@@ -352,6 +352,29 @@ export class Normalizer {
     return this.envelope("user_prompt", this.userActor(), { text }, nowMs);
   }
 
+  // Synthesized run_failed for a run that ERRORED without emitting a result (SDK
+  // crash / auth / connection). Without this the run never reaches a terminal
+  // state and Rails leaves it "active" forever (every next message 409s). The
+  // reason rides `stop_reason`; usage/cost are zero (no result to read them from).
+  runFailed(reason: string, nowMs: number = Date.now()): EventEnvelope {
+    return this.envelope(
+      "run_failed",
+      { kind: "system" },
+      {
+        stop_reason: reason.slice(0, TOOL_INPUT_SUMMARY_CAP),
+        api_error_status: null,
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+      nowMs,
+    );
+  }
+
   private userActor(): Actor {
     if (!this.ctx.requestedBy) {
       throw new Error("requestedBy is required to stamp a user actor");

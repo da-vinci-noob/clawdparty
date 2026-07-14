@@ -14,7 +14,14 @@ Rails.application.routes.draw do
     # Join a session via an invite token → signed clawd_uid cookie.
     resources :participants, only: :create
 
-    resources :sessions, only: [] do
+    # Create a session (bootstrap entry: unauthenticated on the trusted LAN, like
+    # join). The creator becomes the owner + gets the clawd_uid cookie.
+    resources :sessions, only: :create do
+      # Who am I in this session (re-hydrate the client from the clawd_uid cookie
+      # after a refresh): GET /api/sessions/:session_id/participant
+      get 'participant', to: 'participants#show'
+      # Mint a role-scoped invite token (owner only): POST /api/sessions/:session_id/invites
+      resources :invites, only: :create
       # Late-joiner backfill: GET /api/sessions/:session_id/events?after=<cursor>
       resources :events, only: :index
       # Run start: POST /api/sessions/:session_id/runs

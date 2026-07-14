@@ -34,7 +34,7 @@ export const ParticipantList: FC = () => {
   const presence = useEventStore((s) => s.presenceByParticipant);
 
   const participants = useMemo(() => {
-    const list: { id: string; name: string }[] = [];
+    const list: { id: string; name: string; role: string }[] = [];
     const seen = new Set<string>();
     for (const e of durable) {
       if (e.type !== "participant_joined") {
@@ -43,7 +43,11 @@ export const ParticipantList: FC = () => {
       const p = e.payload as ParticipantJoinedPayload;
       if (p.participant_id && !seen.has(p.participant_id)) {
         seen.add(p.participant_id);
-        list.push({ id: p.participant_id, name: p.name ?? `#${p.participant_id}` });
+        list.push({
+          id: p.participant_id,
+          name: p.name ?? `#${p.participant_id}`,
+          role: p.role ?? "",
+        });
       }
     }
     return list;
@@ -55,6 +59,7 @@ export const ParticipantList: FC = () => {
         <li key={p.id} className="flex items-center gap-2">
           <span className={presence.get(p.id) ? "text-emerald-400" : "text-neutral-600"}>●</span>
           <span>{p.name}</span>
+          {p.role && <span className="text-neutral-500">({p.role})</span>}
         </li>
       ))}
     </ul>

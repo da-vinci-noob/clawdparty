@@ -22,6 +22,14 @@ RSpec.describe('POST /api/participants (join)') do
     expect(response.headers['Set-Cookie']).not_to(include('secure'))
   end
 
+  it 'emits a participant_joined event carrying the name + invite role' do
+    _, raw = generate_invite(role: 'reviewer')
+    post('/api/participants', params: { token: raw, name: 'Bob' })
+    event = session.events.find_by(event_type: 'participant_joined')
+    expect(event).to(be_present)
+    expect(event.payload).to(include('name' => 'Bob', 'role' => 'reviewer'))
+  end
+
   it "ignores a client-supplied role param and uses the invite's role" do
     _, raw = generate_invite(role: 'viewer')
     post('/api/participants', params: { token: raw, name: 'Mallory', role: 'owner' })
