@@ -1,0 +1,3 @@
+/* Tailwind v4 — CSS-first, no PostCSS pipeline and no tailwind.config JS file.
+   The @tailwindcss/vite plugin compiles utilities from this single import. */
+@import "tailwindcss";

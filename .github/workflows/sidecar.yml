@@ -1,0 +1,38 @@
+name: sidecar
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "sidecar/**"
+      - "packages/**"
+      - ".github/workflows/sidecar.yml"
+
+jobs:
+  sidecar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin Node 24 even though the host runs Node 25, to avoid runtime drift.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The contracts package is a file: dependency; install resolves the symlink.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Biome
+        run: npx @biomejs/biome@1.9.4 check .
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Vitest
+        run: npx vitest run

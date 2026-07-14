@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# bin/rails — run a Rails command INSIDE the Docker stack. Passes all args
+# straight through, so it covers console, runner, db tasks, routes, etc.:
+#   bin/rails console
+#   bin/rails runner 'puts Event.count'
+#   bin/rails db:migrate
+#   bin/rails routes
+#
+# If the `rails` service is already up (bin/start), it reuses that container via
+# `exec` (fast, shares the running app's env/DB). Otherwise it brings up postgres
+# and runs a one-off `--rm` container. Either way it allocates a TTY so the
+# console is interactive.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# Use a TTY only when this shell has one (so CI / piped use still works).
+tty_flags=()
+[ -t 0 ] && [ -t 1 ] && tty_flags=(-it)
+
+# Reuse the running rails container if present; else a one-off needs postgres up.
+if docker compose ps --status running --services 2>/dev/null | grep -qx rails; then
+  exec docker compose exec ${tty_flags[@]+"${tty_flags[@]}"} rails bin/rails "$@"
+fi
+
+docker compose up -d postgres >/dev/null
+exec docker compose run --rm ${tty_flags[@]+"${tty_flags[@]}"} rails bin/rails "$@"

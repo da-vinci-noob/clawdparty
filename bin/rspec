@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bin/rspec — run the api/ RSpec suite INSIDE the Docker stack.
+#
+# Uses a one-off `rails` container (same image, source bind-mount, compose
+# network) with RAILS_ENV=test so specs hit the `postgres` service, prepares the
+# test databases, then runs RSpec. Any args are passed straight through, e.g.:
+#   bin/rspec                                  # whole suite
+#   bin/rspec spec/models/event_spec.rb        # one file
+#   bin/rspec spec/requests -e "404"           # a path + filter
+#
+# If the postgres service is already up (via bin/start), this reuses it; the
+# --rm one-off container does not need rails/jobs running.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# Ensure postgres is available on the compose network for the test run.
+docker compose up -d postgres >/dev/null
+
+exec docker compose run --rm \
+  -e RAILS_ENV=test \
+  rails \
+  bash -lc 'bundle check || bundle install; bin/rails db:prepare >/dev/null; bundle exec rspec "$@"' _ "$@"
