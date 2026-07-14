@@ -59,4 +59,21 @@ RSpec.describe(Runs::Finalize) do
     ingest('run_interrupted', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('completed_clean'))
   end
+
+  describe 'chat-mode session (no changeset → never awaiting_review)' do
+    let(:session) { create(:session, mode: 'chat') }
+
+    it 'run_finished → completed_clean even when a changeset_ready event exists' do
+      run.update!(status: 'running')
+      create(:event, session: session, ai_run: run, seq: 50, event_type: 'changeset_ready', actor_kind: 'system')
+      ingest('run_finished', seq: 1)
+      expect(run.reload.status).to(eq('completed_clean'))
+    end
+
+    it 'run_interrupted → completed_clean (no worktree to inspect)' do
+      run.update!(status: 'running')
+      ingest('run_interrupted', seq: 1, actor_kind: 'user')
+      expect(run.reload.status).to(eq('completed_clean'))
+    end
+  end
 end

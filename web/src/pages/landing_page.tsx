@@ -19,6 +19,9 @@ export const LandingPage: FC = () => {
   const [token, setToken] = useState(() => searchParams.get("token") ?? "");
   const [title, setTitle] = useState("");
   const [name, setName] = useState("");
+  // Session run mode + (chat-only) working directory for the create form.
+  const [sessionMode, setSessionMode] = useState<"review" | "chat">("review");
+  const [directory, setDirectory] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -55,7 +58,11 @@ export const LandingPage: FC = () => {
   };
   const onCreate = (e: FormEvent): void => {
     e.preventDefault();
-    void submit("/api/sessions", { title, name }, "Create");
+    const body: Record<string, string> = { title, name, mode: sessionMode };
+    if (sessionMode === "chat" && directory.trim()) {
+      body.repository_path = directory.trim();
+    }
+    void submit("/api/sessions", body, "Create");
   };
 
   return (
@@ -123,6 +130,24 @@ export const LandingPage: FC = () => {
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
             />
+            <select
+              aria-label="Session mode"
+              value={sessionMode}
+              onChange={(e) => setSessionMode(e.target.value as "review" | "chat")}
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+            >
+              <option value="review">Review (git diff + approve/reject)</option>
+              <option value="chat">Chat (run in a directory, no git)</option>
+            </select>
+            {sessionMode === "chat" && (
+              <input
+                aria-label="Working directory"
+                placeholder="Working directory (optional, defaults to repo root)"
+                value={directory}
+                onChange={(e) => setDirectory(e.target.value)}
+                className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1"
+              />
+            )}
             <button
               type="submit"
               disabled={busy}

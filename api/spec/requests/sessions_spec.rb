@@ -1,8 +1,20 @@
 # frozen_string_literal: true
 
 require 'rails_helper'
+require 'tmpdir'
 
 RSpec.describe('POST /api/sessions (create)') do
+  # The test env has no bind-mounted /repo, so stub the repo root to a real
+  # temp dir — session create realpath-resolves it as the default working dir.
+  around do |example|
+    Dir.mktmpdir('clawd-sessions') do |dir|
+      @repo = File.realpath(dir)
+      example.run
+    end
+  end
+
+  before { allow(Git::WorktreeManager).to(receive(:repo_root).and_return(@repo)) }
+
   it 'creates a session + owner participant + host user and issues the clawd_uid cookie' do
     expect do
       post('/api/sessions', params: { title: 'Ship the thing', name: 'Alice' })
@@ -32,6 +44,35 @@ RSpec.describe('POST /api/sessions (create)') do
     event = Session.last.events.find_by(event_type: 'participant_joined')
     expect(event).to(be_present)
     expect(event.payload).to(include('name' => 'Alice', 'role' => 'owner'))
+  end
+
+  describe 'run mode (review default | chat)' do
+    it 'defaults to review mode' do
+      post('/api/sessions', params: { title: 'T', name: 'A' })
+      expect(Session.last.mode).to(eq('review'))
+    end
+
+    it 'creates a chat session with the repo root as the default working dir' do
+      post('/api/sessions', params: { title: 'T', name: 'A', mode: 'chat' })
+      expect(response).to(have_http_status(:created))
+      session = Session.last
+      expect(session.mode).to(eq('chat'))
+      expect(session.repository_path).to(eq(File.realpath(Git::WorktreeManager.repo_root)))
+    end
+
+    it 'refuses an unknown mode with 422' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', mode: 'wild' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
+
+    it 'refuses a chat working directory that escapes the repo root with 422' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', mode: 'chat', repository_path: '../../etc' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
   end
 
   it 'refuses a blank title with 422 and creates nothing' do

@@ -102,6 +102,29 @@ describe("LandingPage — create flow", () => {
     });
   });
 
+  it("creates a chat-mode session with a working directory", async () => {
+    let captured: Record<string, unknown> | null = null;
+    server.use(
+      http.post("/api/sessions", async ({ request }) => {
+        captured = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { id: "2", session_id: "8", role: "owner", name: "Alice" },
+          { status: 201 },
+        );
+      }),
+    );
+    renderLanding();
+    fireEvent.click(within(screen.getByTestId("landing-mode-toggle")).getByText("Create"));
+    fireEvent.change(screen.getByLabelText("Session mode"), { target: { value: "chat" } });
+    fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Chatty" } });
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    fireEvent.change(screen.getByLabelText("Working directory"), { target: { value: "sub/dir" } });
+    submitForm("create-form");
+
+    await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
+    expect(captured).toMatchObject({ mode: "chat", repository_path: "sub/dir", title: "Chatty" });
+  });
+
   it("surfaces a create error and stays on the landing screen", async () => {
     server.use(
       http.post("/api/sessions", () =>

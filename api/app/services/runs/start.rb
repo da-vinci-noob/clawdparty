@@ -34,19 +34,31 @@ module Runs
       prior = @session.ai_runs.active.first
       raise(ActiveRunExists) if prior && !revise
 
-      worktree_path = @worktree.ensure_worktree!
-      raise(DirtyWorktree) if !revise && @worktree.dirty?
+      # `chat` sessions run Claude in a plain working directory — no worktree, no
+      # dirty check, no base_sha. `review` sessions use the git worktree.
+      cwd = @session.mode == 'chat' ? chat_cwd : review_worktree!(revise)
 
       claude_session_id = resume_session_id(revise)
       prior&.update!(status: 'superseded') if revise
 
-      create_and_post!(worktree_path, claude_session_id)
+      create_and_post!(cwd, claude_session_id)
     rescue ActiveRecord::RecordNotUnique
       # The partial unique index won the race: another active run exists.
       raise(ActiveRunExists)
     end
 
     private
+
+    def chat_cwd
+      @session.repository_path.presence || Git::WorktreeManager.repo_root
+    end
+
+    def review_worktree!(revise)
+      path = @worktree.ensure_worktree!
+      raise(DirtyWorktree) if !revise && @worktree.dirty?
+
+      path
+    end
 
     # Reject severs chaining: only a `revise` resumes the prior Claude session. A
     # fresh start (incl. one after a reject) passes NO claude_session_id, so a new
@@ -60,16 +72,16 @@ module Runs
     # If the sidecar refuses the start, drop the just-created run so no
     # queued/active run is left behind to block the session (queued counts toward
     # one-active-run); re-raise so the controller still surfaces the error.
-    def create_and_post!(worktree_path, claude_session_id)
-      run = create_run!(worktree_path)
-      status = post_to_sidecar(run, worktree_path, claude_session_id)
+    def create_and_post!(cwd, claude_session_id)
+      run = create_run!
+      status = post_to_sidecar(run, cwd, claude_session_id)
       Result.new(ai_run: run, sidecar_status: status)
     rescue Sidecar::Client::ActiveRunConflict, Sidecar::Client::TransportError
       run&.destroy
       raise
     end
 
-    def create_run!(_worktree_path)
+    def create_run!
       AiRun.create!(
         session: @session,
         status: 'queued',
@@ -79,11 +91,11 @@ module Runs
       )
     end
 
-    def post_to_sidecar(run, worktree_path, claude_session_id)
+    def post_to_sidecar(run, cwd, claude_session_id)
       payload = {
         run_id: run.id.to_s,
         session_id: @session.id.to_s,
-        repo_path: worktree_path,
+        repo_path: cwd,
         prompt: @prompt,
         requested_by: @requested_by.id.to_s,
         model: @model,
