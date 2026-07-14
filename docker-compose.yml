@@ -47,6 +47,10 @@ services:
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_USER: ${DATABASE_USER:-postgres}
       SIDECAR_URL: ${SIDECAR_URL:-http://sidecar:8787}
+      # In-container repo root == the host path (identical-path mount below), so
+      # git worktree metadata (absolute gitdir paths) is valid on BOTH host and
+      # container — GitHub Desktop / host `git worktree` can open the worktrees.
+      REPO_ROOT: ${TARGET_REPO_PATH:-/repo}
     volumes:
       - ./api:/app:delegated
       - bundle:/usr/local/bundle
@@ -54,7 +58,10 @@ services:
       # Rails.root.join("..","packages",...) resolves identically in-container
       # and on the host (fake-Claude replay reads the fixture + CONTRACT_VERSION).
       - ./packages:/packages:ro
-      - ${TARGET_REPO_PATH:-./repo}:/repo
+      # Target repo mounted at the IDENTICAL host path (not /repo) so worktree
+      # gitdir absolute paths resolve on the host too. TARGET_REPO_PATH must be
+      # an ABSOLUTE host path (the parent of your repos).
+      - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +80,7 @@ services:
       RAILS_ENV: ${RAILS_ENV:-development}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_USER: ${DATABASE_USER:-postgres}
+      REPO_ROOT: ${TARGET_REPO_PATH:-/repo}
     volumes:
       - ./api:/app:delegated
       - bundle:/usr/local/bundle
@@ -114,9 +122,11 @@ services:
     volumes:
       - ./sidecar:/app:delegated
       - sidecar_node_modules:/app/node_modules
-      # Target repo READ-WRITE at the identical path /repo (Claude edits the
-      # worktree; reject reverts it). Same path as rails so worktree gitdirs resolve.
-      - ${TARGET_REPO_PATH:-./repo}:/repo
+      # Target repo READ-WRITE, mounted at the IDENTICAL host path (Claude edits
+      # the worktree; reject reverts it). Same absolute path as the host + rails
+      # so worktree gitdir paths resolve everywhere and the run cwd (a host path
+      # from the run-start payload) is valid in-container.
+      - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
       # Host login. Targets the `node` user's home so `~/.claude` / `~/.aws`
       # resolve to the mounts. `~/.claude` is READ-WRITE: the Agent SDK writes
       # runtime dirs there (session-env/<id> per run, and the resume JSONL under
