@@ -2,6 +2,7 @@
 
 require 'rails_helper'
 require 'tmpdir'
+require 'fileutils'
 
 RSpec.describe('POST /api/sessions (create)') do
   # The test env has no bind-mounted /repo, so stub the repo root to a real
@@ -34,9 +35,10 @@ RSpec.describe('POST /api/sessions (create)') do
     expect(session.participants.sole.role).to(eq('owner'))
   end
 
-  it 'stores an optional repository_path when given' do
-    post('/api/sessions', params: { title: 'T', name: 'A', repository_path: '/repo' })
-    expect(Session.last.repository_path).to(eq('/repo'))
+  it 'stores an optional repository_path when given (resolved + contained)' do
+    FileUtils.mkdir_p(File.join(@repo, 'proj'))
+    post('/api/sessions', params: { title: 'T', name: 'A', repository_path: 'proj' })
+    expect(Session.last.repository_path).to(eq(File.join(@repo, 'proj')))
   end
 
   it 'emits a participant_joined event carrying the name + role (for client attribution)' do
@@ -72,6 +74,19 @@ RSpec.describe('POST /api/sessions (create)') do
         post('/api/sessions', params: { title: 'T', name: 'A', mode: 'chat', repository_path: '../../etc' })
       end.not_to(change(Session, :count))
       expect(response).to(have_http_status(:unprocessable_content))
+    end
+
+    it 'refuses a REVIEW working directory that escapes the repo root with 422 (contained for both modes)' do
+      expect do
+        post('/api/sessions', params: { title: 'T', name: 'A', repository_path: '../../etc' })
+      end.not_to(change(Session, :count))
+      expect(response).to(have_http_status(:unprocessable_content))
+    end
+
+    it 'defaults a blank review working directory to the resolved repo root' do
+      post('/api/sessions', params: { title: 'T', name: 'A', repository_path: '' })
+      expect(response).to(have_http_status(:created))
+      expect(Session.last.repository_path).to(eq(File.realpath(Git::WorktreeManager.repo_root)))
     end
   end
 

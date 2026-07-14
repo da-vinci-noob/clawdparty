@@ -26,6 +26,15 @@ module Git
 
     attr_reader :session, :repo_root
 
+    # The git repository the worktree is created FROM: the session's SELECTED
+    # repo (repository_path) when set, else the mount root. This is distinct from
+    # repo_root, which is only where the worktree working files are centralized
+    # (under the mount root, so the user's real repos are not littered with
+    # worktree checkouts — only a branch ref + registration land in the repo).
+    def repo_dir
+      session.repository_path.presence || repo_root
+    end
+
     def worktree_path
       File.join(repo_root, '.clawdparty', 'worktrees', "session-#{session.id}")
     end
@@ -34,11 +43,13 @@ module Git
       "clawd/session-#{session.id}"
     end
 
-    # Create the worktree (idempotent: reuse if it already exists) and return its path.
+    # Create the worktree (idempotent: reuse if it already exists) and return its
+    # path. Created FROM repo_dir (the selected repo) so review runs operate on
+    # the picked repository, not the mount root.
     def ensure_worktree!
       return worktree_path if worktree_exists?
 
-      run_git!('worktree', 'add', '-b', branch_name, worktree_path, 'HEAD', dir: repo_root)
+      run_git!('worktree', 'add', '-b', branch_name, worktree_path, 'HEAD', dir: repo_dir)
       worktree_path
     end
 
