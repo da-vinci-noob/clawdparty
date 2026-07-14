@@ -45,16 +45,14 @@ class DevSpaProxy
   # bytes to the upstream over the compose network. Dev-only (this middleware is
   # absent in production). Returns the hijack sentinel so the server writes nothing.
   def tunnel_websocket(env)
-    return hijack_unavailable unless env['rack.hijack?']
+    unless env['rack.hijack?']
+      return [502, { 'content-type' => 'text/plain' },
+              ['Bad Gateway: WebSocket tunnel requires rack.hijack (unavailable)']]
+    end
 
     env['rack.hijack'].call
     tunnel_to_upstream(env['rack.hijack_io'], Rack::Request.new(env))
     [-1, {}, []]
-  end
-
-  def hijack_unavailable
-    [502, { 'content-type' => 'text/plain' },
-     ['Bad Gateway: WebSocket tunnel requires rack.hijack (unavailable)']]
   end
 
   def tunnel_to_upstream(client, request)
@@ -63,7 +61,7 @@ class DevSpaProxy
     [Thread.new { copy_until_eof(client, upstream) },
      Thread.new { copy_until_eof(upstream, client) }].each(&:join)
   rescue Errno::ECONNREFUSED, SocketError, Errno::EHOSTUNREACH, Errno::ETIMEDOUT
-    write_bad_gateway(client)
+    nil # vite upstream down: the hijacked ws socket is closed below, HMR fails cleanly
   ensure
     close_socket(upstream)
     close_socket(client)
@@ -88,19 +86,7 @@ class DevSpaProxy
   rescue IOError, Errno::EPIPE, Errno::ECONNRESET
     nil
   ensure
-    close_write(to)
-  end
-
-  def write_bad_gateway(client)
-    client&.write("HTTP/1.1 502 Bad Gateway\r\n\r\n")
-  rescue IOError, Errno::EPIPE, Errno::ECONNRESET
-    nil
-  end
-
-  def close_write(socket)
-    socket.close_write
-  rescue IOError, Errno::EPIPE
-    nil
+    close_socket(to) # closing propagates EOF to the other pump direction
   end
 
   def close_socket(socket)
