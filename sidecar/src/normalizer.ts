@@ -131,6 +131,10 @@ export class Normalizer {
   private seq = 0;
   // Track tool_use id -> name so a tool_result can be classified (Bash → terminal).
   private readonly toolNames = new Map<string, string>();
+  // Accumulate streamed thinking text per block key. The real SDK's finalized
+  // thinking block is signature-only (thinking: ""), so the durable ai_thinking
+  // must reconstruct its text from the thinking_deltas seen for that block.
+  private readonly thinkingByBlock = new Map<string, string>();
 
   constructor(private readonly ctx: NormalizeContext) {}
 
@@ -201,6 +205,10 @@ export class Normalizer {
       return [this.textDelta(block, ev.delta.text ?? "", nowMs)];
     }
     if (ev.delta.type === "thinking_delta") {
+      this.thinkingByBlock.set(
+        block,
+        (this.thinkingByBlock.get(block) ?? "") + (ev.delta.thinking ?? ""),
+      );
       return [this.thinkingDelta(block, ev.delta.thinking ?? "", nowMs)];
     }
     return [];
@@ -237,13 +245,14 @@ export class Normalizer {
           ),
         );
       } else if (block.type === "thinking") {
+        // The finalized block is usually signature-only (thinking: ""); fall back
+        // to the accumulated thinking_deltas so the durable event carries the text.
+        const text =
+          block.thinking && block.thinking.length > 0
+            ? block.thinking
+            : (this.thinkingByBlock.get(blockKey) ?? "");
         out.push(
-          this.envelope(
-            "ai_thinking",
-            { kind: "claude" },
-            { block: blockKey, text: block.thinking ?? "" },
-            nowMs,
-          ),
+          this.envelope("ai_thinking", { kind: "claude" }, { block: blockKey, text }, nowMs),
         );
       } else if (block.type === "tool_use") {
         const id = block.id ?? "";
