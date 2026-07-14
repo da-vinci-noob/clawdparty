@@ -1,0 +1,15 @@
+{"id":1,"session_id":"sess_demo","ai_run_id":null,"seq":null,"type":"participant_joined","actor":{"kind":"user","id":"part_alice"},"ts":"2026-06-28T20:10:00.000Z","payload":{}}
+{"id":2,"session_id":"sess_demo","ai_run_id":null,"seq":null,"type":"chat_message","actor":{"kind":"user","id":"part_alice"},"ts":"2026-06-28T20:10:30.000Z","payload":{}}
+{"id":3,"session_id":"sess_demo","ai_run_id":"run_demo","seq":1,"type":"run_started","actor":{"kind":"user","id":"part_alice"},"ts":"2026-06-28T20:11:00.000Z","payload":{}}
+{"id":null,"session_id":"sess_demo","ai_run_id":"run_demo","seq":null,"type":"ai_text_delta","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:01.100Z","payload":{}}
+{"id":null,"session_id":"sess_demo","ai_run_id":"run_demo","seq":null,"type":"ai_text_delta","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:01.250Z","payload":{}}
+{"id":4,"session_id":"sess_demo","ai_run_id":"run_demo","seq":2,"type":"ai_text","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:01.400Z","payload":{}}
+{"id":5,"session_id":"sess_demo","ai_run_id":"run_demo","seq":3,"type":"ai_thinking","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:02.000Z","payload":{}}
+{"id":6,"session_id":"sess_demo","ai_run_id":"run_demo","seq":4,"type":"tool_started","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:03.000Z","payload":{}}
+{"id":7,"session_id":"sess_demo","ai_run_id":"run_demo","seq":5,"type":"terminal_output","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:03.500Z","payload":{}}
+{"id":8,"session_id":"sess_demo","ai_run_id":"run_demo","seq":6,"type":"tool_finished","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:04.000Z","payload":{}}
+{"id":9,"session_id":"sess_demo","ai_run_id":"run_demo","seq":7,"type":"file_changed","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:04.500Z","payload":{}}
+{"id":10,"session_id":"sess_demo","ai_run_id":"run_demo","seq":8,"type":"ai_text","actor":{"kind":"claude"},"ts":"2026-06-28T20:11:05.000Z","payload":{}}
+{"id":11,"session_id":"sess_demo","ai_run_id":"run_demo","seq":9,"type":"changeset_ready","actor":{"kind":"system"},"ts":"2026-06-28T20:11:06.000Z","payload":{}}
+{"id":12,"session_id":"sess_demo","ai_run_id":"run_demo","seq":10,"type":"run_finished","actor":{"kind":"system"},"ts":"2026-06-28T20:11:06.500Z","payload":{}}
+{"id":null,"session_id":"sess_demo","ai_run_id":null,"seq":null,"type":"presence_changed","actor":{"kind":"user","id":"part_alice"},"ts":"2026-06-28T20:11:07.000Z","payload":{}}

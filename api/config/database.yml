@@ -1,0 +1,52 @@
+# clawdparty uses three logical PostgreSQL databases — primary, queue, cable —
+# so Solid Queue and Solid Cable keep their write volume off the primary and no
+# Redis is needed. Connection coordinates come from env (DATABASE_HOST/USER/PORT)
+# so the same config works on the host and inside the Docker `rails`/`jobs`
+# containers (where DATABASE_HOST=postgres). No password under trust auth.
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  host: <%= ENV.fetch("DATABASE_HOST", "localhost") %>
+  port: <%= ENV.fetch("DATABASE_PORT", 5432) %>
+  username: <%= ENV.fetch("DATABASE_USER", "postgres") %>
+  password: <%= ENV.fetch("DATABASE_PASSWORD", nil) %>
+
+development:
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("DATABASE_NAME", "clawdparty_development") %>
+  queue:
+    <<: *default
+    database: <%= ENV.fetch("QUEUE_DATABASE_NAME", "clawdparty_development_queue") %>
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: <%= ENV.fetch("CABLE_DATABASE_NAME", "clawdparty_development_cable") %>
+    migrations_paths: db/cable_migrate
+
+test:
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("DATABASE_NAME", "clawdparty_test") %>
+  queue:
+    <<: *default
+    database: <%= ENV.fetch("QUEUE_DATABASE_NAME", "clawdparty_test_queue") %>
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: <%= ENV.fetch("CABLE_DATABASE_NAME", "clawdparty_test_cable") %>
+    migrations_paths: db/cable_migrate
+
+production:
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("DATABASE_NAME", "clawdparty_production") %>
+  queue:
+    <<: *default
+    database: <%= ENV.fetch("QUEUE_DATABASE_NAME", "clawdparty_production_queue") %>
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: <%= ENV.fetch("CABLE_DATABASE_NAME", "clawdparty_production_cable") %>
+    migrations_paths: db/cable_migrate

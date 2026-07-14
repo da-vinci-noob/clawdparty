@@ -1,0 +1,25 @@
+{
+  "name": "@clawdparty/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frozen clawdparty interface contracts: event envelope, type taxonomy, and the sample_run.jsonl executable fixture. Imported by sidecar/ and web/.",
+  "exports": {
+    ".": {
+      "types": "./src/events.ts",
+      "default": "./src/events.ts"
+    }
+  },
+  "files": ["src", "fixtures"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

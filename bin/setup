@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# bin/setup — one-time host prep for the clawdparty dev stack.
+#
+# Idempotent. Run once on a fresh checkout (and safe to re-run):
+#   1. generate SIDECAR_SHARED_SECRET into .env.local ONLY if absent (never clobber),
+#   2. ensure host ~/.claude and ~/.aws exist so Docker does not silently create
+#      them root-owned on first bind-mount.
+#
+# It does NOT create databases — that happens in the rails container entrypoint,
+# because no postgres container exists yet when this runs on the host.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+env_local="${repo_root}/.env.local"
+
+# --- 1. SIDECAR_SHARED_SECRET (generate only if absent) --------------------
+generate_secret() {
+  # 48 hex chars of CSPRNG randomness; openssl is present on macOS + the images.
+  openssl rand -hex 24
+}
+
+ensure_secret() {
+  if [[ -f "${env_local}" ]] && grep -qE '^SIDECAR_SHARED_SECRET=.+' "${env_local}"; then
+    echo "✓ SIDECAR_SHARED_SECRET already present in .env.local — keeping it."
+    return
+  fi
+
+  local secret
+  secret="$(generate_secret)"
+
+  if [[ -f "${env_local}" ]]; then
+    # File exists but the secret is missing or empty: append/replace the line.
+    if grep -qE '^SIDECAR_SHARED_SECRET=' "${env_local}"; then
+      # Replace an empty assignment in place (portable: rewrite via temp file).
+      local tmp
+      tmp="$(mktemp)"
+      sed "s|^SIDECAR_SHARED_SECRET=.*|SIDECAR_SHARED_SECRET=${secret}|" "${env_local}" >"${tmp}"
+      mv "${tmp}" "${env_local}"
+    else
+      printf '\nSIDECAR_SHARED_SECRET=%s\n' "${secret}" >>"${env_local}"
+    fi
+  else
+    printf 'SIDECAR_SHARED_SECRET=%s\n' "${secret}" >"${env_local}"
+  fi
+  echo "✓ Generated SIDECAR_SHARED_SECRET into .env.local"
+}
+
+# --- 2. Host credential directories (create empty if absent) ---------------
+ensure_credential_dirs() {
+  local d
+  for d in "${HOME}/.claude" "${HOME}/.aws"; do
+    if [[ -d "${d}" ]]; then
+      echo "✓ ${d} exists"
+    else
+      mkdir -p "${d}"
+      echo "✓ Created empty host-owned ${d} (bind-mount source; avoids root-owned auto-create)"
+    fi
+  done
+}
+
+ensure_secret
+ensure_credential_dirs
+
+echo
+echo "Setup complete. Next: bin/start"
