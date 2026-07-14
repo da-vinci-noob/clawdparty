@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **clawdparty** is a real-time collaborative Claude Code session server: any number of developers join a browser session and watch/guide Claude Code working live on a repository hosted on one Mac. It provides shared chat, a live Claude activity stream, file/diff/terminal viewers, and a human approval flow for Claude's changes. The host machine runs everything (Rails + sidecar + repo); **everyone — including the host — interacts only through the browser.** The web session IS the interface to Claude; nobody drives it from a terminal.
 
-**Current state: this is a greenfield repo. The plan exists; the code largely does not.** As of now the only real content is `docs/PLAN.md` (the authoritative design), this file, `.gitignore`, and the OpenSpec scaffolding under `.claude/` and `openspec/`. The `api/`, `sidecar/`, `web/`, `packages/`, and `docs/contracts/` directories described below are the *target* layout from the plan and do not exist yet — create them as the work lands. **`docs/PLAN.md` is the source of truth** for every architectural decision; when this file and the plan disagree, the plan wins (and fix this file).
+**Current state: the MVP is implemented and merged to `main`.** The `api/`, `sidecar/`, `web/`, `packages/`, `docker/`, and `docs/contracts/` directories described below are real and working. The whole core loop ships — session create/join, chat, the live activity stream, interrupt, and diff review + approve (commit) / reject (revert) — plus the supporting features: no-git chat mode, the directory picker + per-repo review worktrees, and live-streaming text/thinking. **`docs/PLAN.md` is the authoritative design** and `docs/contracts/` holds the frozen interface contracts; the per-capability **living spec is under `openspec/specs/`** (promoted from the changes now archived in `openspec/changes/archive/`). When this file and the plan disagree, the plan wins (and fix this file).
 
 ## Architecture at a glance
 
@@ -82,7 +82,7 @@ Three contracts (`docs/contracts/` + `packages/contracts/`) are the seams that l
 
 ## Commands & toolchain
 
-This repo predates its build files — these are the intended commands (per the plan); create the wiring as you go.
+The build files + wiring are all in place — these are the project's working commands.
 
 - **Setup:** `bin/setup` (generates `SIDECAR_SHARED_SECRET`, prepares env; the Postgres DBs are created by the rails container entrypoint, gated on postgres health).
 - **Run the stack:** `bin/start` (= `docker compose build && docker compose up`) — brings up the `rails`, `sidecar`, `jobs` (Solid Queue), `postgres`, and (dev) `vite` containers. Each process is its own compose service; the sidecar is a sibling service with its own restart policy, **not** a child of Rails. Source is bind-mounted (`:delegated`); gems/node_modules live in named volumes; the sidecar read-only binds host `~/.claude` + `~/.aws` (credentials) and inherits the host's Claude/AWS auth env (so it uses the dev's existing login — API key, subscription/enterprise OAuth, or Bedrock — with no app-owned key). The **target repo is bind-mounted read-write** (Claude edits the worktree; reject reverts it) — only the credential mounts are read-only.
@@ -102,7 +102,7 @@ Standard Rails/React patterns chosen to keep a small MVP simple — match these:
 
 ## OpenSpec workflow
 
-Non-trivial changes are designed via OpenSpec before implementation (schema `spec-driven`, config in `openspec/config.yaml` — currently no changes exist). Slash commands (defined in `.claude/commands/opsx/*.md`, backed by the `openspec-*` skills):
+Non-trivial changes are designed via OpenSpec before implementation (schema `spec-driven`, config in `openspec/config.yaml`). The MVP's changes are archived under `openspec/changes/archive/`, and the living per-capability spec is in `openspec/specs/` (run `openspec list --specs`). Slash commands (defined in `.claude/commands/opsx/*.md`, backed by the `openspec-*` skills):
 
 - `/opsx:explore` — think through a problem before committing to a change.
 - `/opsx:propose <name-or-description>` — scaffold `openspec/changes/<name>/` and generate proposal → design → tasks → specs.
