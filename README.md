@@ -71,7 +71,13 @@ bin/setup        # generates SIDECAR_SHARED_SECRET, prepares env
 bin/start        # docker compose build + up: Rails (Puma), the sidecar, Solid Queue, Postgres, and Vite
 ```
 
-Then open the app and create a session pointed at a repo on the host machine.
+**Point it at your repos.** `TARGET_REPO_PATH` is the **absolute** host directory Claude is allowed to work in — set it to the **parent folder of your repos** so the in-app folder picker can browse them all. It's bind-mounted at the *identical* path inside the containers, so git worktrees stay valid on the host too (openable in your editor / GitHub Desktop). Set it in `.env.local` before `bin/start`:
+
+```bash
+TARGET_REPO_PATH=/Users/you/dev     # absolute; the parent of the repos you want to work on
+```
+
+Then open `http://localhost:3000` (or `http://<host>.local:3000` from another machine) and create a session — see **[Using a session](#using-a-session)** below.
 
 ### Joining from another machine (same LAN)
 
@@ -82,6 +88,28 @@ http://<host>.local:3000
 ```
 
 Open a session, generate an invite link for the role you want to grant, share it, and the invitee picks a display name to join. (Remote access via Tailscale is a planned future phase.)
+
+## Using a session
+
+1. **Create a session.** On the landing page, enter a title + your display name, choose a **mode**, and pick the **working directory** with the folder browser (it lists the git-repo folders under `TARGET_REPO_PATH`):
+   - **Review mode** — Claude works in an isolated **git worktree** of the repo you pick; its changes are held for review and approve/reject. Pick a folder that *is* a git repo.
+   - **Chat mode** — Claude runs directly in the chosen folder — no worktree, no diff/approval. Good for exploring, or working in a non-git directory.
+2. **Invite your team.** As owner, mint a **role-scoped invite link** (owner / editor / reviewer / viewer) and share it. The invitee opens it, picks a display name, and joins the same live session. Roles are enforced server-side — the UI just hides what a role can't do.
+3. **Drive Claude.** Type a prompt and **Run**. The activity feed streams Claude's text, thinking, tool calls, and terminal output live. Send **mid-run follow-ups**, or **Interrupt** to stop cleanly. Chat is always available in the sidebar for coordination.
+4. **Review & decide (review mode).** When a run finishes with changes, the **diff appears for everyone**. The owner then:
+   - **Approve** → commits the changeset onto the session branch (`clawd/session-<id>`) and leaves a clean tree for the next run,
+   - **Reject** → reverts the worktree (`git reset --hard && git clean -fd`), or
+   - **Revise** → send a follow-up that keeps the changes and continues (resuming Claude's session).
+5. **Iterate.** Each run's diff is incremental from the last approval. Your **main checkout is never touched** — everything lands in the per-session worktree under `<repo>/.clawdparty/worktrees/`.
+
+### Roles
+
+| Role | Can do |
+|---|---|
+| **owner** | Everything: run / interrupt, **approve / reject**, change the working directory, mint invites |
+| **editor** | Run Claude, follow-ups, interrupt, revise, chat |
+| **reviewer** | View the session + diffs, chat — no running Claude |
+| **viewer** | Watch + chat only |
 
 ## Repo layout
 
@@ -106,6 +134,14 @@ clawdparty/
 - **CI:** three independent jobs — `api` (RuboCop + RSpec), `sidecar` (Biome + tsc + Vitest), `web` (Biome + tsc + Vitest).
 
 Larger changes are designed with [OpenSpec](https://github.com/) first — see the `/opsx:*` slash commands and `openspec/`.
+
+## Troubleshooting
+
+- **`Worktree is dirty; cannot start a fresh run`** — a review changeset from a prior run is still pending. Approve, reject, or revise it first (a fresh run needs a clean tree).
+- **`Could not prepare the session worktree — is the target repo a git repository?`** — the folder you picked for a **review** session isn't a git repo. Pick a git repo, or use **chat mode**.
+- **Empty "Thinking" block on Amazon Bedrock** — Bedrock returns *encrypted* (signature-only) extended thinking, so there's no text to render (Claude's answer text still streams normally). A direct **API key** or **subscription/OAuth** login surfaces readable thinking.
+- **A sidecar code change didn't take effect** — the sidecar runs `tsx` without watch; reload it with `docker compose restart sidecar` (only affects new runs).
+- **Not logged in / auth errors** — make sure the host login the sidecar inherits is fresh: `aws sso login` for Bedrock, or `claude setup-token` + exported `CLAUDE_CODE_OAUTH_TOKEN` for a macOS subscription/enterprise login.
 
 ## Security model (MVP)
 
