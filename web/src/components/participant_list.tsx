@@ -43,7 +43,11 @@ export const ParticipantList: FC = () => {
       const p = e.payload as ParticipantJoinedPayload;
       if (p.participant_id && !seen.has(p.participant_id)) {
         seen.add(p.participant_id);
-        list.push({ id: p.participant_id, name: p.name ?? `#${p.participant_id}`, role: p.role ?? "" });
+        list.push({
+          id: p.participant_id,
+          name: p.name ?? `#${p.participant_id}`,
+          role: p.role ?? "",
+        });
       }
     }
     return list;

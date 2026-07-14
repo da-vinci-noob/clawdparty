@@ -12,18 +12,26 @@ describe("useHydrateParticipant", () => {
   it("hydrates the store from the server when empty (post-refresh)", async () => {
     server.use(
       http.get("/api/sessions/:id/participant", () =>
-        HttpResponse.json({ id: "3", session_id: "42", role: "owner", name: "Alice" }, { status: 200 }),
+        HttpResponse.json(
+          { id: "3", session_id: "42", role: "owner", name: "Alice" },
+          { status: 200 },
+        ),
       ),
     );
     renderHook(() => useHydrateParticipant("42"));
 
     await waitFor(() =>
-      expect(useParticipantStore.getState().current).toMatchObject({ role: "owner", session_id: "42" }),
+      expect(useParticipantStore.getState().current).toMatchObject({
+        role: "owner",
+        session_id: "42",
+      }),
     );
   });
 
   it("does not refetch when the store already has this session's participant", async () => {
-    useParticipantStore.getState().setCurrent({ id: "1", session_id: "42", role: "editor", name: "Me" });
+    useParticipantStore
+      .getState()
+      .setCurrent({ id: "1", session_id: "42", role: "editor", name: "Me" });
     const spy = vi.fn(() => HttpResponse.json({ id: "x" }, { status: 200 }));
     server.use(http.get("/api/sessions/:id/participant", spy));
 
