@@ -63,4 +63,23 @@ RSpec.describe(Git::Diff) do
   it 'returns the run-recorded base_sha' do
     expect(diff.call.base_sha).to(eq('recorded-at-start'))
   end
+
+  it 'does not mutate the worktree real index (untracked file not left in the index)' do
+    File.write(File.join(@wt, 'fresh.rb'), "a\n")
+    diff.call
+    tracked, _e, _s = Open3.capture3('git', '-C', @wt, 'ls-files')
+    expect(tracked.split("\n")).not_to(include('fresh.rb'))
+  end
+
+  it 'still computes the diff when a stale index.lock exists on the worktree' do
+    File.write(File.join(@wt, 'fresh.rb'), "a\n")
+    out, _e, _s = Open3.capture3('git', '-C', @wt, 'rev-parse', '--git-path', 'index.lock')
+    lock = out.strip
+    lock = File.expand_path(lock, @wt) unless lock.start_with?('/')
+    FileUtils.touch(lock)
+
+    result = nil
+    expect { result = diff.call }.not_to(raise_error)
+    expect(result.files.map(&:path)).to(include('fresh.rb'))
+  end
 end

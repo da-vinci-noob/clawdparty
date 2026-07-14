@@ -22,6 +22,10 @@ RSpec.describe(Runs::Finalize) do
     )
   end
 
+  def changeset_ready_count
+    run.events.where(event_type: 'changeset_ready').count
+  end
+
   it "transitions queued → running on the sidecar's run_started" do
     ingest('run_started', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('running'))
@@ -44,24 +48,28 @@ RSpec.describe(Runs::Finalize) do
     expect(run.reload.status).to(eq('failed'))
   end
 
-  it 'transitions to awaiting_review on run_finished when a changeset is ready' do
+  it 'run_finished → awaiting_review + appends changeset_ready when the worktree is dirty' do
     run.update!(status: 'running')
-    create(:event, session: session, ai_run: run, seq: 50, event_type: 'changeset_ready', actor_kind: 'system')
+    allow_any_instance_of(Git::WorktreeManager).to(receive(:dirty?).and_return(true))
     ingest('run_finished', seq: 1)
     expect(run.reload.status).to(eq('awaiting_review'))
+    expect(changeset_ready_count).to(eq(1))
   end
 
-  it 'transitions to completed_clean on run_finished with no changeset' do
+  it 'run_finished → completed_clean + no changeset_ready when the worktree is clean' do
     run.update!(status: 'running')
+    allow_any_instance_of(Git::WorktreeManager).to(receive(:dirty?).and_return(false))
     ingest('run_finished', seq: 1)
     expect(run.reload.status).to(eq('completed_clean'))
+    expect(changeset_ready_count).to(eq(0))
   end
 
-  it 'run_interrupted → awaiting_review when the worktree is dirty' do
+  it 'run_interrupted → awaiting_review + appends changeset_ready when the worktree is dirty' do
     run.update!(status: 'running')
     allow_any_instance_of(Git::WorktreeManager).to(receive(:dirty?).and_return(true))
     ingest('run_interrupted', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('awaiting_review'))
+    expect(changeset_ready_count).to(eq(1))
   end
 
   it 'run_interrupted → completed_clean when the worktree is clean' do
@@ -69,22 +77,33 @@ RSpec.describe(Runs::Finalize) do
     allow_any_instance_of(Git::WorktreeManager).to(receive(:dirty?).and_return(false))
     ingest('run_interrupted', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('completed_clean'))
+    expect(changeset_ready_count).to(eq(0))
+  end
+
+  it 'appends changeset_ready only once when a run is already awaiting_review' do
+    run.update!(status: 'awaiting_review')
+    create(:event, session: session, ai_run: run, seq: 5, event_type: 'changeset_ready', actor_kind: 'system')
+    allow_any_instance_of(Git::WorktreeManager).to(receive(:dirty?).and_return(true))
+    ingest('run_finished', seq: 10)
+    expect(run.reload.status).to(eq('awaiting_review'))
+    expect(changeset_ready_count).to(eq(1))
   end
 
   describe 'chat-mode session (no changeset → never awaiting_review)' do
     let(:session) { create(:session, mode: 'chat') }
 
-    it 'run_finished → completed_clean even when a changeset_ready event exists' do
+    it 'run_finished → completed_clean with no changeset_ready (dirtiness is not consulted)' do
       run.update!(status: 'running')
-      create(:event, session: session, ai_run: run, seq: 50, event_type: 'changeset_ready', actor_kind: 'system')
       ingest('run_finished', seq: 1)
       expect(run.reload.status).to(eq('completed_clean'))
+      expect(changeset_ready_count).to(eq(0))
     end
 
     it 'run_interrupted → completed_clean (no worktree to inspect)' do
       run.update!(status: 'running')
       ingest('run_interrupted', seq: 1, actor_kind: 'user')
       expect(run.reload.status).to(eq('completed_clean'))
+      expect(changeset_ready_count).to(eq(0))
     end
   end
 end

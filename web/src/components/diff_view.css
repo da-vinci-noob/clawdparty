@@ -1,0 +1,40 @@
+/* Dark-theme overrides for react-diff-view (its bundled index.css is light-theme:
+ * light-green/-red row backgrounds that leave the app's light text invisible).
+ * Imported AFTER the library CSS so equal-specificity rules win. */
+.diff {
+  background: transparent;
+  color: #d4d4d8;
+}
+
+.diff-gutter {
+  color: #6b7280;
+  background: transparent;
+}
+
+.diff-code {
+  color: #d4d4d8;
+}
+
+/* Added lines: dark-green tint + readable text. */
+.diff-gutter-insert {
+  background-color: rgba(46, 160, 67, 0.28);
+}
+.diff-code-insert {
+  background-color: rgba(46, 160, 67, 0.16);
+}
+.diff-code-insert .diff-code-edit {
+  background-color: rgba(46, 160, 67, 0.45);
+  color: #e6edf3;
+}
+
+/* Removed lines: dark-red tint + readable text. */
+.diff-gutter-delete {
+  background-color: rgba(248, 81, 73, 0.28);
+}
+.diff-code-delete {
+  background-color: rgba(248, 81, 73, 0.16);
+}
+.diff-code-delete .diff-code-edit {
+  background-color: rgba(248, 81, 73, 0.45);
+  color: #e6edf3;
+}

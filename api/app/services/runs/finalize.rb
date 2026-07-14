@@ -7,9 +7,12 @@ module Runs
   # run-lifecycle event persists.
   #
   #   run_started     → running         (queued → running)
-  #   run_finished    → completed_clean (clean tree) | awaiting_review (changeset ready)
+  #   run_finished    → completed_clean (clean tree) | awaiting_review (dirty tree)
   #   run_failed      → failed
   #   run_interrupted → awaiting_review (dirty tree) | completed_clean (clean)
+  #
+  # Entering awaiting_review (from finish OR interrupt) also appends a
+  # changeset_ready event so the feed marks the reviewable changeset.
   LIFECYCLE_TYPES = %w[run_started run_finished run_failed run_interrupted changeset_ready].freeze
 
   class Finalize
@@ -31,11 +34,11 @@ module Runs
       when 'run_started'
         finalize_run_started(run)
       when 'run_finished'
-        run.update!(status: finished_status(run))
+        apply_status(run, finished_status(run))
       when 'run_failed'
         run.update!(status: 'failed')
       when 'run_interrupted'
-        run.update!(status: interrupted_status(run))
+        apply_status(run, interrupted_status(run))
       when 'changeset_ready'
         run.update!(status: 'awaiting_review')
       end
@@ -54,23 +57,45 @@ module Runs
       run.update!(attrs) unless attrs.empty?
     end
 
+    # Apply a derived terminal/review status. Entering awaiting_review is special:
+    # the transition + its changeset_ready event commit together (one txn).
+    def apply_status(run, status)
+      return enter_awaiting_review(run) if status == 'awaiting_review'
+
+      run.update!(status: status)
+    end
+
+    # Move the run into awaiting_review and append a system changeset_ready event
+    # in the same transaction (via Events::Append, which also broadcasts). Guarded
+    # so a repeat finish/interrupt on an already-reviewing run appends nothing new.
+    def enter_awaiting_review(run)
+      return if run.status == 'awaiting_review'
+
+      Events::Append.call(
+        session: run.session,
+        event: {
+          type: 'changeset_ready',
+          actor: { kind: 'system' },
+          ai_run_id: run.id,
+          seq: (run.events.maximum(:seq) || 0) + 1,
+          payload: {}
+        }
+      ) { run.update!(status: 'awaiting_review') }
+    end
+
     # A `chat` run has no changeset to review → always completed_clean. A `review`
-    # run enters awaiting_review only when a changeset is ready.
+    # run enters awaiting_review when its worktree has uncommitted changes — the
+    # same signal the interrupt path already trusts (derived, not event-gated).
     def finished_status(run)
       return 'completed_clean' if run.session.mode == 'chat'
 
-      changeset_ready?(run) ? 'awaiting_review' : 'completed_clean'
+      worktree_dirty?(run) ? 'awaiting_review' : 'completed_clean'
     end
 
     def interrupted_status(run)
       return 'completed_clean' if run.session.mode == 'chat'
 
       worktree_dirty?(run) ? 'awaiting_review' : 'completed_clean'
-    end
-
-    # A changeset_ready event for this run means there is something to review.
-    def changeset_ready?(run)
-      run.events.exists?(event_type: 'changeset_ready')
     end
 
     def worktree_dirty?(run)

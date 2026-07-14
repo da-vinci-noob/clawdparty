@@ -21,6 +21,8 @@ const RUN_LIFECYCLE = new Set([
   "run_failed",
   "run_interrupted",
   "changeset_ready",
+  "changeset_approved",
+  "changeset_rejected",
 ]);
 
 interface Props {

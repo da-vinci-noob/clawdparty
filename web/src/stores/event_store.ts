@@ -193,4 +193,33 @@ export function selectActiveRunId(state: EventStoreState): string | null {
   return null;
 }
 
+// The run currently awaiting review, derived from changeset lifecycle events: the
+// most recently started run whose latest changeset event is `changeset_ready`
+// (with no later `changeset_approved`/`changeset_rejected`). Returns null when no
+// such run exists — e.g. after approve/reject, or once a revise starts a new run.
+// Gates the diff viewer and the composer's revise mode; status comes from events.
+export function selectAwaitingReviewRunId(state: EventStoreState): string | null {
+  let currentRun: string | null = null;
+  for (const e of state.durableList) {
+    if (e.type === "run_started" && e.ai_run_id !== null) {
+      currentRun = e.ai_run_id;
+    }
+  }
+  if (currentRun === null) {
+    return null;
+  }
+  let awaiting = false;
+  for (const e of state.durableList) {
+    if (e.ai_run_id !== currentRun) {
+      continue;
+    }
+    if (e.type === "changeset_ready") {
+      awaiting = true;
+    } else if (e.type === "changeset_approved" || e.type === "changeset_rejected") {
+      awaiting = false;
+    }
+  }
+  return awaiting ? currentRun : null;
+}
+
 export { deltaKey };

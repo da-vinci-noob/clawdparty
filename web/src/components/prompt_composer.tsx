@@ -1,14 +1,16 @@
 import { type FC, type FormEvent, useState } from "react";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
-import { selectActiveRunId, useEventStore } from "../stores/event_store";
+import { selectActiveRunId, selectAwaitingReviewRunId, useEventStore } from "../stores/event_store";
 
 // Prompt composer: starts a run when none is active, sends a follow-up when one
-// is. Rendered only for owner/editor (client gating is presentation only — the
-// server SessionPolicy is the gate). Active-run state derives from the store's
-// lifecycle events, not a bespoke message.
+// is, and submits a `revise` follow-up while the current run is awaiting review
+// (resume the session, keep the dirty tree). Rendered only for owner/editor
+// (client gating is presentation only — the server SessionPolicy is the gate).
+// All state derives from the store's lifecycle events, not a bespoke message.
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const activeRunId = useEventStore(selectActiveRunId);
+  const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,6 +18,8 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   if (!can("run")) {
     return null;
   }
+
+  const revising = !activeRunId && reviewRunId !== null;
 
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -36,7 +40,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             method: "POST",
             headers: { "content-type": "application/json" },
             credentials: "include",
-            body: JSON.stringify({ prompt: text }),
+            body: JSON.stringify(revising ? { prompt: text, mode: "revise" } : { prompt: text }),
           });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
@@ -61,7 +65,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
     >
       <input
         aria-label="Prompt"
-        placeholder={activeRunId ? "Send a follow-up…" : "Start a run…"}
+        placeholder={
+          activeRunId ? "Send a follow-up…" : revising ? "Revise the changes…" : "Start a run…"
+        }
         value={text}
         onChange={(e) => setText(e.target.value)}
         className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
@@ -71,7 +77,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         disabled={busy}
         className="rounded bg-sky-600 px-3 py-1 text-sm disabled:opacity-50"
       >
-        {activeRunId ? "Send" : "Run"}
+        {activeRunId ? "Send" : revising ? "Revise" : "Run"}
       </button>
       {error && (
         <p data-testid="composer-error" className="text-sm text-red-400">
