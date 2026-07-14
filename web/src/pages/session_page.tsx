@@ -1,18 +1,17 @@
 import type { FC } from "react";
 import { useParams } from "react-router-dom";
+import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
-import { RawEventList } from "../components/raw_event_list";
 
-// Session-route shell. web-cable-client wires the live event transport: it
-// subscribes to the session channel, catches up via REST backfill, and renders
-// the durable log + streamed text as a raw list (activity-feed-rendering will
-// replace the raw list with the rich feed).
+// Session-route shell. The center pane renders the live activity feed
+// (activity-feed-rendering) over the cable-client store: streamed text, tool
+// chips, terminal output, run banners, file-changed rows.
 export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   return (
     <AppShell>
       {sessionId ? (
-        <RawEventList sessionId={sessionId} />
+        <ActivityFeed sessionId={sessionId} />
       ) : (
         <p data-testid="session-placeholder">No session</p>
       )}
