@@ -203,7 +203,7 @@ export class Runner {
 }
 
 function isEphemeral(type: string): boolean {
-  return type === "ai_text_delta" || type === "presence_changed";
+  return type === "ai_text_delta" || type === "ai_thinking_delta" || type === "presence_changed";
 }
 
 function isTerminal(type: string): boolean {
