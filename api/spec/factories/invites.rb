@@ -28,5 +28,13 @@ FactoryBot.define do
     session
     role { 'editor' }
     sequence(:token_digest) { |n| Digest::SHA256.hexdigest("token-#{n}") }
+
+    trait :revoked do
+      revoked_at { Time.current }
+    end
+
+    trait :expired do
+      expires_at { 1.hour.ago }
+    end
   end
 end
