@@ -203,7 +203,9 @@ describe("PromptComposer — revise while awaiting review", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "tweak it" } });
     fireEvent.click(screen.getByText("Revise"));
 
-    await waitFor(() => expect(body).toEqual({ prompt: "tweak it", mode: "revise" }));
+    await waitFor(() =>
+      expect(body).toEqual({ prompt: "tweak it", mode: "revise", permission_mode: "acceptEdits" }),
+    );
   });
 
   it("sends a fresh run (no revise mode) when nothing awaits review", async () => {
@@ -220,6 +222,6 @@ describe("PromptComposer — revise while awaiting review", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do it" } });
     fireEvent.click(screen.getByText("Run"));
 
-    await waitFor(() => expect(body).toEqual({ prompt: "do it" }));
+    await waitFor(() => expect(body).toEqual({ prompt: "do it", permission_mode: "acceptEdits" }));
   });
 });

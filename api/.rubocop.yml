@@ -55,6 +55,10 @@ Metrics/CyclomaticComplexity:
   Max: 11
 Metrics/ParameterLists:
   Max: 7
+  # Keyword args are self-documenting; the service-object style (Runs::Start etc.)
+  # leans on them, so a long keyword list is not the readability hazard a positional
+  # one is. Count only positional/optional args against the limit.
+  CountKeywordArgs: false
 
 # RSpec specs are naturally long/expressive; relax the defaults that fight specs.
 Metrics/BlockLength:

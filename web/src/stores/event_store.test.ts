@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
-import { selectDurableEvents, useEventStore } from "./event_store";
+import { selectDurableEvents, selectExecutablePlanRunId, useEventStore } from "./event_store";
 
 // The executable contract fixture (real spike-derived envelopes, v1.1). Resolved
 // from the web/ package root (vitest runs with cwd = web/).
@@ -137,5 +137,52 @@ describe("event_store", () => {
     store.applyMany(fixture); // includes ephemeral (null id) — must not affect maxAppliedId
     const durableIds = fixture.filter((e) => e.id !== null).map((e) => e.id as number);
     expect(useEventStore.getState().maxAppliedId).toBe(Math.max(...durableIds));
+  });
+});
+
+describe("selectExecutablePlanRunId", () => {
+  beforeEach(() => useEventStore.getState().reset());
+
+  function runStarted(id: number, runId: string, mode: string): EventEnvelope {
+    return {
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: 2,
+      type: "run_started",
+      actor: { kind: "user", id: "p1" },
+      ts: "2026-07-17T00:00:00.000Z",
+      payload: { model: "m", cwd: "/r", permission_mode: mode, claude_session_id: "x" },
+    };
+  }
+
+  function runFinished(id: number, runId: string): EventEnvelope {
+    return {
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: 9,
+      type: "run_finished",
+      actor: { kind: "claude" },
+      ts: "2026-07-17T00:01:00.000Z",
+      payload: {},
+    };
+  }
+
+  it("returns the run id when the last run was a finished plan run", () => {
+    useEventStore.getState().applyMany([runStarted(1, "run1", "plan"), runFinished(2, "run1")]);
+    expect(selectExecutablePlanRunId(useEventStore.getState())).toBe("run1");
+  });
+
+  it("returns null while the plan run is still active (not finished)", () => {
+    useEventStore.getState().apply(runStarted(1, "run1", "plan"));
+    expect(selectExecutablePlanRunId(useEventStore.getState())).toBeNull();
+  });
+
+  it("returns null when the last finished run was not plan mode", () => {
+    useEventStore
+      .getState()
+      .applyMany([runStarted(1, "run1", "acceptEdits"), runFinished(2, "run1")]);
+    expect(selectExecutablePlanRunId(useEventStore.getState())).toBeNull();
   });
 });

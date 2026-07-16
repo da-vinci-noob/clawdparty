@@ -61,6 +61,26 @@ export function buildServer(runner: Runner): FastifyInstance {
     }
   });
 
+  // POST /runs/:id/permission_mode — switch the run's permission mode in-session
+  // (plan → execute). 200 with the applied mode; 409 when the run is no longer
+  // active (Rails then falls back to a fresh run resuming the session).
+  app.post<{ Params: { id: string }; Body: { permission_mode: string } }>(
+    "/runs/:id/permission_mode",
+    async (req, reply) => {
+      try {
+        await runner.setPermissionMode(req.params.id, req.body.permission_mode);
+        return reply
+          .code(200)
+          .send({ run_id: req.params.id, permission_mode: req.body.permission_mode });
+      } catch (err) {
+        if (err instanceof UnknownRun) {
+          return reply.code(409).send({ error: "run_not_active" });
+        }
+        throw err;
+      }
+    },
+  );
+
   return app;
 }
 

@@ -28,6 +28,29 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [protocol] — selectable Claude permission mode (sidecar-protocol, additive)
+
+**`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this touches the **sidecar protocol**
+(`sidecar_protocol.md`), not the event taxonomy/envelope/payloads, so the event contract version does
+not move. Change: `claude-permission-modes`.
+
+### Added / widened (additive — nothing removed or renamed)
+
+- **`permission_mode` on `POST /runs`** is now a **selectable allowlist** value — `plan` / `acceptEdits`
+  (the default when omitted, i.e. the prior fixed behavior) / `bypassPermissions` — rather than the fixed
+  literal `acceptEdits`. Omitting the field is unchanged behavior, so existing callers are unaffected.
+  `bypassPermissions` is **owner-only** (Rails-enforced) because the SDK does not constrain it by
+  `allowed_tools`. Values outside the allowlist are rejected by Rails (`422`).
+- **New endpoint `POST /runs/:id/permission_mode`** (`{ permission_mode, requested_by }` → `200
+  { run_id, permission_mode }`; `404` unknown; `409` not active) — switches the active run's mode
+  in-session (plan→execute). Adding an endpoint is additive; no existing endpoint signature changed.
+
+### Unchanged (why this is not a `major`)
+
+The event envelope, the 22-name taxonomy, all payloads (`run_started` already carried `permission_mode`),
+the `(ai_run_id, seq)` rules, and every **existing** endpoint signature are untouched. `cwd` stays pinned
+to the worktree in all modes; `canUseTool` stays allow-all (per-tool live approval remains out of scope).
+
 ## [1.3.0] — `ai_thinking_delta` event, live streaming (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 3 }`.** Additive `minor` bump (`live-streaming-thinking`): a new

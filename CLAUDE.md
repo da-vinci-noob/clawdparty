@@ -76,7 +76,7 @@ Three contracts (`docs/contracts/` + `packages/contracts/`) are the seams that l
 
 ## Sidecar ↔ Rails protocol (quick reference)
 
-- **Rails → sidecar (`http://sidecar:8787`, compose-network; configurable via `SIDECAR_URL`):** `POST /runs` (409 if a run is active) · `POST /runs/:id/messages` (pushed into the live streaming-input iterable — no respawn) · `POST /runs/:id/interrupt` · `GET /healthz`. Run start carries `permission_mode: acceptEdits` and an `allowed_tools` whitelist; `cwd` is pinned to the session worktree.
+- **Rails → sidecar (`http://sidecar:8787`, compose-network; configurable via `SIDECAR_URL`):** `POST /runs` (409 if a run is active) · `POST /runs/:id/messages` (pushed into the live streaming-input iterable — no respawn) · `POST /runs/:id/interrupt` · `POST /runs/:id/permission_mode` (switch mode mid-run: plan→execute) · `GET /healthz`. Run start carries a user-selectable `permission_mode` (defaults to `acceptEdits`; selectable among `plan`|`acceptEdits`|`bypassPermissions`, with `bypassPermissions` owner-only) and an `allowed_tools` whitelist; `cwd` is pinned to the session worktree in all modes.
 - **Sidecar → Rails:** `POST /internal/events` (batched, idempotent, bearer-authed with `SIDECAR_SHARED_SECRET`) · `POST /internal/sidecar/heartbeat` every 5s with `active_run_ids`.
 - **Crash recovery:** sidecar dies → its container restart policy reboots it; `Sidecar::HealthcheckJob` marks runs stale >15s as `failed`; the Claude session JSONL in the bind-mounted host `~/.claude/projects/` (survives container restarts) lets the host resume via `claude_session_id`. Rails restart → sidecar ring-buffers events and retries with backoff; boot reconciliation marks orphaned runs failed.
 

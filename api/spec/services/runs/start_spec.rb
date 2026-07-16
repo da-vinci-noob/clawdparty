@@ -101,6 +101,35 @@ RSpec.describe(Runs::Start) do
     expect { start }.to(raise_error(Runs::Start::DirtyWorktree))
   end
 
+  describe 'permission_mode (selectable Claude mode, default acceptEdits)' do
+    def start_with(permission_mode)
+      described_class.call(session: session, requested_by: owner, prompt: 'build it',
+                           model: 'claude-opus-4-8', permission_mode: permission_mode,
+                           client: client, worktree: worktree)
+    end
+
+    it 'defaults to acceptEdits and forwards it in the payload' do
+      start
+      expect(posted.last[:permission_mode]).to(eq('acceptEdits'))
+    end
+
+    it 'forwards an allowlisted mode (plan)' do
+      start_with('plan')
+      expect(posted.last[:permission_mode]).to(eq('plan'))
+    end
+
+    it 'forwards bypassPermissions' do
+      start_with('bypassPermissions')
+      expect(posted.last[:permission_mode]).to(eq('bypassPermissions'))
+    end
+
+    it 'rejects an unsupported mode before posting (no run, nothing posted)' do
+      expect { start_with('default') }.to(raise_error(Runs::Start::UnsupportedPermissionMode))
+      expect(posted).to(be_empty)
+      expect(session.ai_runs.count).to(eq(0))
+    end
+  end
+
   describe 'chat mode (no worktree; cwd = working directory)' do
     let(:session) { create(:session, mode: 'chat', repository_path: '/repo/some/dir') }
 

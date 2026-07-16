@@ -13,6 +13,9 @@
 # Per-session git worktrees (bind-mounted, never committed)
 /.clawdparty/
 
+# Transient agent worktrees (created by isolated subagents; never committed)
+/.claude/worktrees/
+
 # Local target-repo bind-mount source (the repo Claude works on; per-developer,
 # path configurable via TARGET_REPO_PATH). Default ./repo is a local artifact.
 /repo/

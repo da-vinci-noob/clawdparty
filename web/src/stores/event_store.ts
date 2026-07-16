@@ -222,4 +222,29 @@ export function selectAwaitingReviewRunId(state: EventStoreState): string | null
   return awaiting ? currentRun : null;
 }
 
+// The most recently started run, if it ran in `plan` mode and has finished (no
+// active run) — the signal to offer "Execute plan". Plan runs make no edits, so
+// they never enter review; this is how the composer knows to surface execution.
+// Reads permission_mode from the run_started payload (no new event type/column).
+export function selectExecutablePlanRunId(state: EventStoreState): string | null {
+  let lastStarted: EventEnvelope | null = null;
+  for (const e of state.durableList) {
+    if (e.type === "run_started" && e.ai_run_id !== null) {
+      lastStarted = e;
+    }
+  }
+  if (lastStarted === null || lastStarted.ai_run_id === null) {
+    return null;
+  }
+  const mode = (lastStarted.payload as { permission_mode?: string }).permission_mode;
+  if (mode !== "plan") {
+    return null;
+  }
+  const runId = lastStarted.ai_run_id;
+  const finished = state.durableList.some(
+    (e) => e.ai_run_id === runId && TERMINAL_RUN_TYPES.has(e.type),
+  );
+  return finished ? runId : null;
+}
+
 export { deltaKey };

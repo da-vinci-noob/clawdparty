@@ -79,6 +79,54 @@ describe("Fastify server (runner-backed)", () => {
     expect(i.statusCode).toBe(404);
     await a.close();
   });
+
+  it("POST /runs/:id/permission_mode switches an active run (200)", async () => {
+    const setMode = vi.fn().mockResolvedValue(undefined);
+    const transport = new Transport({
+      railsInternalUrl: "http://rails:3000",
+      sharedSecret: "s",
+      logger: noopLogger,
+      fetchImpl: vi
+        .fn()
+        .mockResolvedValue(new Response(null, { status: 200 })) as unknown as typeof fetch,
+    });
+    // A query that stays open so the run is active when we switch its mode.
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        await new Promise(() => {});
+      })(),
+      { interrupt: () => Promise.resolve(), setPermissionMode: setMode },
+    ) as unknown as QueryHandle;
+    const a = buildServer(new Runner(transport, () => handle));
+    await a.ready();
+    await a.inject({
+      method: "POST",
+      url: "/runs",
+      payload: { run_id: "r1", session_id: "s", repo_path: "/r", prompt: "hi", requested_by: "p" },
+    });
+
+    const res = await a.inject({
+      method: "POST",
+      url: "/runs/r1/permission_mode",
+      payload: { permission_mode: "acceptEdits" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ run_id: "r1", permission_mode: "acceptEdits" });
+    expect(setMode).toHaveBeenCalledWith("acceptEdits");
+    await a.close();
+  });
+
+  it("POST /runs/:id/permission_mode for a non-active run is 409", async () => {
+    const { app: a } = buildTestServer();
+    await a.ready();
+    const res = await a.inject({
+      method: "POST",
+      url: "/runs/nope/permission_mode",
+      payload: { permission_mode: "acceptEdits" },
+    });
+    expect(res.statusCode).toBe(409);
+    await a.close();
+  });
 });
 
 describe("config — no hard-coded Rails host; RAILS_INTERNAL_URL distinct from SIDECAR_URL", () => {

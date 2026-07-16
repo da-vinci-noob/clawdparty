@@ -8,7 +8,8 @@ class SessionPolicy
 
   # role => set of permitted action symbols.
   MATRIX = {
-    'owner' => %i[view chat manage_tasks run interrupt approve reject manage_invites manage_session].freeze,
+    'owner' => %i[view chat manage_tasks run interrupt approve reject
+                  manage_invites manage_session bypass_permissions].freeze,
     'editor' => %i[view chat manage_tasks run interrupt].freeze,
     'reviewer' => %i[view chat manage_tasks].freeze,
     'viewer' => %i[view chat].freeze

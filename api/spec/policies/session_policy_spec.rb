@@ -38,6 +38,19 @@ RSpec.describe(SessionPolicy) do
     end
   end
 
+  describe 'bypass_permissions is owner-only' do
+    it 'permits an owner' do
+      expect(policy_for('owner').can?(:bypass_permissions)).to(be(true))
+    end
+
+    %w[editor reviewer viewer].each do |role|
+      it "denies a #{role}" do
+        expect(policy_for(role).can?(:bypass_permissions)).to(be(false))
+        expect { policy_for(role).authorize!(:bypass_permissions) }.to(raise_error(described_class::NotAuthorized))
+      end
+    end
+  end
+
   describe 'run/interrupt is owner+editor' do
     it 'permits owner and editor, denies reviewer and viewer' do
       expect(policy_for('owner').can?(:run)).to(be(true))

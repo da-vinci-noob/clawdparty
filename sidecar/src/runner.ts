@@ -23,9 +23,11 @@ export interface StartRunInput {
   claude_session_id?: string;
 }
 
-// The SDK Query surface the runner needs: an async-iterable of messages + interrupt.
+// The SDK Query surface the runner needs: an async-iterable of messages + interrupt,
+// plus the optional mid-run permission-mode switch (plan → execute).
 export interface QueryHandle extends AsyncIterable<unknown> {
   interrupt: () => Promise<void>;
+  setPermissionMode?: (mode: string) => Promise<void>;
 }
 export type QueryFn = (params: {
   prompt: AsyncIterable<unknown>;
@@ -146,6 +148,17 @@ export class Runner {
     await run.handle.interrupt();
     await this.ship([run.normalizer.runInterrupted()]);
     // Rails finalizes the run state; the runner only emits the event + clears active.
+  }
+
+  // Switch the active run's Claude permission mode in-session (plan → execute), via
+  // the SDK query handle. Throws UnknownRun when the run is not the active one
+  // (ended/unknown) so index.ts maps it to 409 and Rails falls back to a fresh run.
+  async setPermissionMode(runId: string, mode: string): Promise<void> {
+    const run = this.requireActive(runId);
+    if (typeof run.handle.setPermissionMode !== "function") {
+      throw new Error("query handle does not support setPermissionMode");
+    }
+    await run.handle.setPermissionMode(mode);
   }
 
   private requireActive(runId: string): ActiveRun {
