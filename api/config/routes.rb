@@ -24,8 +24,8 @@ Rails.application.routes.draw do
       # Who am I in this session (re-hydrate the client from the clawd_uid cookie
       # after a refresh): GET /api/sessions/:session_id/participant
       get 'participant', to: 'participants#show'
-      # Mint a role-scoped invite token (owner only): POST /api/sessions/:session_id/invites
-      resources :invites, only: :create
+      # Invite management (owner only): mint/list/revoke /api/sessions/:session_id/invites[/:id]
+      resources :invites, only: %i[create index destroy]
       # Late-joiner backfill: GET /api/sessions/:session_id/events?after=<cursor>
       resources :events, only: :index
       # Run start: POST /api/sessions/:session_id/runs
