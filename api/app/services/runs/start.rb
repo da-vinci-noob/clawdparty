@@ -9,8 +9,14 @@ module Runs
   class Start
     class ActiveRunExists < StandardError; end
     class DirtyWorktree < StandardError; end
+    class UnsupportedPermissionMode < StandardError; end
 
     DEFAULT_ALLOWED_TOOLS = %w[Read Write Edit Bash].freeze
+    # Claude permission modes users may pick (the CLI Shift+Tab modes we support).
+    # `default`/`dontAsk`/ask-per-tool are intentionally excluded (no per-tool
+    # approval UI). `bypassPermissions` is owner-gated in the controller.
+    PERMISSION_MODES = %w[plan acceptEdits bypassPermissions].freeze
+    DEFAULT_PERMISSION_MODE = 'acceptEdits'
 
     Result = Struct.new(:ai_run, :sidecar_status, keyword_init: true)
 
@@ -19,17 +25,21 @@ module Runs
     end
 
     def initialize(session:, requested_by:, prompt:, model:, mode: 'fresh',
-                   client: Sidecar::Client.new, worktree: nil)
+                   permission_mode: DEFAULT_PERMISSION_MODE, client: Sidecar::Client.new, worktree: nil)
       @session = session
       @requested_by = requested_by
       @prompt = prompt
       @model = model
       @mode = mode
+      @permission_mode = permission_mode
       @client = client
       @worktree = worktree || Git::WorktreeManager.new(session)
     end
 
     def call
+      raise(UnsupportedPermissionMode, "unsupported permission_mode: #{@permission_mode}") unless
+        PERMISSION_MODES.include?(@permission_mode)
+
       revise = @mode == 'revise'
       prior = @session.ai_runs.active.first
       raise(ActiveRunExists) if prior && !revise
@@ -103,7 +113,7 @@ module Runs
         prompt: @prompt,
         requested_by: @requested_by.id.to_s,
         model: @model,
-        permission_mode: 'acceptEdits',
+        permission_mode: @permission_mode,
         allowed_tools: DEFAULT_ALLOWED_TOOLS
       }
       payload[:claude_session_id] = claude_session_id if claude_session_id

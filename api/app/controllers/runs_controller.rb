@@ -5,6 +5,8 @@
 # from events, never a bespoke cable message. Start is async: respond after the
 # sidecar accepts, do not block on completion.
 class RunsController < ApplicationController
+  include RunPermissionModes
+
   before_action :require_user
 
   rescue_from Runs::Start::ActiveRunExists, Sidecar::Client::ActiveRunConflict do
@@ -40,7 +42,8 @@ class RunsController < ApplicationController
       requested_by: participant,
       prompt: params.require(:prompt),
       model: params[:model].presence || default_model,
-      mode: params[:mode].presence || 'fresh'
+      mode: params[:mode].presence || 'fresh',
+      permission_mode: permission_mode_param(session)
     )
     render(json: { id: result.ai_run.id.to_s, status: result.ai_run.status }, status: :accepted)
   end

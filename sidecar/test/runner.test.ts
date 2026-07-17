@@ -275,4 +275,54 @@ describe("Runner", () => {
     expect(() => runner.sendMessage("nope", "x")).toThrow(UnknownRun);
     await expect(runner.interrupt("nope")).rejects.toBeInstanceOf(UnknownRun);
   });
+
+  it("passes the selected permission_mode to the SDK query options", () => {
+    const { transport } = captureTransport();
+    const captured: { options?: Record<string, unknown> } = {};
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        await new Promise(() => {}); // stay open
+      })(),
+      { interrupt: () => Promise.resolve() },
+    ) as unknown as QueryHandle;
+    const runner = new Runner(transport, (params) => {
+      captured.options = params.options;
+      return handle;
+    });
+    runner.startRun({ ...baseInput, permission_mode: "plan" });
+    expect(captured.options?.permissionMode).toBe("plan");
+  });
+
+  it("setPermissionMode switches the active run via the query handle", async () => {
+    const { transport, durable } = captureTransport();
+    const setMode = vi.fn().mockResolvedValue(undefined);
+    const handle = Object.assign(
+      (async function* (): AsyncGenerator<unknown> {
+        yield {
+          type: "system",
+          subtype: "init",
+          model: "m",
+          cwd: "/repo",
+          permissionMode: "plan",
+          session_id: "x",
+        };
+        await new Promise(() => {}); // stay open (plan run awaits execution)
+      })(),
+      { interrupt: () => Promise.resolve(), setPermissionMode: setMode },
+    ) as unknown as QueryHandle;
+    const runner = new Runner(transport, () => handle);
+    runner.startRun(baseInput);
+    await vi.waitFor(() => expect(durable.some((e) => e.type === "run_started")).toBe(true));
+
+    await runner.setPermissionMode("r1", "acceptEdits");
+    expect(setMode).toHaveBeenCalledWith("acceptEdits");
+  });
+
+  it("setPermissionMode on an unknown/ended run throws UnknownRun", async () => {
+    const { transport } = captureTransport();
+    const runner = new Runner(transport, () => scriptedQuery([]).handle);
+    await expect(runner.setPermissionMode("nope", "acceptEdits")).rejects.toBeInstanceOf(
+      UnknownRun,
+    );
+  });
 });

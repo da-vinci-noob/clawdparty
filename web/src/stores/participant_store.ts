@@ -39,6 +39,7 @@ const MATRIX: Record<Role, Set<string>> = {
     "reject",
     "manage_invites",
     "manage_session",
+    "bypass_permissions",
   ]),
   editor: new Set(["view", "chat", "manage_tasks", "run", "interrupt"]),
   reviewer: new Set(["view", "chat", "manage_tasks"]),

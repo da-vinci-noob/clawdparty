@@ -38,7 +38,7 @@ Body (at least):
 | `claude_session_id` | string? | optional; resume a prior Claude session (revise only) |
 | `model` | string? | optional model override |
 | `max_turns` | integer? | optional |
-| `permission_mode` | string | `acceptEdits` (see §5) |
+| `permission_mode` | string | one of `plan` / `acceptEdits` / `bypassPermissions`; default `acceptEdits` when omitted (see §5) |
 | `allowed_tools` | string[] | tool whitelist (see §5) |
 
 Responses:
@@ -68,6 +68,18 @@ Body: `{ "requested_by": "<participant id>" }` — interrupt is a **human** acti
 
 Responses: **`200`** `{ "run_id": "...", "accepted": true }`; **`404`**/**`409`** when the run is
 unknown or not interruptible.
+
+### `POST /runs/:id/permission_mode` — switch the run's permission mode in-session
+
+Body: `{ "permission_mode": "<plan|acceptEdits|bypassPermissions>", "requested_by": "<participant id>" }`.
+
+Switches the active run's Claude permission mode **in-session** (via the SDK query handle, no
+respawn) — the mechanism behind the plan→execute flow. Rails validates the mode against the
+allowlist and role rules (bypass owner-only) before calling this.
+
+Responses: **`200`** `{ "run_id": "...", "permission_mode": "<applied>" }`; **`404`** if the run is
+unknown; **`409`** when the run is no longer active (already terminal) — the caller then falls back
+to a fresh `acceptEdits` run resuming the same `claude_session_id`.
 
 ### `GET /healthz` — liveness + active runs
 
@@ -116,6 +128,13 @@ Request body: `{ "active_run_ids": ["run_...", ...] }`. **`200`** `{ "ok": true 
 
 ## 5. Permission mode & tool scoping at run start
 
-Every run starts with **`permission_mode: acceptEdits`**, an **`allowed_tools`** whitelist, and
-**`cwd` pinned to the session worktree**. The `canUseTool` permission hook is **allow-all for the
-MVP** and is documented as the seam for later per-tool Bash gating.
+A run's **`permission_mode`** is a selectable allowlist value — **`plan`**, **`acceptEdits`** (the
+default when omitted, and the prior fixed behavior), or **`bypassPermissions`** — with an
+**`allowed_tools`** whitelist and **`cwd` pinned to the session worktree in all modes**. `acceptEdits`
+auto-approves edits within the whitelist; `plan` explores read-only and makes no file edits;
+`bypassPermissions` auto-approves all tools and — per the SDK — is **not** constrained by
+`allowed_tools`, so **Rails restricts it to owners** (enforced by `SessionPolicy`, not the sidecar).
+Values outside the allowlist (incl. `default`/`dontAsk`/ask-per-tool) are rejected by Rails before
+reaching the sidecar. The mode may be switched mid-run via `POST /runs/:id/permission_mode` (§2).
+The `canUseTool` permission hook remains **allow-all for the MVP** and is the seam for later
+per-tool Bash gating; live per-tool approval remains out of scope.

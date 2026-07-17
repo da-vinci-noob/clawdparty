@@ -11,6 +11,7 @@ module Sidecar
   class Client
     class ActiveRunConflict < StandardError; end
     class UnknownRun < StandardError; end
+    class RunNotActive < StandardError; end
     class TransportError < StandardError; end
 
     Result = Struct.new(:status, :body, keyword_init: true)
@@ -44,6 +45,17 @@ module Sidecar
     def interrupt(run_id, requested_by:)
       res = post("/runs/#{run_id}/interrupt", { requested_by: requested_by })
       raise(UnknownRun, "run #{run_id} unknown") if res.status == 404
+
+      res
+    end
+
+    # POST /runs/:id/permission_mode — 200 { run_id, permission_mode } on switch;
+    # 404 unknown; 409 when the run is no longer active (caller falls back to a run).
+    def set_permission_mode(run_id, permission_mode:, requested_by:)
+      res = post("/runs/#{run_id}/permission_mode",
+                 { permission_mode: permission_mode, requested_by: requested_by })
+      raise(UnknownRun, "run #{run_id} unknown") if res.status == 404
+      raise(RunNotActive, "run #{run_id} not active") if res.status == 409
 
       res
     end
