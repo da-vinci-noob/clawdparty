@@ -2,36 +2,56 @@ import type { FC, ReactNode } from "react";
 
 interface Props {
   children?: ReactNode;
-  // Optional region slots; default to the static placeholders so a bare render
-  // (e.g. the W1 shell smoke test) still shows all three regions.
+  // Region slots filled by the session page. Default to nothing so a bare render
+  // (the shell smoke test) still shows all three labelled regions.
   sidebar?: ReactNode;
   chat?: ReactNode;
-  footer?: ReactNode;
+  // The center pane's terminal-style titlebar (path + avatars + live count) and
+  // the composer that sits pinned at the bottom of the center column.
+  titlebar?: ReactNode;
+  composer?: ReactNode;
 }
 
-// The workspace layout from docs/PLAN.md §6: left sidebar / center (tabs + feed +
-// composer) / right chat sidebar. Regions are filled via slots by the session page.
-export const AppShell: FC<Props> = ({ children, sidebar, chat, footer }) => (
-  <div className="flex h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100">
-    <aside aria-label="Sessions sidebar" className="w-64 shrink-0 border-r border-neutral-800 p-3">
-      <h1 className="mb-3 text-sm font-semibold text-neutral-400">clawdparty</h1>
+// The session workspace (docs/PLAN.md §6), styled to the dark-green design:
+// a fixed 264px left sidebar / fluid center "terminal" (titlebar · scrollable
+// feed · composer) / fixed 340px right chat sidebar. Regions are filled via slots
+// by the session page. aria-labels are load-bearing (the shell test asserts them).
+export const AppShell: FC<Props> = ({ children, sidebar, chat, titlebar, composer }) => (
+  <div
+    className="grid h-screen w-screen overflow-hidden bg-[#0d0f0e] text-[#e6ebe4]"
+    style={{ gridTemplateColumns: "264px 1fr 340px" }}
+  >
+    <aside
+      aria-label="Sessions sidebar"
+      className="flex min-h-0 min-w-0 flex-col border-r border-[#1d221f] bg-[#0f1211]"
+    >
       {sidebar}
     </aside>
 
-    <main aria-label="Activity tabs" className="flex min-w-0 flex-1 flex-col">
-      <nav aria-label="Center tabs" className="flex gap-2 border-b border-neutral-800 px-3 py-2">
-        <span className="text-sm text-neutral-400">Activity</span>
-      </nav>
-      <section className="min-h-0 flex-1 overflow-auto p-3">{children}</section>
-      {footer}
+    <main
+      aria-label="Activity tabs"
+      className="relative flex min-h-0 min-w-0 flex-col bg-[#0b0e0c]"
+    >
+      {/* faint radial glow behind the terminal, matching the reference */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(120% 80% at 50% -10%, rgba(79,232,154,.035), transparent 60%)",
+        }}
+      />
+      {titlebar}
+      <section className="relative z-[1] min-h-0 flex-1 overflow-auto px-6 pb-2 pt-5">
+        {children}
+      </section>
+      {composer}
     </main>
 
     <aside
       aria-label="Chat sidebar"
-      className="flex w-80 shrink-0 flex-col border-l border-neutral-800 p-3"
+      className="flex min-h-0 min-w-0 flex-col border-l border-[#1d221f] bg-[#0f1211]"
     >
-      <h2 className="mb-2 text-sm font-semibold text-neutral-400">Chat</h2>
-      {chat ?? <div className="text-xs text-neutral-600">No chat</div>}
+      {chat}
     </aside>
   </div>
 );

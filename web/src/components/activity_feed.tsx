@@ -1,10 +1,11 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
 import type { FC } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
-import { selectDurableEvents, useEventStore } from "../stores/event_store";
+import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
 import { FileChangedRow } from "./feed/file_changed_row";
 import { RawFallback } from "./feed/raw_fallback";
 import { RunBanner } from "./feed/run_banner";
+import { ShimmerLoader } from "./feed/shimmer_loader";
 import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
 import { ThinkingBlock } from "./feed/thinking_block";
@@ -41,6 +42,7 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const durable = useEventStore(selectDurableEvents);
   const textByBlock = useEventStore((s) => s.textByBlock);
   const thinkingByBlock = useEventStore((s) => s.thinkingByBlock);
+  const activeRunId = useEventStore(selectActiveRunId);
 
   // Pair each tool_started with its tool_finished/tool_failed (same tool_use_id).
   const finishByToolId = new Map<string, EventEnvelope>();
@@ -54,7 +56,7 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const windowed = durable.slice(-FEED_CAP);
 
   return (
-    <div data-testid="activity-feed" className="space-y-2">
+    <div data-testid="activity-feed" className="space-y-4 font-mono text-[13px] leading-[1.65]">
       {windowed.map((event) => (
         <div key={event.id ?? `${event.type}-${event.ts}`}>
           {renderEvent(event, finishByToolId, resolvedNames)}
@@ -69,12 +71,20 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
         <div
           key={`live-${block}`}
           data-testid="feed-streaming-text"
-          className="text-sm text-emerald-300"
+          className="pl-[26px] text-[13px] text-[#d4dbd2]"
         >
           {text}
-          <span className="animate-pulse">▍</span>
+          <span
+            className="ml-[1px] inline-block h-[14px] w-[8px] translate-y-[2px] bg-[#4fe89a]"
+            style={{
+              animation: "cp-blink 1.1s step-end infinite",
+              boxShadow: "0 0 8px rgba(79,232,154,.5)",
+            }}
+          />
         </div>
       ))}
+      {/* While a run is active with no streaming text yet, show the shimmer loader. */}
+      {activeRunId && textByBlock.size === 0 && <ShimmerLoader />}
     </div>
   );
 };

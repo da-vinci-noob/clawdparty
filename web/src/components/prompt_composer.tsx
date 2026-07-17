@@ -6,6 +6,7 @@ import {
   selectExecutablePlanRunId,
   useEventStore,
 } from "../stores/event_store";
+import { SkillsPopover } from "./session/skills_popover";
 
 // The Claude permission modes a user may pick (CLI Shift+Tab). Bypass is owner-only
 // (it ignores the tool whitelist); the server re-enforces every choice.
@@ -16,11 +17,29 @@ const MODE_OPTIONS: { value: PermissionMode; label: string; ownerOnly?: boolean 
   { value: "bypassPermissions", label: "Bypass", ownerOnly: true },
 ];
 
+// Selectable models. The server accepts an arbitrary `model` string on run start
+// (no allowlist), so this list is client-side; the first is the default.
+interface ModelOption {
+  value: string;
+  name: string;
+  desc: string;
+}
+const MODELS: ModelOption[] = [
+  { value: "claude-opus-4-8", name: "claude-opus-4.8", desc: "Most capable" },
+  { value: "claude-sonnet-5", name: "claude-sonnet-5", desc: "Balanced" },
+  { value: "claude-haiku-4-5-20251001", name: "claude-haiku-4.5", desc: "Fastest" },
+];
+const DEFAULT_MODEL: ModelOption = {
+  value: "claude-opus-4-8",
+  name: "claude-opus-4.8",
+  desc: "Most capable",
+};
+
 // Prompt composer: starts a run when none is active, sends a follow-up when one is,
 // and submits a `revise` follow-up while awaiting review. When starting a run the
-// user picks Claude's permission mode; after a finished Plan run an "Execute plan"
-// shortcut starts an auto-accept run that resumes the session. Rendered only for
-// owner/editor (client gating is presentation only — the server SessionPolicy gates).
+// user picks Claude's permission mode + model; after a finished Plan run an "Execute
+// plan" shortcut starts an auto-accept run that resumes the session. Rendered only
+// for owner/editor (client gating is presentation only — the server SessionPolicy gates).
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const activeRunId = useEventStore(selectActiveRunId);
@@ -28,6 +47,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const planRunId = useEventStore(selectExecutablePlanRunId);
   const [text, setText] = useState("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("acceptEdits");
+  const [model, setModel] = useState<string>(DEFAULT_MODEL.value);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +66,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
       credentials: "include",
       body: JSON.stringify({
         prompt,
+        model,
         permission_mode: mode,
         ...(revising ? { mode: "revise" } : {}),
       }),
@@ -100,62 +123,164 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   const showModeControl = !activeRunId; // a new run is created (start or revise)
   const modeOptions = MODE_OPTIONS.filter((m) => !m.ownerOnly || can("bypass_permissions"));
+  const activeModel = MODELS.find((m) => m.value === model) ?? DEFAULT_MODEL;
 
   return (
-    <form
-      onSubmit={submit}
-      data-testid="prompt-composer"
-      className="flex flex-col gap-2 border-t border-neutral-800 p-2"
-    >
-      {planRunId && !activeRunId && (
-        <button
-          type="button"
-          data-testid="execute-plan"
-          onClick={() => void executePlan()}
-          disabled={busy}
-          className="self-start rounded bg-emerald-700 px-3 py-1 text-xs disabled:opacity-50"
-        >
-          Execute plan
-        </button>
-      )}
-      <div className="flex gap-2">
-        {showModeControl && (
-          <select
-            aria-label="Permission mode"
-            data-testid="permission-mode"
-            value={permissionMode}
-            onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
-            className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-sm"
-          >
-            {modeOptions.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+    <div className="relative z-[2] px-[18px] pb-4">
+      {skillOpen && <SkillsPopover onClose={() => setSkillOpen(false)} />}
+
+      <form
+        onSubmit={submit}
+        data-testid="prompt-composer"
+        className="overflow-hidden rounded-[15px] border border-[#232a25] bg-[#0f1311] shadow-[0_8px_30px_rgba(0,0,0,.35)]"
+      >
+        {/* MOCK context-usage bar — AiRun.usage exists server-side but is never
+            populated or surfaced, so these numbers are static placeholders. */}
+        <div className="flex items-center gap-[10px] px-[15px] pt-[10px]">
+          <span className="font-mono text-[10px] tracking-[0.5px] text-[#565d58]">CONTEXT</span>
+          <div className="h-1 flex-1 overflow-hidden rounded-[3px] bg-[#181e1a]">
+            <div
+              className="h-full rounded-[3px] bg-[#4fe89a]"
+              style={{ width: "62%", boxShadow: "0 0 10px rgba(79,232,154,.55)" }}
+            />
+          </div>
+          <span className="font-mono text-[10px] text-[#79817b]">124K / 200K · 62%</span>
+        </div>
+
+        {planRunId && !activeRunId && (
+          <div className="px-[15px] pt-[10px]">
+            <button
+              type="button"
+              data-testid="execute-plan"
+              onClick={() => void executePlan()}
+              disabled={busy}
+              className="rounded-[8px] border border-[#2a352d] bg-[#17241b] px-3 py-1 font-mono text-[12px] text-[#4fe89a] disabled:opacity-50"
+            >
+              ▶ Execute plan
+            </button>
+          </div>
         )}
-        <input
-          aria-label="Prompt"
-          placeholder={
-            activeRunId ? "Send a follow-up…" : revising ? "Revise the changes…" : "Start a run…"
-          }
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-sky-600 px-3 py-1 text-sm disabled:opacity-50"
-        >
-          {activeRunId ? "Send" : revising ? "Revise" : "Run"}
-        </button>
-      </div>
-      {error && (
-        <p data-testid="composer-error" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
-    </form>
+
+        {/* prompt input row */}
+        <div className="flex items-center gap-[10px] px-[15px] py-[10px] font-mono text-[14px]">
+          <span
+            className="text-[#4fe89a]"
+            style={{
+              animation: "cp-blink 1.1s step-end infinite",
+              textShadow: "0 0 10px rgba(79,232,154,.5)",
+            }}
+          >
+            ❯
+          </span>
+          <input
+            aria-label="Prompt"
+            placeholder={
+              activeRunId
+                ? "Send a follow-up…"
+                : revising
+                  ? "Revise the changes…"
+                  : "Message the room + clawd…"
+            }
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="flex-1 bg-transparent text-[#e6ebe4] placeholder:text-[#4b524d] focus:outline-none"
+          />
+        </div>
+
+        {/* toolbar */}
+        <div className="flex flex-wrap items-center gap-2 px-[13px] pb-3">
+          {/* model dropdown (backed: sends `model` on run start) */}
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Model"
+              onClick={() => setModelOpen((v) => !v)}
+              className="flex items-center gap-[7px] rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039]"
+            >
+              <span className="h-[6px] w-[6px] rounded-full bg-[#4fe89a]" />
+              {activeModel.name}
+              <span className="text-[9px] text-[#565d58]">▾</span>
+            </button>
+            {modelOpen && (
+              <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-[250px] rounded-[11px] border border-[#232a25] bg-[#0f1311] p-[5px] shadow-[0_12px_40px_rgba(0,0,0,.5)]">
+                {MODELS.map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => {
+                      setModel(m.value);
+                      setModelOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between rounded-[8px] px-[10px] py-[8px] text-left hover:bg-[#141a16]"
+                  >
+                    <span className="flex flex-col">
+                      <span className="font-mono text-[12px] text-[#e6ebe4]">{m.name}</span>
+                      <span className="text-[10px] text-[#565d58]">{m.desc}</span>
+                    </span>
+                    {m.value === model && <span className="text-[#4fe89a]">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* MOCK skills button — allowed_tools is hardcoded server-side; toggling
+              skills is not wired to the backend. */}
+          <button
+            type="button"
+            onClick={() => setSkillOpen((v) => !v)}
+            className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
+              skillOpen
+                ? "border-[#374039] bg-[#17241b] text-[#4fe89a]"
+                : "border-[#232a25] bg-[#141a16] text-[#d4dbd2] hover:border-[#374039]"
+            }`}
+          >
+            <span className="text-[12px]">✦</span> Skills
+            <span className="rounded-full bg-[#1a281e] px-[6px] py-px text-[10px] font-semibold text-[#4fe89a]">
+              3
+            </span>
+          </button>
+
+          {/* permission mode — kept as the existing select (restyled) */}
+          {showModeControl && (
+            <select
+              aria-label="Permission mode"
+              data-testid="permission-mode"
+              value={permissionMode}
+              onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
+              className="rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039] focus:outline-none"
+            >
+              {modeOptions.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <div className="flex-1" />
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="flex items-center gap-[7px] rounded-[10px] bg-[#4fe89a] px-[15px] py-[8px] font-mono text-[12px] font-semibold text-[#0e1a13] shadow-[0_0_16px_rgba(79,232,154,.35)] transition hover:brightness-110 disabled:opacity-50"
+          >
+            <span>{activeRunId ? "Send" : revising ? "Revise" : "Run"}</span>
+            <span className="opacity-55" aria-hidden="true">
+              ⌘↵
+            </span>
+          </button>
+        </div>
+
+        {error && (
+          <p
+            data-testid="composer-error"
+            className="px-[15px] pb-3 font-mono text-[12px] text-[#b58a7d]"
+          >
+            {error}
+          </p>
+        )}
+      </form>
+    </div>
   );
 };

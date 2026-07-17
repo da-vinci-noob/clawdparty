@@ -7,17 +7,18 @@ import { ChatPanel } from "../components/chat_panel";
 import { DiffView } from "../components/diff_view";
 import { InterruptButton } from "../components/interrupt_button";
 import { InvitePanel } from "../components/invite_panel";
-import { ParticipantList } from "../components/participant_list";
 import { PromptComposer } from "../components/prompt_composer";
+import { SessionSidebar } from "../components/session/session_sidebar";
+import { TerminalTitlebar } from "../components/session/terminal_titlebar";
 import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 import { useSessionEvents } from "../hooks/use_session_events";
 import { selectAwaitingReviewRunId, useEventStore } from "../stores/event_store";
 
-// The full session workspace: live activity feed (center) + prompt composer and
-// interrupt (footer, role-gated), chat panel + participant list (right sidebar).
-// The cable catch-up runs HERE (one subscription for the whole page); a backfill
-// 404 (unknown session OR not a participant) renders a not-found state instead of
-// a blank working shell.
+// The full session workspace, styled to the dark-green 3-column design: left rail
+// (mock session list + real owner controls), center terminal (titlebar · live feed ·
+// composer), right room chat. The cable catch-up runs HERE (one subscription for the
+// whole page); a backfill 404 (unknown session OR not a participant) renders a
+// not-found state instead of a blank working shell.
 export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const status = useSessionEvents(sessionId ?? "");
@@ -32,14 +33,14 @@ export const SessionPage: FC = () => {
     return (
       <main
         data-testid="session-not-found"
-        className="grid h-screen place-items-center bg-neutral-950 text-neutral-100"
+        className="grid h-screen place-items-center bg-[#0d0f0e] text-[#e6ebe4]"
       >
         <div className="space-y-2 text-center">
           <h1 className="text-lg font-semibold">Session not available</h1>
-          <p className="text-sm text-neutral-400">
+          <p className="text-sm text-[#a4aca6]">
             This session doesn’t exist, or you haven’t joined it. Open your invite link to join.
           </p>
-          <a href="/" className="inline-block text-sm text-sky-400 underline">
+          <a href="/" className="inline-block text-sm text-[#4fe89a] underline">
             Go to join screen
           </a>
         </div>
@@ -50,30 +51,32 @@ export const SessionPage: FC = () => {
   return (
     <AppShell
       sidebar={
+        <SessionSidebar
+          ownerControls={
+            <>
+              <InvitePanel sessionId={sessionId} />
+              <ChangeDirectory sessionId={sessionId} />
+            </>
+          }
+        />
+      }
+      titlebar={<TerminalTitlebar />}
+      chat={<ChatPanel sessionId={sessionId} />}
+      composer={
         <>
-          <ParticipantList />
-          <InvitePanel sessionId={sessionId} />
-          <ChangeDirectory sessionId={sessionId} />
+          <div className="relative z-[2] flex justify-end px-[18px]">
+            <InterruptButton />
+          </div>
+          <PromptComposer sessionId={sessionId} />
         </>
       }
-      chat={<ChatPanel sessionId={sessionId} />}
-      footer={
-        <div className="flex items-center gap-2 border-t border-neutral-800 px-2 py-1">
-          <InterruptButton />
-          <div className="flex-1">
-            <PromptComposer sessionId={sessionId} />
-          </div>
-        </div>
-      }
     >
-      <div className="space-y-4">
-        {reviewRunId && (
-          <div className="rounded border border-neutral-800 bg-neutral-900/30 p-3">
-            <DiffView runId={reviewRunId} />
-          </div>
-        )}
-        <ActivityFeed />
-      </div>
+      {reviewRunId && (
+        <div className="mb-4 rounded-[13px] border border-[#262f28] bg-[#0d110f] p-4">
+          <DiffView runId={reviewRunId} />
+        </div>
+      )}
+      <ActivityFeed />
     </AppShell>
   );
 };

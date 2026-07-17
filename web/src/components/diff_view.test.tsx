@@ -204,7 +204,12 @@ describe("PromptComposer — revise while awaiting review", () => {
     fireEvent.click(screen.getByText("Revise"));
 
     await waitFor(() =>
-      expect(body).toEqual({ prompt: "tweak it", mode: "revise", permission_mode: "acceptEdits" }),
+      expect(body).toEqual({
+        prompt: "tweak it",
+        model: "claude-opus-4-8",
+        mode: "revise",
+        permission_mode: "acceptEdits",
+      }),
     );
   });
 
@@ -222,6 +227,12 @@ describe("PromptComposer — revise while awaiting review", () => {
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do it" } });
     fireEvent.click(screen.getByText("Run"));
 
-    await waitFor(() => expect(body).toEqual({ prompt: "do it", permission_mode: "acceptEdits" }));
+    await waitFor(() =>
+      expect(body).toEqual({
+        prompt: "do it",
+        model: "claude-opus-4-8",
+        permission_mode: "acceptEdits",
+      }),
+    );
   });
 });

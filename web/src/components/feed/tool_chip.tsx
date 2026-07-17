@@ -17,21 +17,34 @@ export const ToolChip: FC<Props> = ({ startEvent, finishEvent }) => {
   const error = failed ? (finishEvent?.payload as ToolFailedPayload).error : undefined;
   const status = finishEvent ? (failed ? "failed" : "done") : "running";
 
+  const statusColor = status === "failed" ? "#b58a7d" : status === "done" ? "#5fc79a" : "#79817b";
+
   return (
-    <div
-      data-testid="feed-tool-chip"
-      className="rounded border border-neutral-800 px-2 py-1 text-xs"
-    >
+    <div data-testid="feed-tool-chip">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full gap-2 text-left"
+        className="flex w-full items-center gap-2 text-left text-[12px]"
       >
-        <span className={failed ? "text-red-400" : "text-amber-400"}>{start.name}</span>
-        <span className="truncate text-neutral-400">{start.input_summary}</span>
-        <span className="ml-auto text-neutral-500">{status}</span>
+        <span className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[6px] border border-[#2a352d] bg-[#141a16]">
+          <span
+            className="h-[6px] w-[6px] rounded-full"
+            style={{ background: failed ? "#b58a7d" : "#4fe89a" }}
+          />
+        </span>
+        <span className="text-[#4fe89a]">clawd</span>
+        <span className="text-[#565d58]">used</span>
+        <span className="truncate text-[#5fc79a]">{start.name}</span>
+        {start.input_summary && (
+          <span className="truncate text-[#565d58]">· {start.input_summary}</span>
+        )}
+        <span className="ml-auto flex-none" style={{ color: statusColor }}>
+          {status}
+        </span>
       </button>
-      {open && error && <pre className="mt-1 whitespace-pre-wrap text-red-300">{error}</pre>}
+      {open && error && (
+        <pre className="mt-1 whitespace-pre-wrap pl-[26px] text-[#b58a7d]">{error}</pre>
+      )}
     </div>
   );
 };
