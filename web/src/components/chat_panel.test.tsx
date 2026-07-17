@@ -57,7 +57,7 @@ describe("ChatPanel", () => {
     );
     render(<ChatPanel sessionId="s" />);
     fireEvent.change(screen.getByLabelText("Chat message"), { target: { value: "ship it" } });
-    fireEvent.click(screen.getByText("Send"));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(posted).toEqual({ body: "ship it" }));
   });

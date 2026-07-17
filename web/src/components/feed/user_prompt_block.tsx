@@ -12,9 +12,17 @@ export const UserPromptBlock: FC<{ event: EventEnvelope; names?: ParticipantName
 }) => {
   const { text } = event.payload as UserPromptPayload;
   return (
-    <div data-testid="feed-user-prompt" className="rounded bg-sky-950/40 px-2 py-1">
-      <span className="text-xs text-sky-400">{actorLabel(event.actor, names)}</span>
-      <p className="whitespace-pre-wrap text-sm text-neutral-100">{text}</p>
+    <div data-testid="feed-user-prompt">
+      <div className="mb-[5px] flex items-center gap-2 text-[11px] text-[#565d58]">
+        <span className="text-[#9aa39c]">{actorLabel(event.actor, names)}</span>
+        <span>ran prompt</span>
+      </div>
+      <div className="flex gap-[10px]">
+        <span className="text-[#4fe89a]" style={{ textShadow: "0 0 10px rgba(79,232,154,.5)" }}>
+          ❯
+        </span>
+        <span className="whitespace-pre-wrap text-[#d4dbd2]">{text}</span>
+      </div>
     </div>
   );
 };

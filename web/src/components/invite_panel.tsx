@@ -15,9 +15,9 @@ interface InviteSummary {
 }
 
 const STATUS_CLASS: Record<InviteStatus, string> = {
-  active: "text-emerald-400",
-  revoked: "text-neutral-500",
-  expired: "text-amber-400",
+  active: "text-[#4fe89a]",
+  revoked: "text-[#565d58]",
+  expired: "text-[#d6b784]",
 };
 
 // Owner-only invite management. Mint a role-scoped link (POST) and show it once,
@@ -105,14 +105,14 @@ export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
   };
 
   return (
-    <div data-testid="invite-panel" className="mt-4 space-y-2 border-t border-neutral-800 pt-3">
-      <h3 className="text-xs font-semibold text-neutral-400">Invite</h3>
+    <div data-testid="invite-panel" className="space-y-2">
+      <h3 className="font-mono text-[10px] uppercase tracking-[1px] text-[#565d58]">Invite</h3>
       <div className="flex gap-1">
         <select
           aria-label="Invite role"
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
-          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-xs"
+          className="flex-1 rounded-[9px] border border-[#232a25] bg-[#141a16] px-[9px] py-[7px] font-mono text-[12px] text-[#d4dbd2] focus:outline-none"
         >
           {ROLES.map((r) => (
             <option key={r} value={r}>
@@ -124,7 +124,7 @@ export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
           type="button"
           onClick={mint}
           disabled={busy}
-          className="rounded bg-sky-600 px-2 py-1 text-xs disabled:opacity-50"
+          className="rounded-[9px] bg-[#4fe89a] px-[11px] py-[7px] font-mono text-[12px] font-semibold text-[#0e1a13] transition hover:brightness-110 disabled:opacity-50"
         >
           {busy ? "…" : "Create link"}
         </button>
@@ -136,10 +136,10 @@ export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
           readOnly
           value={link}
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-xs text-neutral-300"
+          className="w-full rounded-[9px] border border-[#232a25] bg-[#0c0f0e] px-[9px] py-[7px] font-mono text-[11px] text-[#d4dbd2]"
         />
       )}
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="font-mono text-[11px] text-[#b58a7d]">{error}</p>}
 
       {invites.length > 0 && (
         <ul data-testid="invite-list" className="max-h-64 space-y-1 overflow-y-auto pt-1 pr-1">
@@ -150,12 +150,12 @@ export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
               className="flex items-start justify-between gap-2 text-xs"
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-neutral-300">{invite.role}</span>
+                <div className="flex items-center gap-2 font-mono">
+                  <span className="text-[#d4dbd2]">{invite.role}</span>
                   <span className={STATUS_CLASS[invite.status]}>{invite.status}</span>
-                  <span className="text-neutral-600">#{invite.id}</span>
+                  <span className="text-[#3a4038]">#{invite.id}</span>
                 </div>
-                <div className="truncate text-[11px] text-neutral-500">
+                <div className="truncate text-[11px] text-[#565d58]">
                   {`created ${new Date(invite.created_at).toLocaleString()}`}
                   {" · "}
                   {invite.expires_at
@@ -168,7 +168,7 @@ export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
                   type="button"
                   aria-label={`Revoke ${invite.role} invite #${invite.id}`}
                   onClick={() => void revoke(invite.id)}
-                  className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 text-neutral-400 hover:text-red-400"
+                  className="shrink-0 rounded-[7px] border border-[#232a25] px-2 py-0.5 font-mono text-[#79817b] hover:text-[#b58a7d]"
                 >
                   Revoke
                 </button>
