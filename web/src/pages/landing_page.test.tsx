@@ -138,7 +138,8 @@ describe("LandingPage — create flow", () => {
     );
     renderLanding();
     fireEvent.click(within(screen.getByTestId("landing-mode-toggle")).getByText("Create"));
-    fireEvent.change(screen.getByLabelText("Session mode"), { target: { value: "chat" } });
+    // Session type is a card toggle (not a <select>): click "Chat" to pick chat mode.
+    fireEvent.click(screen.getByRole("button", { name: /Chat/ }));
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Chatty" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
 

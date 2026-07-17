@@ -66,14 +66,14 @@ export const DirectoryPicker: FC<{
   if (error) {
     return (
       <div data-testid="directory-picker" className="space-y-1">
-        <p className="text-xs text-red-400">{error}</p>
+        <p className="text-xs text-[#b58a7d]">{error}</p>
         <input
           aria-label={label}
           data-testid="directory-fallback"
           placeholder="Working directory (relative to repo root)"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          className="w-full rounded-[10px] border border-[#232a25] bg-[#0b0e0c] px-[15px] py-[13px] font-mono text-sm text-[#e6ebe4] outline-none focus:border-[#4fe89a]"
         />
       </div>
     );
@@ -82,10 +82,10 @@ export const DirectoryPicker: FC<{
   return (
     <div
       data-testid="directory-picker"
-      className="space-y-2 rounded border border-neutral-700 bg-neutral-900 p-2"
+      className="overflow-hidden rounded-[12px] border border-[#232a25] bg-[#0b0e0c]"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs text-neutral-400" data-testid="directory-current">
+      <div className="flex items-center justify-between border-b border-[#171d19] px-[13px] py-[10px]">
+        <span className="truncate font-mono text-xs text-[#79817b]" data-testid="directory-current">
           {current === "" ? "(repo root)" : `/${current}`}
         </span>
         <button
@@ -93,12 +93,12 @@ export const DirectoryPicker: FC<{
           aria-label="Up"
           onClick={() => setCurrent(parentOf(current))}
           disabled={current === ""}
-          className="rounded border border-neutral-700 px-2 py-0.5 text-xs disabled:opacity-40"
+          className="rounded-[7px] border border-[#232a25] bg-[#141a16] px-[11px] py-[3px] font-mono text-[11px] text-[#a4aca6] disabled:opacity-40"
         >
           Up
         </button>
       </div>
-      <ul className="max-h-40 space-y-1 overflow-auto">
+      <ul className="max-h-[190px] space-y-1 overflow-y-auto p-[5px]">
         {entries.map((entry) => (
           <li key={entry.path}>
             <button
@@ -106,11 +106,16 @@ export const DirectoryPicker: FC<{
               data-testid="dir-entry"
               aria-label={`Open ${entry.name}`}
               onClick={() => setCurrent(entry.path)}
-              className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-sm hover:bg-neutral-800"
+              className="flex w-full items-center justify-between gap-2 rounded-[8px] px-[11px] py-[9px] text-left hover:bg-[#141a16]"
             >
-              <span className="truncate">{entry.name}</span>
+              <span className="flex min-w-0 items-center gap-[10px]">
+                <span className="font-mono text-xs text-[#4fe89a]">▸</span>
+                <span className="truncate font-mono text-[13.5px] text-[#e6ebe4]">
+                  {entry.name}
+                </span>
+              </span>
               {entry.is_git_repo && (
-                <span className="rounded bg-neutral-800 px-1 text-[10px] uppercase text-neutral-400">
+                <span className="rounded-[5px] border border-[#2a352d] bg-[#17241b] px-[6px] py-px font-mono text-[9px] uppercase tracking-[0.5px] text-[#4fe89a]">
                   git
                 </span>
               )}
@@ -118,13 +123,15 @@ export const DirectoryPicker: FC<{
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        onClick={() => onChange(current)}
-        className="w-full rounded bg-sky-600 px-2 py-1 text-sm"
-      >
-        Use this folder
-      </button>
+      <div className="p-[9px]">
+        <button
+          type="button"
+          onClick={() => onChange(current)}
+          className="w-full rounded-[9px] border border-[#2a352d] bg-[#141a16] p-[11px] font-mono text-[12.5px] font-semibold text-[#4fe89a] hover:bg-[#17241b]"
+        >
+          Use this folder
+        </button>
+      </div>
     </div>
   );
 };
