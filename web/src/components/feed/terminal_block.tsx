@@ -10,7 +10,7 @@ export const TerminalBlock: FC<{ event: EventEnvelope }> = ({ event }) => {
   return (
     <pre
       data-testid="feed-terminal"
-      className="ml-[26px] max-h-64 overflow-auto rounded-[8px] border border-[#171d19] bg-black/60 p-3 font-mono text-xs text-[#c2c8c3]"
+      className="ml-[26px] max-h-64 overflow-auto rounded-[8px] border border-[#16211a] bg-black/60 p-3 font-mono text-xs text-[#cdd2cd]"
       // anser output is escaped first, then ANSI→span; safe to render.
       // biome-ignore lint/security/noDangerouslySetInnerHtml: anser escapes input before colorizing
       dangerouslySetInnerHTML={{ __html: html }}

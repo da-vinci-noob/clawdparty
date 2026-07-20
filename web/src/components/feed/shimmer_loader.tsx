@@ -16,18 +16,18 @@ export const ShimmerLoader: FC = () => {
   return (
     <div data-testid="feed-shimmer" className="flex items-center gap-[11px] pb-1 pt-[6px]">
       <div
-        className="flex h-5 w-5 items-center justify-center rounded-[6px] border border-[#2a352d] bg-[#141a16]"
+        className="flex h-5 w-5 items-center justify-center rounded-[6px] border border-[#1c2a20] bg-[#0e140f]"
         style={{ animation: "cp-float 2.6s ease-in-out infinite" }}
       >
         <span
-          className="h-[7px] w-[7px] rounded-full bg-[#4fe89a]"
+          className="h-[7px] w-[7px] rounded-full bg-[#3b9dff]"
           style={{ animation: "cp-pulse 1.5s ease-in-out infinite" }}
         />
       </div>
       <span
         className="text-[13px] font-medium"
         style={{
-          background: "linear-gradient(90deg,#4a524b 20%,#4fe89a 50%,#4a524b 80%)",
+          background: "linear-gradient(90deg,#5f665f 20%,#3b9dff 50%,#5f665f 80%)",
           backgroundSize: "200% 100%",
           WebkitBackgroundClip: "text",
           backgroundClip: "text",
@@ -39,19 +39,19 @@ export const ShimmerLoader: FC = () => {
       </span>
       <span className="ml-[2px] flex gap-[3px]">
         <span
-          className="h-1 w-1 rounded-full bg-[#4fe89a]"
+          className="h-1 w-1 rounded-full bg-[#3b9dff]"
           style={{ animation: "cp-pulse 1s ease-in-out infinite" }}
         />
         <span
-          className="h-1 w-1 rounded-full bg-[#4fe89a]"
+          className="h-1 w-1 rounded-full bg-[#3b9dff]"
           style={{ animation: "cp-pulse 1s ease-in-out .2s infinite" }}
         />
         <span
-          className="h-1 w-1 rounded-full bg-[#4fe89a]"
+          className="h-1 w-1 rounded-full bg-[#3b9dff]"
           style={{ animation: "cp-pulse 1s ease-in-out .4s infinite" }}
         />
       </span>
-      <span className="ml-[6px] font-mono text-[11px] text-[#3a4038]">esc to interrupt</span>
+      <span className="ml-[6px] font-mono text-[11px] text-[#3a4440]">esc to interrupt</span>
     </div>
   );
 };

@@ -6,12 +6,12 @@ import { type FC, useState } from "react";
 export const RawFallback: FC<{ event: EventEnvelope }> = ({ event }) => {
   const [open, setOpen] = useState(false);
   return (
-    <div data-testid="feed-raw-fallback" className="text-[12px] text-[#565d58]">
+    <div data-testid="feed-raw-fallback" className="text-[12px] text-[#6b726b]">
       <button type="button" onClick={() => setOpen((v) => !v)} className="text-left">
-        <span className="text-[#4fe89a]">▸</span> {event.type}
+        <span className="text-[#3b9dff]">▸</span> {event.type}
       </button>
       {open && (
-        <pre className="mt-1 whitespace-pre-wrap pl-[14px] text-[#79817b]">
+        <pre className="mt-1 whitespace-pre-wrap pl-[14px] text-[#7c847c]">
           {JSON.stringify(event.payload)}
         </pre>
       )}

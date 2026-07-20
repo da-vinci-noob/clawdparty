@@ -42,15 +42,15 @@ export const ChatPanel: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   return (
     <div data-testid="chat-panel" className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-[#1d221f] px-4 pb-[14px] pt-4">
+      <div className="flex items-center justify-between border-b border-[#16211a] px-4 pb-[14px] pt-4">
         <div className="flex items-center gap-[9px]">
           <span className="text-[14px] font-semibold">Room chat</span>
           <span
-            className="h-[6px] w-[6px] rounded-full bg-[#4fe89a]"
-            style={{ boxShadow: "0 0 8px rgba(79,232,154,.85)" }}
+            className="h-[6px] w-[6px] rounded-full bg-[#3b9dff]"
+            style={{ boxShadow: "0 0 8px rgba(59,157,255,.85)" }}
           />
         </div>
-        <span className="font-mono text-[11px] text-[#565d58]">{names.size} here</span>
+        <span className="font-mono text-[11px] text-[#6b726b]">{names.size} here</span>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-[17px] overflow-y-auto px-[14px] py-4">
@@ -65,15 +65,15 @@ export const ChatPanel: FC<{ sessionId: string }> = ({ sessionId }) => {
                 className="flex h-7 w-7 flex-none items-center justify-center rounded-full font-mono text-[10px] font-semibold"
                 style={
                   isClaude
-                    ? { background: "#17241b", color: "#4fe89a" }
+                    ? { background: "#0a1826", color: "#3b9dff" }
                     : { background: c.bg, color: c.color }
                 }
               >
                 {isClaude ? "✦" : initialsOf(label)}
               </div>
               <div className="flex min-w-0 flex-col gap-[3px]">
-                <span className="text-[12px] font-medium text-[#c2c8c3]">{label}</span>
-                <span className="text-[13px] leading-[1.5] text-[#d4dbd2]">
+                <span className="text-[12px] font-medium text-[#cdd2cd]">{label}</span>
+                <span className="text-[13px] leading-[1.5] text-[#cdd2cd]">
                   {(e.payload as ChatMessagePayload).body}
                 </span>
               </div>
@@ -82,20 +82,20 @@ export const ChatPanel: FC<{ sessionId: string }> = ({ sessionId }) => {
         })}
       </div>
 
-      <form onSubmit={send} className="border-t border-[#1d221f] px-[14px] py-3">
-        <div className="flex items-center gap-[9px] rounded-[11px] border border-[#232925] bg-[#0c0f0e] px-3 py-[10px]">
+      <form onSubmit={send} className="border-t border-[#16211a] px-[14px] py-3">
+        <div className="flex items-center gap-[9px] rounded-[11px] border border-[#17231b] bg-[#0e120f] px-3 py-[10px]">
           <input
             aria-label="Chat message"
             value={text}
             onChange={(ev) => setText(ev.target.value)}
             placeholder="Message the room…"
-            className="flex-1 bg-transparent text-[13px] text-[#e6ebe4] placeholder:text-[#4b524d] focus:outline-none"
+            className="flex-1 bg-transparent text-[13px] text-[#e6e8e6] placeholder:text-[#5c6b5f] focus:outline-none"
           />
           <button
             type="submit"
             disabled={busy}
             aria-label="Send"
-            className="text-[13px] text-[#565d58] hover:text-[#4fe89a] disabled:opacity-50"
+            className="text-[13px] text-[#6b726b] hover:text-[#3b9dff] disabled:opacity-50"
           >
             ↵
           </button>

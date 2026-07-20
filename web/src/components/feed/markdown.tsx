@@ -11,7 +11,7 @@ import remarkGfm from "remark-gfm";
 export const Markdown: FC<{ children: string }> = ({ children }) => (
   <div
     data-testid="feed-text"
-    className="max-w-[680px] space-y-2 pl-[26px] text-[13px] leading-relaxed text-[#d4dbd2] [&_a]:text-[#4fe89a] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-[#2a352d] [&_blockquote]:pl-2 [&_blockquote]:text-[#79817b] [&_code]:rounded [&_code]:bg-[#141a16] [&_code]:px-1 [&_code]:text-[0.85em] [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#0b0e0c] [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_strong]:font-semibold [&_strong]:text-[#e8ebe8] [&_table]:w-full [&_td]:border-b [&_td]:border-[#1d221f] [&_th]:border-b [&_th]:border-[#2a352d] [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5"
+    className="max-w-[680px] space-y-2 pl-[26px] text-[13px] leading-relaxed text-[#cdd2cd] [&_a]:text-[#3b9dff] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-[#1c2a20] [&_blockquote]:pl-2 [&_blockquote]:text-[#7c847c] [&_code]:rounded [&_code]:bg-[#0e140f] [&_code]:px-1 [&_code]:text-[0.85em] [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#0a0a0a] [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_strong]:font-semibold [&_strong]:text-[#e6e8e6] [&_table]:w-full [&_td]:border-b [&_td]:border-[#16211a] [&_th]:border-b [&_th]:border-[#1c2a20] [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5"
   >
     <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
   </div>

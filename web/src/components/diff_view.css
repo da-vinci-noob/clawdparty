@@ -3,28 +3,28 @@
  * Imported AFTER the library CSS so equal-specificity rules win. */
 .diff {
   background: transparent;
-  color: #d4d4d8;
+  color: #cdd2cd;
 }
 
 .diff-gutter {
-  color: #6b7280;
+  color: #6b726b;
   background: transparent;
 }
 
 .diff-code {
-  color: #d4d4d8;
+  color: #cdd2cd;
 }
 
 /* Added lines: dark-green tint + readable text. */
 .diff-gutter-insert {
-  background-color: rgba(46, 160, 67, 0.28);
+  background-color: rgba(59, 157, 255, 0.28);
 }
 .diff-code-insert {
-  background-color: rgba(46, 160, 67, 0.16);
+  background-color: rgba(59, 157, 255, 0.16);
 }
 .diff-code-insert .diff-code-edit {
-  background-color: rgba(46, 160, 67, 0.45);
-  color: #e6edf3;
+  background-color: rgba(59, 157, 255, 0.45);
+  color: #e6e8e6;
 }
 
 /* Removed lines: dark-red tint + readable text. */
@@ -36,5 +36,5 @@
 }
 .diff-code-delete .diff-code-edit {
   background-color: rgba(248, 81, 73, 0.45);
-  color: #e6edf3;
+  color: #e6e8e6;
 }

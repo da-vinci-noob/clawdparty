@@ -48,13 +48,13 @@ export const ChangeDirectory: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   return (
     <div data-testid="change-directory" className="space-y-2">
-      <h3 className="font-mono text-[10px] uppercase tracking-[1px] text-[#565d58]">
+      <h3 className="font-mono text-[10px] uppercase tracking-[1px] text-[#6b726b]">
         Working directory
       </h3>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[8px] font-mono text-[12px] text-[#d4dbd2] transition hover:border-[#374039] disabled:opacity-50"
+        className="w-full rounded-[9px] border border-[#17231b] bg-[#0e140f] px-[11px] py-[8px] font-mono text-[12px] text-[#cdd2cd] transition hover:border-[#2c5580] disabled:opacity-50"
         disabled={busy}
       >
         {open ? "Close" : "Change directory"}
@@ -63,12 +63,12 @@ export const ChangeDirectory: FC<{ sessionId: string }> = ({ sessionId }) => {
       {saved !== null && (
         <p
           data-testid="change-directory-confirmation"
-          className="font-mono text-[11px] text-[#4fe89a]"
+          className="font-mono text-[11px] text-[#3b9dff]"
         >
           Working directory set to {saved === "" ? "(repo root)" : saved}
         </p>
       )}
-      {error && <p className="font-mono text-[11px] text-[#b58a7d]">{error}</p>}
+      {error && <p className="font-mono text-[11px] text-[#f0a8a8]">{error}</p>}
     </div>
   );
 };

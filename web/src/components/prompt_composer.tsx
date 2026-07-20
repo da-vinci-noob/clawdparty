@@ -135,21 +135,21 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
       <form
         onSubmit={submit}
         data-testid="prompt-composer"
-        className="overflow-hidden rounded-[15px] border border-[#232a25] bg-[#0f1311] shadow-[0_8px_30px_rgba(0,0,0,.35)]"
+        className="overflow-hidden rounded-[15px] border border-[#17231b] bg-[#0c0e0c] shadow-[0_8px_30px_rgba(0,0,0,.35)]"
       >
         {/* Live context-usage bar: the latest completed run's prompt-side tokens
             (from run_finished/run_failed `usage`) over the model's window. Reads 0
             until the first run finishes; updates at run end, not live mid-stream. */}
         <div className="flex items-center gap-[10px] px-[15px] pt-[10px]">
-          <span className="font-mono text-[10px] tracking-[0.5px] text-[#565d58]">CONTEXT</span>
-          <div className="h-1 flex-1 overflow-hidden rounded-[3px] bg-[#181e1a]">
+          <span className="font-mono text-[10px] tracking-[0.5px] text-[#6b726b]">CONTEXT</span>
+          <div className="h-1 flex-1 overflow-hidden rounded-[3px] bg-[#1c2a20]">
             <div
               data-testid="context-bar-fill"
-              className="h-full rounded-[3px] bg-[#4fe89a] transition-[width] duration-500"
-              style={{ width: `${contextPct}%`, boxShadow: "0 0 10px rgba(79,232,154,.55)" }}
+              className="h-full rounded-[3px] bg-[#3b9dff] transition-[width] duration-500"
+              style={{ width: `${contextPct}%`, boxShadow: "0 0 10px rgba(59,157,255,.55)" }}
             />
           </div>
-          <span data-testid="context-usage" className="font-mono text-[10px] text-[#79817b]">
+          <span data-testid="context-usage" className="font-mono text-[10px] text-[#7c847c]">
             {tokensToK(contextTokens)} / {tokensToK(contextWindow)} · {contextPct}%
           </span>
         </div>
@@ -161,7 +161,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
               data-testid="execute-plan"
               onClick={() => void executePlan()}
               disabled={busy}
-              className="rounded-[8px] border border-[#2a352d] bg-[#17241b] px-3 py-1 font-mono text-[12px] text-[#4fe89a] disabled:opacity-50"
+              className="rounded-[8px] border border-[#1c2a20] bg-[#0a1826] px-3 py-1 font-mono text-[12px] text-[#3b9dff] disabled:opacity-50"
             >
               ▶ Execute plan
             </button>
@@ -171,10 +171,10 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         {/* prompt input row */}
         <div className="flex items-center gap-[10px] px-[15px] py-[10px] font-mono text-[14px]">
           <span
-            className="text-[#4fe89a]"
+            className="text-[#3b9dff]"
             style={{
               animation: "cp-blink 1.1s step-end infinite",
-              textShadow: "0 0 10px rgba(79,232,154,.5)",
+              textShadow: "0 0 10px rgba(59,157,255,.5)",
             }}
           >
             ❯
@@ -190,7 +190,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             }
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="flex-1 bg-transparent text-[#e6ebe4] placeholder:text-[#4b524d] focus:outline-none"
+            className="flex-1 bg-transparent text-[#e6e8e6] placeholder:text-[#5c6b5f] focus:outline-none"
           />
         </div>
 
@@ -204,7 +204,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
               data-testid="model"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039] focus:outline-none"
+              className="rounded-[9px] border border-[#17231b] bg-[#0e140f] px-[11px] py-[7px] font-mono text-[12px] text-[#cdd2cd] hover:border-[#2c5580] focus:outline-none"
             >
               <option value="">Default model</option>
               {models.map((m) => (
@@ -222,12 +222,12 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             onClick={() => setSkillOpen((v) => !v)}
             className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
               skillOpen
-                ? "border-[#374039] bg-[#17241b] text-[#4fe89a]"
-                : "border-[#232a25] bg-[#141a16] text-[#d4dbd2] hover:border-[#374039]"
+                ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
+                : "border-[#17231b] bg-[#0e140f] text-[#cdd2cd] hover:border-[#2c5580]"
             }`}
           >
             <span className="text-[12px]">✦</span> Skills
-            <span className="rounded-full bg-[#1a281e] px-[6px] py-px text-[10px] font-semibold text-[#4fe89a]">
+            <span className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]">
               3
             </span>
           </button>
@@ -239,7 +239,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
               data-testid="permission-mode"
               value={permissionMode}
               onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
-              className="rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039] focus:outline-none"
+              className="rounded-[9px] border border-[#17231b] bg-[#0e140f] px-[11px] py-[7px] font-mono text-[12px] text-[#cdd2cd] hover:border-[#2c5580] focus:outline-none"
             >
               {modeOptions.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -254,7 +254,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
           <button
             type="submit"
             disabled={busy}
-            className="flex items-center gap-[7px] rounded-[10px] bg-[#4fe89a] px-[15px] py-[8px] font-mono text-[12px] font-semibold text-[#0e1a13] shadow-[0_0_16px_rgba(79,232,154,.35)] transition hover:brightness-110 disabled:opacity-50"
+            className="flex items-center gap-[7px] rounded-[10px] bg-[#3b9dff] px-[15px] py-[8px] font-mono text-[12px] font-semibold text-[#04101f] shadow-[0_0_16px_rgba(59,157,255,.35)] transition hover:brightness-110 disabled:opacity-50"
           >
             <span>{activeRunId ? "Send" : revising ? "Revise" : "Run"}</span>
             <span className="opacity-55" aria-hidden="true">
@@ -266,7 +266,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         {error && (
           <p
             data-testid="composer-error"
-            className="px-[15px] pb-3 font-mono text-[12px] text-[#b58a7d]"
+            className="px-[15px] pb-3 font-mono text-[12px] text-[#f0a8a8]"
           >
             {error}
           </p>

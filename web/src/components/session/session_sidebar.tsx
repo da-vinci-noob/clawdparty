@@ -1,6 +1,5 @@
 import { type FC, type ReactNode, useState } from "react";
 import { useCurrentParticipant } from "../../hooks/use_current_participant";
-import { LogoMark } from "../landing/logo_mark";
 
 // ⚠️ MOCK DATA — there is no session-list/index API today (routes expose only
 // session create/update). The "Your sessions" / "Joined" lists below are static
@@ -22,9 +21,9 @@ const MOCK_JOINED: MockSession[] = [
   { name: "infra-migration", meta: "devon · 1d ago", status: "idle" },
 ];
 
-const IDLE_PILL = { bg: "#161a18", color: "#79817b" };
+const IDLE_PILL = { bg: "#0e140f", color: "#7c847c" };
 const STATUS_PILL: Record<string, { bg: string; color: string }> = {
-  live: { bg: "#17241b", color: "#4fe89a" },
+  live: { bg: "#0a1826", color: "#3b9dff" },
   review: { bg: "#241f17", color: "#d6b784" },
   idle: IDLE_PILL,
 };
@@ -34,21 +33,21 @@ const SessionRow: FC<{ s: MockSession }> = ({ s }) => {
   return (
     <button
       type="button"
-      className="w-full rounded-[9px] px-[11px] py-[9px] text-left transition hover:bg-[#141a16]"
+      className="w-full rounded-[9px] px-[11px] py-[9px] text-left transition hover:bg-[#0e140f]"
     >
       <div className="flex min-w-0 items-center gap-[9px]">
         <span
           className="h-[7px] w-[7px] flex-none rounded-full"
           style={
             s.live
-              ? { background: "#4fe89a", boxShadow: "0 0 8px rgba(79,232,154,.85)" }
-              : { background: "#3a4038" }
+              ? { background: "#3b9dff", boxShadow: "0 0 8px rgba(59,157,255,.85)" }
+              : { background: "#3a4440" }
           }
         />
         <span className="truncate font-mono text-[13px] font-medium">{s.name}</span>
       </div>
       <div className="mt-[6px] flex items-center justify-between pl-[17px]">
-        <span className="text-[11px] text-[#565d58]">{s.meta}</span>
+        <span className="text-[11px] text-[#6b726b]">{s.meta}</span>
         <span
           className="rounded-full px-[7px] py-px font-mono text-[9px] uppercase tracking-[0.4px]"
           style={{ background: pill.bg, color: pill.color }}
@@ -62,8 +61,8 @@ const SessionRow: FC<{ s: MockSession }> = ({ s }) => {
 
 const SectionHeader: FC<{ label: string; count: number }> = ({ label, count }) => (
   <div className="flex items-center justify-between px-[6px] pb-[6px] pt-[10px]">
-    <span className="font-mono text-[10px] uppercase tracking-[1px] text-[#565d58]">{label}</span>
-    <span className="font-mono text-[10px] text-[#3a4038]">{count}</span>
+    <span className="font-mono text-[10px] uppercase tracking-[1px] text-[#6b726b]">{label}</span>
+    <span className="font-mono text-[10px] text-[#3a4440]">{count}</span>
   </div>
 );
 
@@ -78,14 +77,17 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
   return (
     <>
       <div className="flex items-center gap-[11px] px-4 pb-[15px] pt-[18px]">
-        <div className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] border border-[#262c28] bg-[#161a18]">
-          <LogoMark />
+        <div
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] text-[16px] font-extrabold text-[#04101f]"
+          style={{ background: "linear-gradient(135deg,#2166b0,#3b9dff)" }}
+        >
+          ▚
         </div>
         <div className="flex flex-col leading-[1.15]">
           <span className="text-[15px] font-semibold tracking-[-0.2px]">
-            clawd<span className="text-[#4fe89a]">party</span>
+            clawd<span className="text-[#3b9dff]">party</span>
           </span>
-          <span className="mt-px text-[10px] tracking-[0.4px] text-[#565d58]">
+          <span className="mt-px text-[10px] tracking-[0.4px] text-[#6b726b]">
             shared ai sessions
           </span>
         </div>
@@ -94,13 +96,13 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
       <div className="flex gap-2 px-[14px] pb-[14px]">
         <a
           href="/"
-          className="flex flex-1 items-center justify-center gap-[6px] rounded-[9px] bg-[#4fe89a] px-[10px] py-[9px] text-[13px] font-semibold text-[#0e1a13] shadow-[0_0_16px_rgba(79,232,154,.3)] transition hover:brightness-110"
+          className="flex flex-1 items-center justify-center gap-[6px] rounded-[9px] bg-[#3b9dff] px-[10px] py-[9px] text-[13px] font-semibold text-[#04101f] shadow-[0_0_16px_rgba(59,157,255,.3)] transition hover:brightness-110"
         >
           <span className="text-[15px] leading-none">+</span> New
         </a>
         <a
           href="/"
-          className="flex flex-1 items-center justify-center gap-[6px] rounded-[9px] border border-[#262c28] px-[10px] py-[9px] text-[13px] font-medium text-[#d4dbd2] transition hover:border-[#374039]"
+          className="flex flex-1 items-center justify-center gap-[6px] rounded-[9px] border border-[#1c2a20] px-[10px] py-[9px] text-[13px] font-medium text-[#cdd2cd] transition hover:border-[#2c5580]"
         >
           Join
         </a>
@@ -108,13 +110,13 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
 
       {/* MOCK search — non-functional filter over placeholder rows */}
       <div className="px-[14px] pb-2">
-        <div className="flex items-center gap-2 rounded-[9px] border border-[#1d221f] bg-[#0c0f0e] px-[11px] py-[9px]">
-          <span className="text-[12px] text-[#565d58]">⌕</span>
+        <div className="flex items-center gap-2 rounded-[9px] border border-[#16211a] bg-[#0e120f] px-[11px] py-[9px]">
+          <span className="text-[12px] text-[#6b726b]">⌕</span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="search or paste token…"
-            className="w-full bg-transparent font-mono text-[12px] text-[#d4dbd2] placeholder:text-[#565d58] focus:outline-none"
+            className="w-full bg-transparent font-mono text-[12px] text-[#cdd2cd] placeholder:text-[#6b726b] focus:outline-none"
           />
         </div>
       </div>
@@ -130,23 +132,23 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
         ))}
 
         {ownerControls && (
-          <div className="mt-4 space-y-3 border-t border-[#1d221f] pt-4">{ownerControls}</div>
+          <div className="mt-4 space-y-3 border-t border-[#16211a] pt-4">{ownerControls}</div>
         )}
       </div>
 
-      <div className="flex items-center gap-[10px] border-t border-[#1d221f] px-4 py-3">
-        <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#414d47] font-mono text-[11px] font-semibold text-[#d7ded9]">
+      <div className="flex items-center gap-[10px] border-t border-[#16211a] px-4 py-3">
+        <div className="flex h-[28px] w-[28px] items-center justify-center rounded-full bg-[#0e140f] font-mono text-[11px] font-semibold text-[#cdd2cd]">
           {initials}
         </div>
         <div className="flex min-w-0 flex-1 flex-col leading-[1.2]">
           <span className="truncate text-[12px] font-medium">{participant?.name ?? "you"}</span>
-          <span className="text-[10px] capitalize text-[#565d58]">
+          <span className="text-[10px] capitalize text-[#6b726b]">
             {participant?.role ?? "guest"} · online
           </span>
         </div>
         <span
-          className="h-[7px] w-[7px] rounded-full bg-[#4fe89a]"
-          style={{ boxShadow: "0 0 8px rgba(79,232,154,.85)" }}
+          className="h-[7px] w-[7px] rounded-full bg-[#3b9dff]"
+          style={{ boxShadow: "0 0 8px rgba(59,157,255,.85)" }}
         />
       </div>
     </>

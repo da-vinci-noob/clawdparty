@@ -17,7 +17,7 @@ export const ToolChip: FC<Props> = ({ startEvent, finishEvent }) => {
   const error = failed ? (finishEvent?.payload as ToolFailedPayload).error : undefined;
   const status = finishEvent ? (failed ? "failed" : "done") : "running";
 
-  const statusColor = status === "failed" ? "#b58a7d" : status === "done" ? "#5fc79a" : "#79817b";
+  const statusColor = status === "failed" ? "#f0a8a8" : status === "done" ? "#3b9dff" : "#7c847c";
 
   return (
     <div data-testid="feed-tool-chip">
@@ -26,24 +26,24 @@ export const ToolChip: FC<Props> = ({ startEvent, finishEvent }) => {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 text-left text-[12px]"
       >
-        <span className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[6px] border border-[#2a352d] bg-[#141a16]">
+        <span className="flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[6px] border border-[#1c2a20] bg-[#0e140f]">
           <span
             className="h-[6px] w-[6px] rounded-full"
-            style={{ background: failed ? "#b58a7d" : "#4fe89a" }}
+            style={{ background: failed ? "#f0a8a8" : "#3b9dff" }}
           />
         </span>
-        <span className="text-[#4fe89a]">clawd</span>
-        <span className="text-[#565d58]">used</span>
-        <span className="truncate text-[#5fc79a]">{start.name}</span>
+        <span className="text-[#3b9dff]">clawd</span>
+        <span className="text-[#6b726b]">used</span>
+        <span className="truncate text-[#3b9dff]">{start.name}</span>
         {start.input_summary && (
-          <span className="truncate text-[#565d58]">· {start.input_summary}</span>
+          <span className="truncate text-[#6b726b]">· {start.input_summary}</span>
         )}
         <span className="ml-auto flex-none" style={{ color: statusColor }}>
           {status}
         </span>
       </button>
       {open && error && (
-        <pre className="mt-1 whitespace-pre-wrap pl-[26px] text-[#b58a7d]">{error}</pre>
+        <pre className="mt-1 whitespace-pre-wrap pl-[26px] text-[#f0a8a8]">{error}</pre>
       )}
     </div>
   );
