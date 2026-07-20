@@ -5,6 +5,7 @@ import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
   selectExecutablePlanRunId,
+  selectLatestUsage,
   useEventStore,
 } from "../stores/event_store";
 import { SkillsPopover } from "./session/skills_popover";
@@ -18,6 +19,16 @@ const MODE_OPTIONS: { value: PermissionMode; label: string; ownerOnly?: boolean 
   { value: "bypassPermissions", label: "Bypass", ownerOnly: true },
 ];
 
+// Context-window size per model (tokens). Current Claude models are 200K; unknown
+// models fall back to 200K. Used as the denominator of the CONTEXT bar.
+const CONTEXT_WINDOW_BY_MODEL: Record<string, number> = {
+  "claude-opus-4-8": 200_000,
+  "claude-sonnet-5": 200_000,
+  "claude-haiku-4-5-20251001": 200_000,
+};
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+const tokensToK = (n: number): string => `${Math.round(n / 1000)}K`;
+
 // Prompt composer: starts a run when none is active, sends a follow-up when one is,
 // and submits a `revise` follow-up while awaiting review. When starting a run the
 // user picks Claude's permission mode + model; after a finished Plan run an "Execute
@@ -29,6 +40,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const activeRunId = useEventStore(selectActiveRunId);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   const planRunId = useEventStore(selectExecutablePlanRunId);
+  // Select PRIMITIVES (not the object) so a new reference each render can't loop Zustand.
+  const contextTokens = useEventStore((s) => selectLatestUsage(s)?.contextTokens ?? 0);
+  const usageModel = useEventStore((s) => selectLatestUsage(s)?.model ?? null);
   const [text, setText] = useState("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("acceptEdits");
   // Empty = let the server pick its default (ANTHROPIC_MODEL). Set once the user
@@ -109,6 +123,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const showModeControl = !activeRunId; // a new run is created (start or revise)
   const modeOptions = MODE_OPTIONS.filter((m) => !m.ownerOnly || can("bypass_permissions"));
 
+  // Real context usage from the latest completed run (0 until the first run finishes).
+  // Window follows that run's model, falling back to the currently-selected model.
+  const contextWindow = CONTEXT_WINDOW_BY_MODEL[usageModel ?? model] ?? DEFAULT_CONTEXT_WINDOW;
+  const contextPct = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
+
   return (
     <div className="relative z-[2] px-[18px] pb-4">
       {skillOpen && <SkillsPopover onClose={() => setSkillOpen(false)} />}
@@ -118,17 +137,21 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         data-testid="prompt-composer"
         className="overflow-hidden rounded-[15px] border border-[#232a25] bg-[#0f1311] shadow-[0_8px_30px_rgba(0,0,0,.35)]"
       >
-        {/* MOCK context-usage bar — AiRun.usage exists server-side but is never
-            populated or surfaced, so these numbers are static placeholders. */}
+        {/* Live context-usage bar: the latest completed run's prompt-side tokens
+            (from run_finished/run_failed `usage`) over the model's window. Reads 0
+            until the first run finishes; updates at run end, not live mid-stream. */}
         <div className="flex items-center gap-[10px] px-[15px] pt-[10px]">
           <span className="font-mono text-[10px] tracking-[0.5px] text-[#565d58]">CONTEXT</span>
           <div className="h-1 flex-1 overflow-hidden rounded-[3px] bg-[#181e1a]">
             <div
-              className="h-full rounded-[3px] bg-[#4fe89a]"
-              style={{ width: "62%", boxShadow: "0 0 10px rgba(79,232,154,.55)" }}
+              data-testid="context-bar-fill"
+              className="h-full rounded-[3px] bg-[#4fe89a] transition-[width] duration-500"
+              style={{ width: `${contextPct}%`, boxShadow: "0 0 10px rgba(79,232,154,.55)" }}
             />
           </div>
-          <span className="font-mono text-[10px] text-[#79817b]">124K / 200K · 62%</span>
+          <span data-testid="context-usage" className="font-mono text-[10px] text-[#79817b]">
+            {tokensToK(contextTokens)} / {tokensToK(contextWindow)} · {contextPct}%
+          </span>
         </div>
 
         {planRunId && !activeRunId && (
