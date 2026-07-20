@@ -11,6 +11,8 @@
 export interface ModelInfo {
   id: string;
   label: string;
+  // The model's native context window in tokens (the CONTEXT bar's denominator).
+  context_window: number;
 }
 
 export interface ModelList {
@@ -26,10 +28,23 @@ export interface ModelList {
 // ids (not Bedrock inference-profile ids) — correct for a direct API-key login and
 // a safe default the SDK can still resolve via the host's ANTHROPIC_MODEL env.
 export const FALLBACK_MODELS: ModelInfo[] = [
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)" },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)", context_window: 1_000_000 },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)", context_window: 1_000_000 },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)", context_window: 200_000 },
 ];
+
+// Ids whose (lowercased) form containing any of these tokens are 1M-token models.
+// Matches both plain ids ("claude-sonnet-5") and Bedrock inference-profile ids
+// ("us.anthropic.claude-sonnet-5-...").
+const ONE_MILLION_FAMILIES = ["opus-4-8", "opus-4-7", "sonnet-5", "sonnet-4-6", "fable-5"];
+
+// Fallback context window for sources that don't report one (Bedrock's
+// ListInferenceProfiles carries no window). The Anthropic API's max_input_tokens
+// is preferred whenever it is available.
+export function inferContextWindow(id: string): number {
+  const lower = id.toLowerCase();
+  return ONE_MILLION_FAMILIES.some((token) => lower.includes(token)) ? 1_000_000 : 200_000;
+}
 
 function isBedrock(env: NodeJS.ProcessEnv): boolean {
   const v = env.CLAUDE_CODE_USE_BEDROCK;
@@ -54,7 +69,11 @@ async function listBedrockModels(env: NodeJS.ProcessEnv): Promise<ModelInfo[]> {
       if (!id || !id.toLowerCase().includes("anthropic")) {
         continue; // this app only drives Anthropic (Claude) models
       }
-      models.push({ id, label: p.inferenceProfileName ?? id });
+      models.push({
+        id,
+        label: p.inferenceProfileName ?? id,
+        context_window: inferContextWindow(id),
+      });
     }
     nextToken = res.nextToken;
   } while (nextToken);
@@ -83,8 +102,14 @@ async function listAnthropicApiModels(
   if (!res.ok) {
     throw new Error(`anthropic /v1/models returned ${res.status}`);
   }
-  const body = (await res.json()) as { data?: { id: string; display_name?: string }[] };
-  return (body.data ?? []).map((m) => ({ id: m.id, label: m.display_name ?? m.id }));
+  const body = (await res.json()) as {
+    data?: { id: string; display_name?: string; max_input_tokens?: number }[];
+  };
+  return (body.data ?? []).map((m) => ({
+    id: m.id,
+    label: m.display_name ?? m.id,
+    context_window: m.max_input_tokens ?? inferContextWindow(m.id),
+  }));
 }
 
 // Discover the models available to this host's login. Never throws — on any
