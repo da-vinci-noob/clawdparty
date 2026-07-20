@@ -71,14 +71,14 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
         <div
           key={`live-${block}`}
           data-testid="feed-streaming-text"
-          className="pl-[26px] text-[13px] text-[#d4dbd2]"
+          className="pl-[26px] text-[13px] text-[#cdd2cd]"
         >
           {text}
           <span
-            className="ml-[1px] inline-block h-[14px] w-[8px] translate-y-[2px] bg-[#4fe89a]"
+            className="ml-[1px] inline-block h-[14px] w-[8px] translate-y-[2px] bg-[#3b9dff]"
             style={{
               animation: "cp-blink 1.1s step-end infinite",
-              boxShadow: "0 0 8px rgba(79,232,154,.5)",
+              boxShadow: "0 0 8px rgba(59,157,255,.5)",
             }}
           />
         </div>

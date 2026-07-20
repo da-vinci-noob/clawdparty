@@ -29,9 +29,9 @@ export const InterruptButton: FC = () => {
       data-testid="interrupt-button"
       onClick={interrupt}
       disabled={busy}
-      className="mb-[10px] flex items-center gap-[6px] rounded-[9px] border border-[#332723] bg-[#1a0f0d] px-[11px] py-[6px] font-mono text-[12px] text-[#b58a7d] transition hover:border-[#4a2f28] disabled:opacity-50"
+      className="mb-[10px] flex items-center gap-[6px] rounded-[9px] border border-[#332723] bg-[#1a0e0e] px-[11px] py-[6px] font-mono text-[12px] text-[#f0a8a8] transition hover:border-[#4a2f28] disabled:opacity-50"
     >
-      <span className="h-[7px] w-[7px] rounded-full bg-[#b58a7d]" /> Interrupt
+      <span className="h-[7px] w-[7px] rounded-full bg-[#f0a8a8]" /> Interrupt
       <span className="text-[#5c4a44]">esc</span>
     </button>
   );

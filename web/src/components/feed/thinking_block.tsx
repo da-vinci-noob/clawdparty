@@ -16,16 +16,16 @@ export const ThinkingBlock: FC<{ text: string; streaming?: boolean }> = ({ text,
     <details
       open
       data-testid="feed-thinking"
-      className="rounded-[8px] border border-[#1d221f] bg-[#0f1211]/60 px-3 py-2 text-[12px]"
+      className="rounded-[8px] border border-[#16211a] bg-[#0b0d0b]/60 px-3 py-2 text-[12px]"
     >
-      <summary className="cursor-pointer select-none text-[#565d58]">
+      <summary className="cursor-pointer select-none text-[#6b726b]">
         Thinking{streaming ? "…" : ""}
       </summary>
-      <div className="mt-1 whitespace-pre-wrap italic text-[#79817b]">
+      <div className="mt-1 whitespace-pre-wrap italic text-[#7c847c]">
         {text}
         {streaming && (
           <span
-            className="ml-[1px] inline-block h-[12px] w-[7px] translate-y-[2px] bg-[#4fe89a]"
+            className="ml-[1px] inline-block h-[12px] w-[7px] translate-y-[2px] bg-[#3b9dff]"
             style={{ animation: "cp-blink 1.1s step-end infinite" }}
           />
         )}

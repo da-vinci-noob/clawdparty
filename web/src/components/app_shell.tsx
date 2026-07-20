@@ -18,26 +18,26 @@ interface Props {
 // by the session page. aria-labels are load-bearing (the shell test asserts them).
 export const AppShell: FC<Props> = ({ children, sidebar, chat, titlebar, composer }) => (
   <div
-    className="grid h-screen w-screen overflow-hidden bg-[#0d0f0e] text-[#e6ebe4]"
+    className="font-mono grid h-screen w-screen overflow-hidden bg-[#0a0a0a] text-[#e6e8e6]"
     style={{ gridTemplateColumns: "264px 1fr 340px" }}
   >
     <aside
       aria-label="Sessions sidebar"
-      className="flex min-h-0 min-w-0 flex-col border-r border-[#1d221f] bg-[#0f1211]"
+      className="flex min-h-0 min-w-0 flex-col border-r border-[#16211a] bg-[#0b0d0b]"
     >
       {sidebar}
     </aside>
 
     <main
       aria-label="Activity tabs"
-      className="relative flex min-h-0 min-w-0 flex-col bg-[#0b0e0c]"
+      className="relative flex min-h-0 min-w-0 flex-col bg-[#0a0a0a]"
     >
       {/* faint radial glow behind the terminal, matching the reference */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 80% at 50% -10%, rgba(79,232,154,.035), transparent 60%)",
+            "radial-gradient(120% 80% at 50% -10%, rgba(59,157,255,.035), transparent 60%)",
         }}
       />
       {titlebar}
@@ -49,7 +49,7 @@ export const AppShell: FC<Props> = ({ children, sidebar, chat, titlebar, compose
 
     <aside
       aria-label="Chat sidebar"
-      className="flex min-h-0 min-w-0 flex-col border-l border-[#1d221f] bg-[#0f1211]"
+      className="flex min-h-0 min-w-0 flex-col border-l border-[#16211a] bg-[#0b0d0b]"
     >
       {chat}
     </aside>

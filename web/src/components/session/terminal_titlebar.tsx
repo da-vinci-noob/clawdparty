@@ -34,24 +34,24 @@ export const TerminalTitlebar: FC<{ path?: string }> = ({ path }) => {
   const shown = participants.slice(0, 4);
 
   return (
-    <div className="relative z-[1] flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#171d19] bg-[#0d110f] px-[18px] py-[13px]">
+    <div className="relative z-[1] flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#16211a] bg-[#0b0d0b] px-[18px] py-[13px]">
       <div className="flex flex-none gap-[7px]">
-        <span className="h-[11px] w-[11px] rounded-full bg-[#242a26]" />
-        <span className="h-[11px] w-[11px] rounded-full bg-[#242a26]" />
-        <span className="h-[11px] w-[11px] rounded-full bg-[#242a26]" />
+        <span className="h-[11px] w-[11px] rounded-full bg-[#3a4440]" />
+        <span className="h-[11px] w-[11px] rounded-full bg-[#3a4440]" />
+        <span className="h-[11px] w-[11px] rounded-full bg-[#3a4440]" />
       </div>
       <div className="ml-1 flex min-w-0 items-center gap-2 font-mono text-[13px]">
-        <span className="flex-none text-[#565d58]">clawd@party</span>
-        <span className="flex-none text-[#3a4038]">:</span>
+        <span className="flex-none text-[#6b726b]">clawd@party</span>
+        <span className="flex-none text-[#3a4440]">:</span>
         <span
-          className="min-w-0 truncate text-[#4fe89a]"
-          style={{ textShadow: "0 0 12px rgba(79,232,154,.4)" }}
+          className="min-w-0 truncate text-[#3b9dff]"
+          style={{ textShadow: "0 0 12px rgba(59,157,255,.4)" }}
         >
           {path?.trim() ? path : "~/workspace"}
         </span>
         <span
-          className="ml-[2px] h-[6px] w-[6px] flex-none rounded-full bg-[#4fe89a]"
-          style={{ boxShadow: "0 0 8px rgba(79,232,154,.85)" }}
+          className="ml-[2px] h-[6px] w-[6px] flex-none rounded-full bg-[#3b9dff]"
+          style={{ boxShadow: "0 0 8px rgba(59,157,255,.85)" }}
         />
       </div>
       <div className="flex-1" />
@@ -63,7 +63,7 @@ export const TerminalTitlebar: FC<{ path?: string }> = ({ path }) => {
               <div
                 key={p.id}
                 title={p.name}
-                className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#0d110f] font-mono text-[9px] font-semibold"
+                className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[#0b0d0b] font-mono text-[9px] font-semibold"
                 style={{ background: c.bg, color: c.color, marginLeft: i === 0 ? 0 : -7 }}
               >
                 {initialsOf(p.name)}
@@ -72,7 +72,7 @@ export const TerminalTitlebar: FC<{ path?: string }> = ({ path }) => {
           })}
         </div>
       )}
-      <span className="ml-1 flex-none font-mono text-[11px] text-[#565d58]">
+      <span className="ml-1 flex-none font-mono text-[11px] text-[#6b726b]">
         {participants.length} {participants.length === 1 ? "here" : "live"}
       </span>
     </div>

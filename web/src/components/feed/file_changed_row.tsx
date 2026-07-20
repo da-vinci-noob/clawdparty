@@ -8,9 +8,9 @@ export const FileChangedRow: FC<{ event: EventEnvelope }> = ({ event }) => {
   return (
     <div
       data-testid="feed-file-changed"
-      className="flex gap-2 pl-[26px] text-[12px] text-[#5fc79a]"
+      className="flex gap-2 pl-[26px] text-[12px] text-[#3b9dff]"
     >
-      <span className="text-[#565d58]">{change === "created" ? "+" : "~"}</span>
+      <span className="text-[#6b726b]">{change === "created" ? "+" : "~"}</span>
       <span className="truncate">{path}</span>
     </div>
   );

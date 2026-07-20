@@ -35,20 +35,20 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   return (
     <div
       data-testid="feed-run-banner"
-      className="flex items-center gap-2 text-[11px] text-[#565d58]"
+      className="flex items-center gap-2 text-[11px] text-[#6b726b]"
     >
       <span
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#4fe89a]"
-        style={{ boxShadow: "0 0 6px rgba(79,232,154,.7)" }}
+        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#3b9dff]"
+        style={{ boxShadow: "0 0 6px rgba(59,157,255,.7)" }}
         aria-hidden="true"
       />
       <span>
-        {who && <span className="text-[#9aa39c]">{who}</span>}
+        {who && <span className="text-[#aeb4ae]">{who}</span>}
         {label}
         {mode && (
           <span
             data-testid="run-mode"
-            className="ml-1 rounded-[5px] border border-[#2a352d] bg-[#141a16] px-1 text-[10px] uppercase text-[#79817b]"
+            className="ml-1 rounded-[5px] border border-[#1c2a20] bg-[#0e140f] px-1 text-[10px] uppercase text-[#7c847c]"
           >
             {MODE_LABELS[mode] ?? mode}
           </span>

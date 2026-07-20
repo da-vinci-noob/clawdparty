@@ -68,7 +68,7 @@ export const DiffView: FC<{ runId: string }> = ({ runId }) => {
   return (
     <div data-testid="diff-view" className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-neutral-400">Review changes</h3>
+        <h3 className="text-xs font-semibold text-[#aeb4ae]">Review changes</h3>
         <ReviewControls runId={runId} />
       </div>
       {renderBody(state)}
@@ -79,14 +79,14 @@ export const DiffView: FC<{ runId: string }> = ({ runId }) => {
 function renderBody(state: LoadState): ReactNode {
   if (state.status === "loading") {
     return (
-      <p data-testid="diff-loading" className="text-sm text-neutral-500">
+      <p data-testid="diff-loading" className="text-sm text-[#7c847c]">
         Loading diff…
       </p>
     );
   }
   if (state.status === "error") {
     return (
-      <p data-testid="diff-error" className="text-sm text-red-400">
+      <p data-testid="diff-error" className="text-sm text-[#f0a8a8]">
         {state.message}
       </p>
     );
@@ -96,7 +96,7 @@ function renderBody(state: LoadState): ReactNode {
   const parsed = patch.trim() ? parseDiff(patch) : [];
   if (files.length === 0 && parsed.length === 0) {
     return (
-      <p data-testid="diff-empty" className="text-sm text-neutral-500">
+      <p data-testid="diff-empty" className="text-sm text-[#7c847c]">
         No changes to review.
       </p>
     );
@@ -109,15 +109,15 @@ function renderBody(state: LoadState): ReactNode {
           <li
             key={file.path}
             data-testid="diff-file"
-            className="flex items-center justify-between rounded border border-neutral-800 bg-neutral-900/50 px-2 py-1"
+            className="flex items-center justify-between rounded border border-[#17231b] bg-[#0c0e0c] px-2 py-1"
           >
-            <span className="truncate font-mono text-neutral-200">{file.path}</span>
+            <span className="truncate font-mono text-[#cdd2cd]">{file.path}</span>
             {file.binary ? (
-              <span className="shrink-0 text-neutral-500">binary</span>
+              <span className="shrink-0 text-[#7c847c]">binary</span>
             ) : (
               <span className="shrink-0 tabular-nums">
-                <span className="text-emerald-400">+{file.insertions ?? 0}</span>{" "}
-                <span className="text-red-400">−{file.deletions ?? 0}</span>
+                <span className="text-[#3b9dff]">+{file.insertions ?? 0}</span>{" "}
+                <span className="text-[#f0a8a8]">−{file.deletions ?? 0}</span>
               </span>
             )}
           </li>
@@ -125,11 +125,11 @@ function renderBody(state: LoadState): ReactNode {
       </ul>
       <div
         data-testid="diff-patch"
-        className="overflow-auto rounded border border-neutral-800 text-xs"
+        className="overflow-auto rounded border border-[#17231b] text-xs"
       >
         {parsed.map((file) => (
           <div key={`${file.oldRevision}:${file.newRevision}:${file.newPath || file.oldPath}`}>
-            <div className="border-b border-neutral-800 bg-neutral-900/50 px-2 py-1 font-mono text-neutral-300">
+            <div className="border-b border-[#17231b] bg-[#0c0e0c] px-2 py-1 font-mono text-[#cdd2cd]">
               {file.newPath || file.oldPath}
             </div>
             <Diff diffType={file.type} hunks={file.hunks} viewType="unified">
