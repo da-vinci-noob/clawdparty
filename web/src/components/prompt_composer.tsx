@@ -1,5 +1,6 @@
 import { type FC, type FormEvent, useState } from "react";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
+import { useModels } from "../hooks/use_models";
 import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
@@ -17,24 +18,6 @@ const MODE_OPTIONS: { value: PermissionMode; label: string; ownerOnly?: boolean 
   { value: "bypassPermissions", label: "Bypass", ownerOnly: true },
 ];
 
-// Selectable models. The server accepts an arbitrary `model` string on run start
-// (no allowlist), so this list is client-side; the first is the default.
-interface ModelOption {
-  value: string;
-  name: string;
-  desc: string;
-}
-const MODELS: ModelOption[] = [
-  { value: "claude-opus-4-8", name: "claude-opus-4.8", desc: "Most capable" },
-  { value: "claude-sonnet-5", name: "claude-sonnet-5", desc: "Balanced" },
-  { value: "claude-haiku-4-5-20251001", name: "claude-haiku-4.5", desc: "Fastest" },
-];
-const DEFAULT_MODEL: ModelOption = {
-  value: "claude-opus-4-8",
-  name: "claude-opus-4.8",
-  desc: "Most capable",
-};
-
 // Prompt composer: starts a run when none is active, sends a follow-up when one is,
 // and submits a `revise` follow-up while awaiting review. When starting a run the
 // user picks Claude's permission mode + model; after a finished Plan run an "Execute
@@ -42,13 +25,15 @@ const DEFAULT_MODEL: ModelOption = {
 // for owner/editor (client gating is presentation only — the server SessionPolicy gates).
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
+  const models = useModels();
   const activeRunId = useEventStore(selectActiveRunId);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   const planRunId = useEventStore(selectExecutablePlanRunId);
   const [text, setText] = useState("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("acceptEdits");
-  const [model, setModel] = useState<string>(DEFAULT_MODEL.value);
-  const [modelOpen, setModelOpen] = useState(false);
+  // Empty = let the server pick its default (ANTHROPIC_MODEL). Set once the user
+  // chooses; the option list itself comes from runtime discovery (useModels).
+  const [model, setModel] = useState("");
   const [skillOpen, setSkillOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +51,8 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
       credentials: "include",
       body: JSON.stringify({
         prompt,
-        model,
         permission_mode: mode,
+        ...(model ? { model } : {}),
         ...(revising ? { mode: "revise" } : {}),
       }),
     });
@@ -123,7 +108,6 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   const showModeControl = !activeRunId; // a new run is created (start or revise)
   const modeOptions = MODE_OPTIONS.filter((m) => !m.ownerOnly || can("bypass_permissions"));
-  const activeModel = MODELS.find((m) => m.value === model) ?? DEFAULT_MODEL;
 
   return (
     <div className="relative z-[2] px-[18px] pb-4">
@@ -189,40 +173,24 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 px-[13px] pb-3">
-          {/* model dropdown (backed: sends `model` on run start) */}
-          <div className="relative">
-            <button
-              type="button"
+          {/* model dropdown — options come from runtime discovery (useModels);
+              the chosen id is sent as `model` on run start (empty = server default). */}
+          {showModeControl && (
+            <select
               aria-label="Model"
-              onClick={() => setModelOpen((v) => !v)}
-              className="flex items-center gap-[7px] rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039]"
+              data-testid="model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="rounded-[9px] border border-[#232a25] bg-[#141a16] px-[11px] py-[7px] font-mono text-[12px] text-[#d4dbd2] hover:border-[#374039] focus:outline-none"
             >
-              <span className="h-[6px] w-[6px] rounded-full bg-[#4fe89a]" />
-              {activeModel.name}
-              <span className="text-[9px] text-[#565d58]">▾</span>
-            </button>
-            {modelOpen && (
-              <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-[250px] rounded-[11px] border border-[#232a25] bg-[#0f1311] p-[5px] shadow-[0_12px_40px_rgba(0,0,0,.5)]">
-                {MODELS.map((m) => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => {
-                      setModel(m.value);
-                      setModelOpen(false);
-                    }}
-                    className="flex w-full items-center justify-between rounded-[8px] px-[10px] py-[8px] text-left hover:bg-[#141a16]"
-                  >
-                    <span className="flex flex-col">
-                      <span className="font-mono text-[12px] text-[#e6ebe4]">{m.name}</span>
-                      <span className="text-[10px] text-[#565d58]">{m.desc}</span>
-                    </span>
-                    {m.value === model && <span className="text-[#4fe89a]">✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+              <option value="">Default model</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* MOCK skills button — allowed_tools is hardcoded server-side; toggling
               skills is not wired to the backend. */}

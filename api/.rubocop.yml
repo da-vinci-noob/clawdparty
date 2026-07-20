@@ -61,10 +61,12 @@ Metrics/ParameterLists:
   CountKeywordArgs: false
 
 # RSpec specs are naturally long/expressive; relax the defaults that fight specs.
+# config/routes.rb is a single DSL block by design — length is not a smell there.
 Metrics/BlockLength:
   Exclude:
     - "spec/**/*"
     - "lib/tasks/**/*"
+    - "config/routes.rb"
 RSpec/ExampleLength:
   Enabled: false
 RSpec/MultipleExpectations:

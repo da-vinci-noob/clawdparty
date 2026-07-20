@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { server } from "../../test/msw_server";
+import { renderWithQuery } from "../../test/render_with_query";
 import { useEventStore } from "../stores/event_store";
 import { type Role, useParticipantStore } from "../stores/participant_store";
 import { DiffView } from "./diff_view";
@@ -198,15 +199,15 @@ describe("PromptComposer — revise while awaiting review", () => {
       }),
     );
     seedAwaitingReview();
-    render(<PromptComposer sessionId="s" />);
+    renderWithQuery(<PromptComposer sessionId="s" />);
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "tweak it" } });
     fireEvent.click(screen.getByText("Revise"));
 
     await waitFor(() =>
+      // No model chosen → the key is omitted so the server applies its default.
       expect(body).toEqual({
         prompt: "tweak it",
-        model: "claude-opus-4-8",
         mode: "revise",
         permission_mode: "acceptEdits",
       }),
@@ -222,7 +223,7 @@ describe("PromptComposer — revise while awaiting review", () => {
         return HttpResponse.json({ id: "9", status: "queued" }, { status: 202 });
       }),
     );
-    render(<PromptComposer sessionId="s" />);
+    renderWithQuery(<PromptComposer sessionId="s" />);
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do it" } });
     fireEvent.click(screen.getByText("Run"));
@@ -230,7 +231,6 @@ describe("PromptComposer — revise while awaiting review", () => {
     await waitFor(() =>
       expect(body).toEqual({
         prompt: "do it",
-        model: "claude-opus-4-8",
         permission_mode: "acceptEdits",
       }),
     );

@@ -1,8 +1,9 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { server } from "../../test/msw_server";
+import { renderWithQuery as renderComposer } from "../../test/render_with_query";
 import { useEventStore } from "../stores/event_store";
 import { type Role, useParticipantStore } from "../stores/participant_store";
 import { PromptComposer } from "./prompt_composer";
@@ -57,14 +58,14 @@ describe("PromptComposer permission modes", () => {
 
   it("is not rendered for a viewer (no run permission)", () => {
     setRole("viewer");
-    render(<PromptComposer sessionId="s" />);
+    renderComposer(<PromptComposer sessionId="s" />);
     expect(screen.queryByTestId("prompt-composer")).not.toBeInTheDocument();
   });
 
   it("sends the selected permission_mode on run start", async () => {
     const cap = captureRunStart();
     setRole("owner");
-    render(<PromptComposer sessionId="s" />);
+    renderComposer(<PromptComposer sessionId="s" />);
 
     fireEvent.change(screen.getByTestId("permission-mode"), { target: { value: "plan" } });
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
@@ -76,7 +77,7 @@ describe("PromptComposer permission modes", () => {
 
   it("hides the Bypass option from a non-owner (editor)", () => {
     setRole("editor");
-    render(<PromptComposer sessionId="s" />);
+    renderComposer(<PromptComposer sessionId="s" />);
     const options = Array.from(
       screen.getByTestId("permission-mode").querySelectorAll("option"),
     ).map((o) => o.textContent);
@@ -85,7 +86,7 @@ describe("PromptComposer permission modes", () => {
 
   it("offers Bypass to an owner", () => {
     setRole("owner");
-    render(<PromptComposer sessionId="s" />);
+    renderComposer(<PromptComposer sessionId="s" />);
     const options = Array.from(
       screen.getByTestId("permission-mode").querySelectorAll("option"),
     ).map((o) => o.textContent);
@@ -96,11 +97,49 @@ describe("PromptComposer permission modes", () => {
     const cap = captureRunStart();
     setRole("owner");
     planRunFinished();
-    render(<PromptComposer sessionId="s" />);
+    renderComposer(<PromptComposer sessionId="s" />);
 
     fireEvent.click(await screen.findByTestId("execute-plan"));
 
     await waitFor(() => expect(cap.last()).not.toBeNull());
     expect(cap.last()).toMatchObject({ permission_mode: "acceptEdits" });
+  });
+
+  it("populates the model dropdown from GET /api/models and sends the chosen model", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          source: "bedrock",
+          models: [{ id: "us.anthropic.claude-opus-4-8", label: "Bedrock Opus 4.8" }],
+        }),
+      ),
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // The discovered Bedrock model appears once the query resolves.
+    await screen.findByRole("option", { name: "Bedrock Opus 4.8" });
+
+    fireEvent.change(screen.getByTestId("model"), {
+      target: { value: "us.anthropic.claude-opus-4-8" },
+    });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).toMatchObject({ model: "us.anthropic.claude-opus-4-8" });
+  });
+
+  it("omits model on run start when left on Default", async () => {
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).not.toHaveProperty("model");
   });
 });

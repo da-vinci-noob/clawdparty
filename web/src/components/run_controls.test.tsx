@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { server } from "../../test/msw_server";
+import { renderWithQuery } from "../../test/render_with_query";
 import { useEventStore } from "../stores/event_store";
 import { type Role, useParticipantStore } from "../stores/participant_store";
 import { InterruptButton } from "./interrupt_button";
@@ -38,13 +39,13 @@ describe("run controls — role gating (presentation only; server enforces)", ()
   it("shows the composer for owner/editor, hides for reviewer/viewer", () => {
     for (const role of ["owner", "editor"] as Role[]) {
       setRole(role);
-      const { unmount } = render(<PromptComposer sessionId="s" />);
+      const { unmount } = renderWithQuery(<PromptComposer sessionId="s" />);
       expect(screen.getByTestId("prompt-composer")).toBeInTheDocument();
       unmount();
     }
     for (const role of ["reviewer", "viewer"] as Role[]) {
       setRole(role);
-      const { unmount } = render(<PromptComposer sessionId="s" />);
+      const { unmount } = renderWithQuery(<PromptComposer sessionId="s" />);
       expect(screen.queryByTestId("prompt-composer")).not.toBeInTheDocument();
       unmount();
     }
@@ -93,7 +94,7 @@ describe("prompt composer — server refusals are surfaced, not swallowed", () =
         ),
       ),
     );
-    render(<PromptComposer sessionId="s" />);
+    renderWithQuery(<PromptComposer sessionId="s" />);
     typeAndRun();
 
     expect(await screen.findByTestId("composer-error")).toHaveTextContent(
@@ -107,7 +108,7 @@ describe("prompt composer — server refusals are surfaced, not swallowed", () =
         HttpResponse.json({ errors: [{ message: "boom" }] }, { status: 500 }),
       ),
     );
-    render(<PromptComposer sessionId="s" />);
+    renderWithQuery(<PromptComposer sessionId="s" />);
     typeAndRun("keep me");
 
     await screen.findByTestId("composer-error");
@@ -120,7 +121,7 @@ describe("prompt composer — server refusals are surfaced, not swallowed", () =
         HttpResponse.json({ id: "7", status: "queued" }, { status: 202 }),
       ),
     );
-    render(<PromptComposer sessionId="s" />);
+    renderWithQuery(<PromptComposer sessionId="s" />);
     typeAndRun("go");
 
     await waitFor(() => expect(screen.getByLabelText("Prompt")).toHaveValue(""));
