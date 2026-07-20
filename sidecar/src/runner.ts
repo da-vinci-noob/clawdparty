@@ -2,8 +2,9 @@
 // query() in the session worktree, normalizes every SDK message into Contract-1
 // envelopes (normalizer.ts) and ships them via the transport. Follow-ups push
 // into a live pushable input iterable (no respawn); interrupt() stops the run.
-// Tracks the single active run. NEVER finalizes run state — Rails does that from
-// the lifecycle events this runner emits.
+// Tracks active runs keyed by run id — one active run PER SESSION (different sessions
+// run concurrently). NEVER finalizes run state — Rails does that from the lifecycle
+// events this runner emits.
 
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { EventEnvelope } from "@clawdparty/contracts";
@@ -79,6 +80,7 @@ class PushableInput implements AsyncIterable<unknown> {
 
 interface ActiveRun {
   runId: string;
+  sessionId: string;
   handle: QueryHandle;
   input: PushableInput;
   normalizer: Normalizer;
@@ -89,7 +91,7 @@ export class RunConflict extends Error {}
 export class UnknownRun extends Error {}
 
 export class Runner {
-  private active: ActiveRun | null = null;
+  private readonly active = new Map<string, ActiveRun>();
 
   constructor(
     private readonly transport: Transport,
@@ -97,15 +99,21 @@ export class Runner {
   ) {}
 
   activeRunIds(): string[] {
-    return this.active ? [this.active.runId] : [];
+    return [...this.active.keys()];
   }
 
-  // Accept a run start. One active run at a time — a second start throws RunConflict
-  // (the index.ts handler maps it to 409). Drives the query in the background and
-  // ships normalized events; returns once the query is launched (async to client).
+  // Accept a run start. One active run PER SESSION — a second start for a session that
+  // already has an active run throws RunConflict (the index.ts handler maps it to 409);
+  // different sessions run concurrently. Drives the query in the background and ships
+  // normalized events; returns once the query is launched (async to client).
   startRun(input: StartRunInput): void {
-    if (this.active) {
-      throw new RunConflict("a run is already active");
+    if (this.active.has(input.run_id)) {
+      throw new RunConflict(`run ${input.run_id} is already active`);
+    }
+    for (const run of this.active.values()) {
+      if (run.sessionId === input.session_id) {
+        throw new RunConflict("a run is already active for this session");
+      }
     }
     const normalizer = new Normalizer({
       sessionId: input.session_id,
@@ -123,14 +131,16 @@ export class Runner {
       options: buildOptions(input),
     });
 
-    this.active = {
+    const run: ActiveRun = {
       runId: input.run_id,
+      sessionId: input.session_id,
       handle,
       input: pushable,
       normalizer,
       requestedBy: input.requested_by,
     };
-    void this.drain(this.active, [promptEvent]);
+    this.active.set(run.runId, run);
+    void this.drain(run, [promptEvent]);
   }
 
   // Push a follow-up into the live run's input iterable (no respawn). Emit a
@@ -162,16 +172,17 @@ export class Runner {
   }
 
   private requireActive(runId: string): ActiveRun {
-    if (!this.active || this.active.runId !== runId) {
+    const run = this.active.get(runId);
+    if (!run) {
       throw new UnknownRun(`run ${runId} is not active`);
     }
-    return this.active;
+    return run;
   }
 
   // Consume the SDK message stream, normalize each, and ship the envelopes.
   // Stop on a terminal lifecycle event: in streaming-input mode the SDK keeps the
   // generator open awaiting more input after `result`, so waiting for it to return
-  // would leak the single run slot forever. Breaking lets `finally` close the
+  // would leak the run's slot forever. Breaking lets `finally` close the
   // input (signaling end-of-input to the SDK) and free the slot.
   private async drain(run: ActiveRun, leading: EventEnvelope[] = []): Promise<void> {
     try {
@@ -196,8 +207,8 @@ export class Runner {
       }
     } finally {
       run.input.close();
-      if (this.active?.runId === run.runId) {
-        this.active = null;
+      if (this.active.get(run.runId) === run) {
+        this.active.delete(run.runId);
       }
     }
   }
