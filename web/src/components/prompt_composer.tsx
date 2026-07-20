@@ -19,15 +19,11 @@ const MODE_OPTIONS: { value: PermissionMode; label: string; ownerOnly?: boolean 
   { value: "bypassPermissions", label: "Bypass", ownerOnly: true },
 ];
 
-// Context-window size per model (tokens). Current Claude models are 200K; unknown
-// models fall back to 200K. Used as the denominator of the CONTEXT bar.
-const CONTEXT_WINDOW_BY_MODEL: Record<string, number> = {
-  "claude-opus-4-8": 200_000,
-  "claude-sonnet-5": 200_000,
-  "claude-haiku-4-5-20251001": 200_000,
-};
+// Denominator when no discovered model matches (empty "Default" selection with no
+// completed run). Real windows come from model discovery (context_window).
 const DEFAULT_CONTEXT_WINDOW = 200_000;
-const tokensToK = (n: number): string => `${Math.round(n / 1000)}K`;
+const tokensToK = (n: number): string =>
+  n >= 1_000_000 ? `${n / 1_000_000}M` : `${Math.round(n / 1000)}K`;
 
 // Prompt composer: starts a run when none is active, sends a follow-up when one is,
 // and submits a `revise` follow-up while awaiting review. When starting a run the
@@ -124,9 +120,17 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const modeOptions = MODE_OPTIONS.filter((m) => !m.ownerOnly || can("bypass_permissions"));
 
   // Real context usage from the latest completed run (0 until the first run finishes).
-  // Window follows that run's model, falling back to the currently-selected model.
-  const contextWindow = CONTEXT_WINDOW_BY_MODEL[usageModel ?? model] ?? DEFAULT_CONTEXT_WINDOW;
+  // Window follows that run's model (falling back to the currently-selected model),
+  // read from the discovered models list — falling back to 200K when nothing matches.
+  const windowModelId = usageModel ?? model;
+  const contextWindow =
+    models.find((m) => m.id === windowModelId)?.context_window ?? DEFAULT_CONTEXT_WINDOW;
   const contextPct = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
+  // The model the latest run ACTUALLY used (from run_started), so a viewer can
+  // confirm the selection took effect — Claude can't reliably introspect this itself.
+  const runModelLabel = usageModel
+    ? (models.find((m) => m.id === usageModel)?.label ?? usageModel)
+    : null;
 
   return (
     <div className="relative z-[2] px-[18px] pb-4">
@@ -150,6 +154,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             />
           </div>
           <span data-testid="context-usage" className="font-mono text-[10px] text-[#7c847c]">
+            {runModelLabel && (
+              <span data-testid="context-model" className="text-[#565d58]">
+                {runModelLabel} ·{" "}
+              </span>
+            )}
             {tokensToK(contextTokens)} / {tokensToK(contextWindow)} · {contextPct}%
           </span>
         </div>

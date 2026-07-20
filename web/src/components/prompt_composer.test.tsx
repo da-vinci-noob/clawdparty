@@ -183,8 +183,19 @@ describe("PromptComposer context bar", () => {
     expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "0%" });
   });
 
-  it("reflects the latest completed run's prompt-side token usage", () => {
-    // 120000 input + 4000 cache-read = 124000 → 124K of a 200K window → 62%.
+  it("uses the model's REAL context window as the denominator (opus-4.8 is 1M, not 200K)", async () => {
+    // Regression: the window was hardcoded to 200K for every model, so a 1M model
+    // (opus-4.8, sonnet-5, …) showed the wrong denominator + percentage. The real
+    // window must come from model discovery (context_window / max_input_tokens).
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          source: "anthropic",
+          models: [{ id: "claude-opus-4-8", label: "Opus 4.8", context_window: 1_000_000 }],
+        }),
+      ),
+    );
+    // 120000 input + 4000 cache-read = 124000 → 124K of a 1M window → 12%.
     runWithUsage("claude-opus-4-8", {
       input_tokens: 120_000,
       output_tokens: 5000,
@@ -194,7 +205,28 @@ describe("PromptComposer context bar", () => {
     setRole("owner");
     renderComposer(<PromptComposer sessionId="s" />);
 
-    expect(screen.getByTestId("context-usage")).toHaveTextContent("124K / 200K · 62%");
-    expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "62%" });
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("124K / 1M · 12%");
+    expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "12%" });
+    // The actual model that ran is surfaced (confirms the selection took effect).
+    expect(screen.getByTestId("context-model")).toHaveTextContent("Opus 4.8");
+  });
+
+  it("reflects usage against a 200K-model window (haiku)", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          source: "anthropic",
+          models: [{ id: "claude-haiku-4-5-20251001", label: "Haiku", context_window: 200_000 }],
+        }),
+      ),
+    );
+    runWithUsage("claude-haiku-4-5-20251001", {
+      input_tokens: 120_000,
+      cache_read_input_tokens: 4000,
+    });
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("124K / 200K · 62%");
   });
 });

@@ -9,6 +9,8 @@ import { useQuery } from "@tanstack/react-query";
 export interface ModelInfo {
   id: string;
   label: string;
+  // The model's native context window in tokens (the CONTEXT bar's denominator).
+  context_window: number;
 }
 
 interface ModelList {
@@ -20,9 +22,9 @@ interface ModelList {
 // Mirrors the sidecar's FALLBACK_MODELS; used as initialData so the dropdown is
 // never empty during the first fetch.
 export const FALLBACK_MODELS: ModelInfo[] = [
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)" },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)", context_window: 1_000_000 },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)", context_window: 1_000_000 },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)", context_window: 200_000 },
 ];
 
 async function fetchModels(): Promise<ModelInfo[]> {
