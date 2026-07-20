@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
-import { selectDurableEvents, selectExecutablePlanRunId, useEventStore } from "./event_store";
+import {
+  selectDurableEvents,
+  selectExecutablePlanRunId,
+  selectLatestUsage,
+  useEventStore,
+} from "./event_store";
 
 // The executable contract fixture (real spike-derived envelopes, v1.1). Resolved
 // from the web/ package root (vitest runs with cwd = web/).
@@ -184,5 +189,76 @@ describe("selectExecutablePlanRunId", () => {
       .getState()
       .applyMany([runStarted(1, "run1", "acceptEdits"), runFinished(2, "run1")]);
     expect(selectExecutablePlanRunId(useEventStore.getState())).toBeNull();
+  });
+});
+
+describe("selectLatestUsage", () => {
+  beforeEach(() => useEventStore.getState().reset());
+
+  function started(id: number, runId: string, model: string): EventEnvelope {
+    return {
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: 2,
+      type: "run_started",
+      actor: { kind: "user", id: "p1" },
+      ts: "2026-07-20T00:00:00.000Z",
+      payload: { model, cwd: "/r", permission_mode: "acceptEdits", claude_session_id: "x" },
+    };
+  }
+
+  function finished(
+    id: number,
+    runId: string,
+    usage: Record<string, number>,
+    type: "run_finished" | "run_failed" = "run_finished",
+  ): EventEnvelope {
+    return {
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: 9,
+      type,
+      actor: { kind: "claude" },
+      ts: "2026-07-20T00:01:00.000Z",
+      payload: { usage },
+    };
+  }
+
+  it("returns null before any run completes", () => {
+    useEventStore.getState().apply(started(1, "run1", "claude-opus-4-8"));
+    expect(selectLatestUsage(useEventStore.getState())).toBeNull();
+  });
+
+  it("sums prompt-side tokens (input + cache read + cache creation) and returns the model", () => {
+    useEventStore.getState().applyMany([
+      started(1, "run1", "claude-opus-4-8"),
+      finished(2, "run1", {
+        input_tokens: 100_000,
+        output_tokens: 5000,
+        cache_read_input_tokens: 20_000,
+        cache_creation_input_tokens: 4000,
+      }),
+    ]);
+    expect(selectLatestUsage(useEventStore.getState())).toEqual({
+      contextTokens: 124_000,
+      model: "claude-opus-4-8",
+    });
+  });
+
+  it("uses the most recent completed run when several exist (incl. run_failed)", () => {
+    useEventStore
+      .getState()
+      .applyMany([
+        started(1, "run1", "claude-opus-4-8"),
+        finished(2, "run1", { input_tokens: 10_000 }),
+        started(3, "run2", "claude-sonnet-5"),
+        finished(4, "run2", { input_tokens: 50_000 }, "run_failed"),
+      ]);
+    expect(selectLatestUsage(useEventStore.getState())).toEqual({
+      contextTokens: 50_000,
+      model: "claude-sonnet-5",
+    });
   });
 });

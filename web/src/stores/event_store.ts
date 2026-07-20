@@ -247,4 +247,44 @@ export function selectExecutablePlanRunId(state: EventStoreState): string | null
   return finished ? runId : null;
 }
 
+export interface ContextUsage {
+  // Prompt-side tokens of the most recent completed run — a proxy for how full the
+  // context window is (input + cache-read + cache-creation = everything sent that turn).
+  contextTokens: number;
+  // The model that run used (from its run_started), for mapping to a window size.
+  model: string | null;
+}
+
+// The latest completed run's token usage, an approximate "context filled" gauge.
+// `usage` rides run_finished/run_failed (sidecar-populated) and lands in durableList.
+// Returns null before any run completes. NOTE: the SDK only reports usage on the
+// result message, so this reflects the LAST COMPLETED run — it updates at run end,
+// not live mid-stream. run_interrupted carries no usage and is ignored here.
+export function selectLatestUsage(state: EventStoreState): ContextUsage | null {
+  let terminal: EventEnvelope | null = null;
+  for (const e of state.durableList) {
+    if (e.ai_run_id !== null && (e.type === "run_finished" || e.type === "run_failed")) {
+      terminal = e;
+    }
+  }
+  if (terminal === null) {
+    return null;
+  }
+  const usage = (terminal.payload as { usage?: Record<string, number> }).usage;
+  if (!usage) {
+    return null;
+  }
+  const contextTokens =
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0);
+  let model: string | null = null;
+  for (const e of state.durableList) {
+    if (e.type === "run_started" && e.ai_run_id === terminal.ai_run_id) {
+      model = (e.payload as { model?: string }).model ?? null;
+    }
+  }
+  return { contextTokens, model };
+}
+
 export { deltaKey };

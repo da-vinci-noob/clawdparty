@@ -143,3 +143,58 @@ describe("PromptComposer permission modes", () => {
     expect(cap.last()).not.toHaveProperty("model");
   });
 });
+
+describe("PromptComposer context bar", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+  afterEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+
+  function runWithUsage(model: string, usage: Record<string, number>) {
+    const started: EventEnvelope = {
+      id: 1,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: 2,
+      type: "run_started",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-07-20T00:00:00.000Z",
+      payload: { model, cwd: "/r", permission_mode: "acceptEdits", claude_session_id: "x" },
+    };
+    const finished: EventEnvelope = {
+      ...started,
+      id: 2,
+      seq: 9,
+      type: "run_finished",
+      actor: { kind: "claude" },
+      payload: { usage },
+    };
+    useEventStore.getState().applyMany([started, finished]);
+  }
+
+  it("reads 0K / 200K · 0% before any run completes", () => {
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+    expect(screen.getByTestId("context-usage")).toHaveTextContent("0K / 200K · 0%");
+    expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "0%" });
+  });
+
+  it("reflects the latest completed run's prompt-side token usage", () => {
+    // 120000 input + 4000 cache-read = 124000 → 124K of a 200K window → 62%.
+    runWithUsage("claude-opus-4-8", {
+      input_tokens: 120_000,
+      output_tokens: 5000,
+      cache_read_input_tokens: 4000,
+      cache_creation_input_tokens: 0,
+    });
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    expect(screen.getByTestId("context-usage")).toHaveTextContent("124K / 200K · 62%");
+    expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "62%" });
+  });
+});
