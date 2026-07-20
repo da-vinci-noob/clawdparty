@@ -1,6 +1,5 @@
 import { type FC, type ReactNode, useState } from "react";
 import { useCurrentParticipant } from "../../hooks/use_current_participant";
-import { LogoMark } from "../landing/logo_mark";
 
 // ⚠️ MOCK DATA — there is no session-list/index API today (routes expose only
 // session create/update). The "Your sessions" / "Joined" lists below are static
@@ -78,8 +77,11 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
   return (
     <>
       <div className="flex items-center gap-[11px] px-4 pb-[15px] pt-[18px]">
-        <div className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] border border-[#1c2a20] bg-[#0e140f]">
-          <LogoMark />
+        <div
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] text-[16px] font-extrabold text-[#04101f]"
+          style={{ background: "linear-gradient(135deg,#2166b0,#3b9dff)" }}
+        >
+          ▚
         </div>
         <div className="flex flex-col leading-[1.15]">
           <span className="text-[15px] font-semibold tracking-[-0.2px]">
