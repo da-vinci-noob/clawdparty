@@ -221,19 +221,37 @@ describe("Runner", () => {
     expect(followUp?.seq).not.toBeNull();
   });
 
-  it("rejects a second concurrent start with RunConflict", () => {
-    const { transport } = captureTransport();
-    // A query that never ends, so the run stays active.
-    const handle = Object.assign(
+  // A fresh never-ending query per call, so multiple runs can stay active at once.
+  const hangingQuery = (): QueryHandle =>
+    Object.assign(
       (async function* (): AsyncGenerator<unknown> {
         await new Promise(() => {}); // hang
       })(),
       { interrupt: () => Promise.resolve() },
     ) as unknown as QueryHandle;
-    const runner = new Runner(transport, () => handle);
 
-    runner.startRun(baseInput);
-    expect(() => runner.startRun({ ...baseInput, run_id: "r2" })).toThrow(RunConflict);
+  it("rejects a second concurrent start in the SAME session with RunConflict", () => {
+    const { transport } = captureTransport();
+    const runner = new Runner(transport, () => hangingQuery());
+
+    runner.startRun({ ...baseInput, run_id: "r1", session_id: "sessA" });
+    expect(() => runner.startRun({ ...baseInput, run_id: "r2", session_id: "sessA" })).toThrow(
+      RunConflict,
+    );
+  });
+
+  it("allows concurrent runs in DIFFERENT sessions (one active run is PER SESSION)", () => {
+    // Regression: the runner had a single global slot, so a run in session A blocked
+    // the FIRST run of session B — the sidecar 409'd → Rails "A run is already active
+    // for this session". Different sessions must run concurrently.
+    const { transport } = captureTransport();
+    const runner = new Runner(transport, () => hangingQuery());
+
+    runner.startRun({ ...baseInput, run_id: "r1", session_id: "sessA" });
+    expect(() =>
+      runner.startRun({ ...baseInput, run_id: "r2", session_id: "sessB" }),
+    ).not.toThrow();
+    expect(runner.activeRunIds().sort()).toEqual(["r1", "r2"]);
   });
 
   it("interrupt emits a user-attributed run_interrupted and calls the SDK interrupt", async () => {
