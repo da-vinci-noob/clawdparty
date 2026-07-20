@@ -9,6 +9,7 @@
 
 import Fastify, { type FastifyInstance } from "fastify";
 import { type SidecarConfig, loadConfig } from "./config.js";
+import { listModels } from "./models.js";
 import { type QueryFn, RunConflict, Runner, type StartRunInput, UnknownRun } from "./runner.js";
 import { Transport } from "./transport.js";
 
@@ -17,6 +18,11 @@ export function buildServer(runner: Runner): FastifyInstance {
 
   // Liveness probe — no auth, reports the runner's real active runs.
   app.get("/healthz", async () => ({ active_run_ids: runner.activeRunIds() }));
+
+  // GET /models — the models available to THIS host's login (Bedrock inference
+  // profiles or Anthropic API models), discovered at runtime. Never 500s: on any
+  // failure listModels() returns a static fallback list tagged source "fallback".
+  app.get("/models", async () => listModels());
 
   // POST /runs — start a run. 202 on accept; 409 when a run is already active.
   app.post("/runs", async (req, reply) => {

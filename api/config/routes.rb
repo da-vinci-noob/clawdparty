@@ -18,6 +18,10 @@ Rails.application.routes.draw do
     # participant). GET /api/directories?path=…
     get 'directories', to: 'directories#index'
 
+    # Runtime model discovery (any participant): the models available to the host's
+    # Claude/Bedrock login, proxied from the sidecar. GET /api/models
+    get 'models', to: 'models#index'
+
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
     # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id
     resources :sessions, only: %i[create update] do

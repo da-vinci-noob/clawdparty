@@ -25,6 +25,13 @@ module Sidecar
       @http = http # injectable for tests; defaults to Net::HTTP
     end
 
+    # GET /models — the models available to the host's Claude/Bedrock login,
+    # discovered at runtime. The sidecar never 500s here (it falls back to a
+    # static list), so we just return the parsed body.
+    def list_models
+      get('/models')
+    end
+
     # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
     def start_run(payload)
       res = post('/runs', payload)
@@ -75,6 +82,17 @@ module Sidecar
       raise(TransportError, "sidecar #{path} failed: #{e.message}")
     end
 
+    def get(path)
+      uri = URI.join(base_url, path)
+      response = perform_get(uri)
+      parsed = response.body.to_s.empty? ? {} : JSON.parse(response.body)
+      Result.new(status: response.code.to_i, body: parsed)
+    rescue JSON::ParserError
+      Result.new(status: response.code.to_i, body: {})
+    rescue StandardError => e
+      raise(TransportError, "sidecar #{path} failed: #{e.message}")
+    end
+
     def perform(uri, json)
       return @http.call(uri, json) if @http # test seam
 
@@ -85,6 +103,15 @@ module Sidecar
       request['content-type'] = 'application/json'
       request.body = json
       http.request(request)
+    end
+
+    def perform_get(uri)
+      return @http.call(uri, nil) if @http # test seam
+
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.open_timeout = 5
+      http.read_timeout = 15
+      http.request(Net::HTTP::Get.new(uri))
     end
   end
 end
