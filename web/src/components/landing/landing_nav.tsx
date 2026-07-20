@@ -1,25 +1,110 @@
-import type { FC } from "react";
-import { LogoWordmark } from "./logo_mark";
+import type { CSSProperties, FC } from "react";
 
-// Sticky translucent nav. The "Start a session" button scrolls to the #cp-start
-// module (the Join/Create form) rather than routing anywhere.
-export const LandingNav: FC<{ onStart: () => void }> = ({ onStart }) => (
-  <nav className="sticky top-0 z-50 flex items-center justify-between border-b border-[#171d19] bg-[#0d0f0e]/75 px-8 py-4 backdrop-blur-md">
-    <LogoWordmark />
-    <div className="flex items-center gap-[26px]">
-      <a href="#features" className="text-sm font-medium text-[#a4aca6] hover:text-[#7ff2b8]">
-        Features
+type Theme = "dark" | "light";
+
+const linkBox: CSSProperties = { fontSize: 12.5 };
+
+// Sticky translucent nav: wordmark, section anchors, a light/dark toggle, a
+// "live" pulse, and the primary "start a session" CTA (anchors to the hero form
+// at #join). The section links collapse on narrow screens (cp-navlinks-extra).
+export const LandingNav: FC<{ theme: Theme; onToggleTheme: () => void }> = ({
+  theme,
+  onToggleTheme,
+}) => (
+  <nav
+    style={{
+      position: "sticky",
+      top: 0,
+      zIndex: 20,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: "16px 40px",
+      background: "var(--nav-bg)",
+      backdropFilter: "blur(9px)",
+      WebkitBackdropFilter: "blur(9px)",
+      borderBottom: "1px solid var(--divider)",
+    }}
+  >
+    <a
+      href="#top"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        fontWeight: 800,
+        fontSize: 15,
+        color: "var(--text)",
+        letterSpacing: ".01em",
+      }}
+    >
+      <span style={{ color: "var(--accent)" }}>▚</span>clawdparty
+    </a>
+    <div style={{ display: "flex", gap: 26, alignItems: "center", ...linkBox }}>
+      <a className="cp-navlink cp-navlinks-extra" href="#preview">
+        the session
       </a>
-      <a href="#decide" className="text-sm font-medium text-[#a4aca6] hover:text-[#7ff2b8]">
-        How it works
+      <a className="cp-navlink cp-navlinks-extra" href="#how">
+        how it works
+      </a>
+      <a className="cp-navlink cp-navlinks-extra" href="#roles">
+        roles
+      </a>
+      <a className="cp-navlink cp-navlinks-extra" href="#security">
+        security
       </a>
       <button
         type="button"
-        onClick={onStart}
-        className="rounded-[9px] bg-[#4fe89a] px-[18px] py-[9px] text-sm font-semibold text-[#0e1a13] shadow-[0_0_16px_rgba(79,232,154,.28)] transition hover:brightness-110"
+        onClick={onToggleTheme}
+        aria-label="Toggle light or dark mode"
+        className="cp-btn"
+        style={{
+          background: "none",
+          border: "1px solid var(--border)",
+          color: "var(--muted)",
+          borderRadius: 7,
+          width: 32,
+          height: 32,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 14,
+          lineHeight: 1,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
       >
-        Start a session
+        {theme === "light" ? "☾" : "☀"}
       </button>
+      <span
+        style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 7 }}
+      >
+        <span
+          className="cp-blink"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: "var(--accent)",
+            display: "inline-block",
+          }}
+        />
+        live
+      </span>
+      <a
+        className="cp-btn"
+        href="#join"
+        style={{
+          background: "var(--accent)",
+          color: "var(--on-accent)",
+          fontWeight: 700,
+          padding: "8px 15px",
+          borderRadius: 7,
+          fontSize: 12.5,
+        }}
+      >
+        start a session
+      </a>
     </div>
   </nav>
 );
