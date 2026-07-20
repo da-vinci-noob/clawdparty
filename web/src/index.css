@@ -80,3 +80,261 @@ pre {
     transform: translateY(-6px);
   }
 }
+
+/* ===== clawdparty landing — amber/orange theme =====
+   Everything below is scoped to the `.cp-landing` wrapper so the dark-green
+   session workspace is never affected. The theme is driven by CSS variables;
+   adding `.cp-light` on the same wrapper flips to the light palette. The
+   keyframes above (cp-shimmer / cp-pulse / cp-blink / cp-float) belong to the
+   feed + composer and are intentionally left untouched. */
+.cp-landing {
+  --bg: #0a0a0a;
+  --bg-alt: #0b0d0b;
+  --bg2: #0a0c0a;
+  --surface: #0c0e0c;
+  --surface-2: #0e140f;
+  --surface-3: #0c110d;
+  --input-bg: #0e120f;
+  --divider: #16211a;
+  --divider-2: #14201a;
+  --border: #17231b;
+  --border-2: #1c2a20;
+  --text: #e6e8e6;
+  --text-2: #cdd2cd;
+  --text-2b: #c5cad0;
+  --text-3: #aeb4ae;
+  --muted: #98a198;
+  --muted-2: #7c847c;
+  --muted-3: #6b726b;
+  --muted-4: #5f665f;
+  --placeholder: #5c6b5f;
+  --faint: #2b332d;
+  --accent: #3b9dff;
+  --accent-2: #b8dcff;
+  --on-accent: #04101f;
+  --accent-border: #1d3652;
+  --accent-border-2: #2c5580;
+  --accent-bg: #0a1826;
+  --accent-deep: #2166b0;
+  --accent-bg-2: #0f2438;
+  --danger-bg: #1a0e0e;
+  --danger-bg-2: #140c0c;
+  --danger-text: #f0a8a8;
+  --danger-border: #3a2020;
+  --nav-bg: rgba(10, 10, 10, 0.82);
+  --scan: rgba(255, 255, 255, 0.05);
+  --glow: rgba(59, 157, 255, 0.18);
+  --shadow: rgba(0, 0, 0, 0.75);
+  background: var(--bg);
+  color: var(--text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.cp-landing.cp-light {
+  --bg: #f7f6f2;
+  --bg-alt: #eeece6;
+  --bg2: #f1efe9;
+  --surface: #ffffff;
+  --surface-2: #f4f2ec;
+  --surface-3: #faf7f1;
+  --input-bg: #ffffff;
+  --divider: #e6e3da;
+  --divider-2: #ebe8df;
+  --border: #e1ded4;
+  --border-2: #d9d5c9;
+  --text: #1b1a17;
+  --text-2: #3a382f;
+  --text-2b: #43413a;
+  --text-3: #55534a;
+  --muted: #6d6b61;
+  --muted-2: #8a887d;
+  --muted-3: #9d9b90;
+  --muted-4: #adaa9e;
+  --placeholder: #a9a79b;
+  --faint: #cbc8bc;
+  --accent: #1a6fd4;
+  --accent-2: #1257ad;
+  --on-accent: #ffffff;
+  --accent-border: #c7ddf7;
+  --accent-border-2: #9dc3ef;
+  --accent-bg: #eaf3fe;
+  --accent-deep: #2a78cc;
+  --accent-bg-2: #dcecfc;
+  --danger-bg: #fbeaea;
+  --danger-bg-2: #fbecec;
+  --danger-text: #b23636;
+  --danger-border: #f0cccc;
+  --nav-bg: rgba(247, 246, 242, 0.85);
+  --scan: rgba(0, 0, 0, 0.035);
+  --glow: rgba(26, 111, 212, 0.18);
+  --shadow: rgba(0, 0, 0, 0.14);
+}
+
+.cp-landing a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.cp-landing a:hover {
+  color: var(--accent-2);
+}
+.cp-landing ::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.cp-landing header,
+.cp-landing section,
+.cp-landing footer,
+.cp-landing nav {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+@keyframes cp-fadeup {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes cp-scan {
+  to {
+    background-position: 0 240px;
+  }
+}
+@keyframes cp-glow {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+.cp-landing .cp-blink {
+  animation: cp-blink 1s step-end infinite;
+}
+.cp-landing .cp-fadeup {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: cp-fadeup 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+.cp-landing .cp-scan {
+  background-image: repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 3px);
+  animation: cp-scan 7s linear infinite;
+}
+.cp-landing .cp-glow {
+  animation: cp-glow 4.5s ease-in-out infinite;
+}
+.cp-landing .cp-navlink {
+  color: var(--muted);
+  transition: color 0.15s;
+}
+.cp-landing .cp-navlink:hover {
+  color: var(--accent);
+}
+.cp-landing .cp-card {
+  transition: border-color 0.18s, transform 0.18s;
+}
+.cp-landing .cp-card:hover {
+  border-color: var(--accent-border-2) !important;
+  transform: translateY(-2px);
+}
+.cp-landing .cp-btn {
+  transition: filter 0.15s, transform 0.1s;
+}
+.cp-landing .cp-btn:hover {
+  filter: brightness(1.08);
+}
+.cp-landing .cp-btn:active {
+  transform: translateY(1px);
+}
+.cp-landing .cp-stat {
+  transition: color 0.15s, border-color 0.15s;
+}
+.cp-landing .cp-stat:hover {
+  border-color: var(--accent-border-2) !important;
+}
+.cp-landing .cp-msg:hover {
+  background: var(--surface-2) !important;
+}
+.cp-landing .cp-tiltwrap {
+  perspective: 1200px;
+}
+.cp-landing .cp-tilt {
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1), box-shadow 0.18s;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.cp-landing .cp-a::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
+}
+.cp-landing .cp-a:focus {
+  border-color: var(--accent) !important;
+}
+
+/* Layout helpers — desktop-first grids that collapse on narrow screens. Wide
+   mockups (session window, roles table) scroll horizontally instead. */
+.cp-landing .cp-hero-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 72px 40px 84px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 52px;
+  align-items: center;
+}
+.cp-landing .cp-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 84px 40px;
+}
+.cp-landing .cp-3col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.cp-landing .cp-4col {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+.cp-landing .cp-scrollx {
+  overflow-x: auto;
+}
+@media (max-width: 880px) {
+  .cp-landing .cp-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    padding: 48px 22px 60px;
+  }
+  .cp-landing .cp-wrap {
+    padding: 60px 22px;
+  }
+  .cp-landing .cp-3col {
+    grid-template-columns: 1fr;
+  }
+  .cp-landing .cp-4col {
+    grid-template-columns: 1fr 1fr;
+  }
+  .cp-landing .cp-navlinks-extra {
+    display: none;
+  }
+}
+
+/* Respect reduced-motion: stop the looping ambient animations. cp-fadeup must
+   resolve to its visible end-state (not stay at opacity:0) when disabled. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .cp-landing .cp-scan,
+  .cp-landing .cp-blink,
+  .cp-landing .cp-glow {
+    animation: none;
+  }
+  .cp-landing .cp-fadeup {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
