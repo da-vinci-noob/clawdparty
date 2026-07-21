@@ -13,6 +13,7 @@ const LABELS: Record<string, string> = {
   changeset_ready: "changeset ready for review",
   changeset_approved: "approved the changes",
   changeset_rejected: "rejected the changes",
+  participant_joined: "joined the session",
 };
 
 // Human-readable label for a permission mode on the run_started banner.
