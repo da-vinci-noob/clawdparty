@@ -8,28 +8,10 @@
 # response mirrors the join shape so the web flow (store the participant → route
 # into the session) is identical.
 class SessionsController < ApplicationController
-  class DirectoryEscape < StandardError; end
-  class RequiresGitRepo < StandardError; end
+  include SessionWorkingDirectory
 
   # #create is the unauthenticated bootstrap; every other action requires an identity.
   before_action :require_user, only: %i[index update archive]
-
-  rescue_from DirectoryEscape do
-    render(json: { errors: [{ message: 'Working directory must be inside the repo root' }] },
-           status: :unprocessable_content)
-  end
-
-  rescue_from RequiresGitRepo do
-    render(
-      json: {
-        errors: [
-          { message: 'Review mode needs a git repository — pick a repo folder from the browser ' \
-                     '(a directory containing .git).' }
-        ]
-      },
-      status: :unprocessable_content
-    )
-  end
 
   # GET /api/sessions — the caller's session history: every session they host OR
   # participate in, de-duplicated, newest activity first. A per-user index (not
@@ -124,40 +106,6 @@ class SessionsController < ApplicationController
       )
       Participant.create!(session: session, user: user, role: 'owner')
     end
-  end
-
-  # The working directory to persist, for BOTH modes: an absolute path
-  # realpath-contained within the mounted repo root (defeat `../` + symlink
-  # escape), defaulting to the repo root when blank. review roots its worktree at
-  # this repo; chat pins it as the run cwd. Used by both #create and #update.
-  def working_directory
-    given = params[:repository_path].presence
-    return File.realpath(Git::WorktreeManager.repo_root) if given.nil?
-
-    contain_in_repo!(given)
-  end
-
-  # The working directory to persist for the given mode. review needs a git
-  # worktree base, so its resolved directory MUST be a git repository; a blank
-  # dir defaults to the repo root (the non-git PARENT of the repos), which fails
-  # here rather than later at run start. chat is unrestricted. The git check runs
-  # AFTER containment, so an escaping path is still the existing escape 422.
-  def working_directory_for(mode)
-    dir = working_directory
-    raise(RequiresGitRepo) if mode == 'review' && !git_repo?(dir)
-
-    dir
-  end
-
-  def git_repo?(dir)
-    File.exist?(File.join(dir, '.git'))
-  end
-
-  # Shared realpath-containment against the repo root; a refusal is a 422.
-  def contain_in_repo!(path)
-    RepoPaths.contain!(Git::WorktreeManager.repo_root, path)
-  rescue RepoPaths::Escape
-    raise(DirectoryEscape)
   end
 
   def session_json(session)
