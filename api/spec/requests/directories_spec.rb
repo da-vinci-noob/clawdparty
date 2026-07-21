@@ -38,9 +38,11 @@ RSpec.describe('Directory listing API') do
       expect(names).to(contain_exactly('plain', 'proj')) # no .hidden, no recursion into src
       expect(body['entries'].find { |e| e['name'] == 'proj' }['is_git_repo']).to(be(true))
       expect(body['entries'].find { |e| e['name'] == 'plain' }['is_git_repo']).to(be(false))
+      # The current dir (repo root) is itself not a git repo — review mode needs one.
+      expect(body['is_git_repo']).to(be(false))
     end
 
-    it 'lists into a subdirectory when given a path' do
+    it 'lists into a subdirectory when given a path, flagging whether it is a git repo' do
       join_as(session, role: 'viewer')
       get('/api/directories', params: { path: 'proj' })
 
@@ -49,6 +51,8 @@ RSpec.describe('Directory listing API') do
       expect(body['path']).to(eq('proj'))
       expect(body['entries'].pluck('name')).to(eq(['src']))
       expect(body['entries'].first['path']).to(eq('proj/src'))
+      # `proj` IS a git repo, so the picker allows "Use this folder" for review.
+      expect(body['is_git_repo']).to(be(true))
     end
 
     it 'refuses a ../ traversal with 404' do
