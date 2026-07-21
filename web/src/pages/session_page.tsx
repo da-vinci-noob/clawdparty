@@ -72,7 +72,7 @@ export const SessionPage: FC = () => {
       }
     >
       {reviewRunId && (
-        <div className="cp-diff-in sticky top-0 z-[3] mb-4 rounded-[13px] border border-[#1d3652] bg-[#0c0e0c] p-[18px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.7)]">
+        <div className="cp-diff-in mb-4 rounded-[13px] border border-[#1d3652] bg-[#0c0e0c] p-[18px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.7)]">
           <DiffView runId={reviewRunId} />
         </div>
       )}

@@ -218,9 +218,10 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
       </ul>
 
       {/* One card per file: header (badge · path · stats · caret) + tinted diff.
-          Bounded height + internal scroll so a tall diff never crowds out the
-          approve/reject footer or the activity feed below it in the center pane. */}
-      <div data-testid="diff-patch" className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+          No fixed height / inner scrollbar — the card is exactly as tall as the
+          diff and scrolls inline with the center pane (not pinned), so scrolling
+          past it reveals the activity feed rather than hiding it behind a fixed box. */}
+      <div data-testid="diff-patch" className="space-y-3">
         {parsed.map((file) => {
           const path = parsedPath(file);
           const isCollapsed = collapsed.has(path);
