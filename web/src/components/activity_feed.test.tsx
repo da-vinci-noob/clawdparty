@@ -149,7 +149,7 @@ describe("ActivityFeed", () => {
     expect(screen.getAllByTestId("feed-thinking")).toHaveLength(1);
   });
 
-  it("renders an ai_raw / unknown type via the safe fallback (no crash)", () => {
+  it("hides ai_raw events (persisted for backfill, but not rendered as feed noise)", () => {
     renderFeed();
     act(() =>
       useEventStore.getState().apply({
@@ -163,7 +163,31 @@ describe("ActivityFeed", () => {
         payload: { raw: { weird: true }, truncated: false },
       }),
     );
-    expect(screen.getByTestId("feed-raw-fallback")).toBeInTheDocument();
+    // Still in the durable store (contract: never dropped), but nothing rendered.
+    expect(useEventStore.getState().durableList).toHaveLength(1);
+    expect(screen.queryByTestId("feed-raw-fallback")).not.toBeInTheDocument();
+    expect(screen.queryByText("ai_raw")).not.toBeInTheDocument();
+  });
+
+  it("renders participant_joined as a named banner, not a raw type row", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().apply({
+        id: 1,
+        session_id: "sess_demo",
+        ai_run_id: null,
+        seq: null,
+        type: "participant_joined",
+        actor: { kind: "user", id: "42" },
+        ts: "2026-06-28T20:10:00.000Z",
+        payload: { participant_id: "42", name: "Alice", role: "owner" },
+      }),
+    );
+    const banner = screen.getByTestId("feed-run-banner");
+    expect(banner).toHaveTextContent("Alice");
+    expect(banner).toHaveTextContent("joined the session");
+    // No raw "participant_joined" type label leaking through.
+    expect(screen.queryByText("participant_joined")).not.toBeInTheDocument();
   });
 
   it("accumulates streamed text and renders it as a live trailing block", () => {

@@ -113,11 +113,20 @@ function renderEvent(
       return <TerminalBlock event={event} />;
     case "file_changed":
       return <FileChangedRow event={event} />;
+    case "participant_joined":
+      // A social banner ("<name> joined the session"), same framing as the run
+      // lifecycle — the name is resolved from actor.id via the names map.
+      return <RunBanner event={event} names={names} />;
+    case "ai_raw":
+      // The normalizer's safety valve for unmapped SDK messages. Still persisted
+      // (contract: never dropped) and available via backfill, but not user-facing
+      // noise — nothing to render in the feed.
+      return null;
     default:
       if (RUN_LIFECYCLE.has(event.type)) {
         return <RunBanner event={event} names={names} />;
       }
-      // ai_raw and anything else → safe fallback.
+      // Any other unmapped type → safe collapsible fallback (never crashes).
       return <RawFallback event={event} />;
   }
 }
