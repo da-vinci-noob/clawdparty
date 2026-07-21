@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EventEnvelope } from "@clawdparty/contracts";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useEventStore } from "../stores/event_store";
 import { ActivityFeed } from "./activity_feed";
@@ -230,5 +230,51 @@ describe("ActivityFeed", () => {
     expect(screen.queryAllByTestId("feed-text")).toHaveLength(0);
     expect(screen.getAllByTestId("feed-streaming-text")).toHaveLength(1);
     expect(useEventStore.getState().durableList).toHaveLength(0);
+  });
+});
+
+describe("ActivityFeed auto-scroll", () => {
+  beforeEach(() => useEventStore.getState().reset());
+  afterEach(() => useEventStore.getState().reset());
+
+  // Render the feed inside a scroll container with mocked layout metrics (jsdom
+  // has no layout), so getScrollParent finds it and we can assert scrollTop.
+  function renderInScroller(): HTMLElement {
+    const scroller = document.createElement("div");
+    scroller.style.overflowY = "auto";
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1000 });
+    render(<ActivityFeed />, { container: scroller });
+    return scroller;
+  }
+
+  function aiText(id: number, text: string): EventEnvelope {
+    return {
+      id,
+      session_id: "s",
+      ai_run_id: "r",
+      seq: id,
+      type: "ai_text",
+      actor: { kind: "claude" },
+      ts: "2026-07-22T00:00:00.000Z",
+      payload: { text },
+    };
+  }
+
+  it("auto-scrolls to the bottom when new content arrives while pinned", () => {
+    const scroller = renderInScroller();
+    act(() => useEventStore.getState().apply(aiText(1, "hello")));
+    // Pinned (default) → the container is scrolled to its full scrollHeight.
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("does not auto-scroll when the user has scrolled up to read history", () => {
+    const scroller = renderInScroller();
+    // User scrolls to the top → far from the bottom → unpinned.
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+    act(() => useEventStore.getState().apply(aiText(2, "new message")));
+    // Their scroll position is left untouched.
+    expect(scroller.scrollTop).toBe(0);
   });
 });
