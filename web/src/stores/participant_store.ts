@@ -12,6 +12,9 @@ export interface CurrentParticipant {
   session_id: string;
   role: Role;
   name: string;
+  // The session's working directory (from GET /api/sessions/:id/participant),
+  // shown in the terminal titlebar. Absent until hydrated.
+  repository_path?: string;
 }
 
 interface ParticipantStoreState {

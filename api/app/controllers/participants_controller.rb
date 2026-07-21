@@ -14,7 +14,9 @@ class ParticipantsController < ApplicationController
     participant = session && participant_for(session)
     return render_not_found if participant.nil?
 
-    render(json: participant_json(participant), status: :ok)
+    # Include the session's working directory so the client can show it (the
+    # terminal titlebar renders "<name>@clawdparty : <dir>").
+    render(json: participant_json(participant).merge(repository_path: session.repository_path), status: :ok)
   end
 
   def create

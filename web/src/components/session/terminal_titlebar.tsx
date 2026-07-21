@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import { useMemo } from "react";
 import { avatarColor, initialsOf } from "../../helpers/avatar";
+import { useCurrentParticipant } from "../../hooks/use_current_participant";
 import { selectDurableEvents, useEventStore } from "../../stores/event_store";
 
 interface ParticipantJoinedPayload {
@@ -14,6 +15,14 @@ interface ParticipantJoinedPayload {
 // tracked server-side, so the count is the number of known participants.
 export const TerminalTitlebar: FC<{ path?: string }> = ({ path }) => {
   const durable = useEventStore(selectDurableEvents);
+  const { participant } = useCurrentParticipant();
+
+  // Shell-style prompt: "<display name>@clawdparty : <working directory>". The dir
+  // is the session's selected directory (shown as its folder name); falls back to
+  // the `path` prop / a placeholder before the participant is hydrated.
+  const promptUser = participant?.name?.trim() || "clawd";
+  const dir = participant?.repository_path?.trim() || path?.trim() || "";
+  const workspace = dir ? (dir.split("/").filter(Boolean).at(-1) ?? dir) : "~/workspace";
 
   const participants = useMemo(() => {
     const list: { id: string; name: string }[] = [];
@@ -41,13 +50,16 @@ export const TerminalTitlebar: FC<{ path?: string }> = ({ path }) => {
         <span className="h-[11px] w-[11px] rounded-full bg-[#3a4440]" />
       </div>
       <div className="ml-1 flex min-w-0 items-center gap-2 font-mono text-[13px]">
-        <span className="flex-none text-[#6b726b]">clawd@party</span>
+        <span data-testid="titlebar-prompt" className="flex-none text-[#6b726b]">
+          {promptUser}@clawdparty
+        </span>
         <span className="flex-none text-[#3a4440]">:</span>
         <span
+          data-testid="titlebar-workspace"
           className="min-w-0 truncate text-[#3b9dff]"
           style={{ textShadow: "0 0 12px rgba(59,157,255,.4)" }}
         >
-          {path?.trim() ? path : "~/workspace"}
+          {workspace}
         </span>
         <span
           className="ml-[2px] h-[6px] w-[6px] flex-none rounded-full bg-[#3b9dff]"
