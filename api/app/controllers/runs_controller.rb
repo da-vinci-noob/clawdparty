@@ -6,6 +6,7 @@
 # sidecar accepts, do not block on completion.
 class RunsController < ApplicationController
   include RunPermissionModes
+  include RunCapabilities
   include RunErrorResponses
 
   before_action :require_user
@@ -16,14 +17,7 @@ class RunsController < ApplicationController
     raise(ActiveRecord::RecordNotFound) if session.nil?
 
     participant = authorize_action!(:run, session)
-    result = Runs::Start.call(
-      session: session,
-      requested_by: participant,
-      prompt: params.require(:prompt),
-      model: params[:model].presence || default_model,
-      mode: params[:mode].presence || 'fresh',
-      permission_mode: permission_mode_param(session)
-    )
+    result = start_run!(session, participant)
     render(json: { id: result.ai_run.id.to_s, status: result.ai_run.status }, status: :accepted)
   end
 
@@ -83,6 +77,21 @@ class RunsController < ApplicationController
   end
 
   private
+
+  # Validated run start: permission mode + capability selection (both gated
+  # behind the :run authorization already resolved in #create) threaded into
+  # Runs::Start. Kept out of #create to keep that action's ABC size honest.
+  def start_run!(session, participant)
+    Runs::Start.call(
+      session: session,
+      requested_by: participant,
+      prompt: params.require(:prompt),
+      model: params[:model].presence || default_model,
+      mode: params[:mode].presence || 'fresh',
+      permission_mode: permission_mode_param(session),
+      **capability_params(session)
+    )
+  end
 
   def find_run!
     AiRun.find_by(id: params[:id]) || raise(ActiveRecord::RecordNotFound)

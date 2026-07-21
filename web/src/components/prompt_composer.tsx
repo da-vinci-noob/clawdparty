@@ -8,7 +8,11 @@ import {
   selectLatestUsage,
   useEventStore,
 } from "../stores/event_store";
-import { SkillsPopover } from "./session/skills_popover";
+import {
+  type CapabilitySelection,
+  EMPTY_CAPABILITIES,
+  SkillsPopover,
+} from "./session/skills_popover";
 
 // The Claude permission modes a user may pick (CLI Shift+Tab). Bypass is owner-only
 // (it ignores the tool whitelist); the server re-enforces every choice.
@@ -45,6 +49,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   // chooses; the option list itself comes from runtime discovery (useModels).
   const [model, setModel] = useState("");
   const [skillOpen, setSkillOpen] = useState(false);
+  // Per-run capability selection (built-ins OFF / connectors ON / skills ON),
+  // lifted here so the popover stays controlled and the choice reaches run start.
+  const [caps, setCaps] = useState<CapabilitySelection>(EMPTY_CAPABILITIES);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +71,10 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         permission_mode: mode,
         ...(model ? { model } : {}),
         ...(revising ? { mode: "revise" } : {}),
+        // Additive capability scoping — omitted (today's behavior) when untouched.
+        ...(caps.disallowed_tools.length ? { disallowed_tools: caps.disallowed_tools } : {}),
+        ...(caps.connectors.length ? { connectors: caps.connectors } : {}),
+        ...(caps.skills.length ? { skills: caps.skills } : {}),
       }),
     });
 
@@ -134,7 +145,14 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   return (
     <div className="relative z-[2] px-[18px] pb-4">
-      {skillOpen && <SkillsPopover onClose={() => setSkillOpen(false)} />}
+      {skillOpen && showModeControl && (
+        <SkillsPopover
+          sessionId={sessionId}
+          value={caps}
+          onChange={setCaps}
+          onClose={() => setSkillOpen(false)}
+        />
+      )}
 
       <form
         onSubmit={submit}
@@ -224,22 +242,30 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             </select>
           )}
 
-          {/* MOCK skills button — allowed_tools is hardcoded server-side; toggling
-              skills is not wired to the backend. */}
-          <button
-            type="button"
-            onClick={() => setSkillOpen((v) => !v)}
-            className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
-              skillOpen
-                ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
-                : "border-[#17231b] bg-[#0e140f] text-[#cdd2cd] hover:border-[#2c5580]"
-            }`}
-          >
-            <span className="text-[12px]">✦</span> Skills
-            <span className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]">
-              3
-            </span>
-          </button>
+          {/* Tools/Connectors/Skills popover trigger. The badge shows how many
+              skills are enabled for this run (skills default-OFF → 0 until opted in).
+              Only shown when a new run is being configured; the whole composer is
+              already hidden from reviewer/viewer (they lack the `run` capability). */}
+          {showModeControl && (
+            <button
+              type="button"
+              data-testid="skills-toggle"
+              onClick={() => setSkillOpen((v) => !v)}
+              className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
+                skillOpen
+                  ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
+                  : "border-[#17231b] bg-[#0e140f] text-[#cdd2cd] hover:border-[#2c5580]"
+              }`}
+            >
+              <span className="text-[12px]">✦</span> Skills
+              <span
+                data-testid="skills-count"
+                className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]"
+              >
+                {caps.skills.length}
+              </span>
+            </button>
+          )}
 
           {/* permission mode — kept as the existing select (restyled) */}
           {showModeControl && (

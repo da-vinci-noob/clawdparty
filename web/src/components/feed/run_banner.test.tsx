@@ -37,3 +37,41 @@ describe("RunBanner permission mode", () => {
     expect(screen.queryByTestId("run-mode")).not.toBeInTheDocument();
   });
 });
+
+describe("RunBanner capability echo", () => {
+  it("shows the applied capabilities from a run_started payload", () => {
+    render(
+      <RunBanner
+        event={evt("run_started", {
+          model: "m",
+          cwd: "/r",
+          permission_mode: "acceptEdits",
+          claude_session_id: "x",
+          disallowed_tools: ["Bash"],
+          connectors: ["github"],
+          skills: ["pdf"],
+        })}
+        names={new Map([["p1", "Alice"]])}
+      />,
+    );
+    const caps = screen.getByTestId("run-caps");
+    expect(caps).toHaveTextContent("tools −Bash");
+    expect(caps).toHaveTextContent("connectors: github");
+    expect(caps).toHaveTextContent("skills: pdf");
+  });
+
+  it("shows no capability chip when the payload carries none", () => {
+    render(
+      <RunBanner
+        event={evt("run_started", {
+          model: "m",
+          cwd: "/r",
+          permission_mode: "acceptEdits",
+          claude_session_id: "x",
+        })}
+        names={new Map()}
+      />,
+    );
+    expect(screen.queryByTestId("run-caps")).not.toBeInTheDocument();
+  });
+});

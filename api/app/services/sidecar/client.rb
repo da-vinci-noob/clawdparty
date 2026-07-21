@@ -32,6 +32,19 @@ module Sidecar
       get('/models')
     end
 
+    # GET /connectors?cwd= — MCP servers the host has configured for the given
+    # repo path (name + transport only). Missing/unparseable config yields an
+    # empty list with an unavailable source (never a 500), like list_models.
+    def list_connectors(cwd:)
+      get('/connectors', { cwd: cwd })
+    end
+
+    # GET /skills?cwd= — skills discovered by scanning SKILL.md files under the
+    # given repo path + host ~/.claude (name + description only).
+    def list_skills(cwd:)
+      get('/skills', { cwd: cwd })
+    end
+
     # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
     def start_run(payload)
       res = post('/runs', payload)
@@ -82,8 +95,9 @@ module Sidecar
       raise(TransportError, "sidecar #{path} failed: #{e.message}")
     end
 
-    def get(path)
+    def get(path, query = nil)
       uri = URI.join(base_url, path)
+      uri.query = URI.encode_www_form(query) if query
       response = perform_get(uri)
       parsed = response.body.to_s.empty? ? {} : JSON.parse(response.body)
       Result.new(status: response.code.to_i, body: parsed)

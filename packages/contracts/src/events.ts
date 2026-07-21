@@ -21,7 +21,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 3 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 4 } as const;
 
 /**
  * The 22 frozen event type names. Adding or removing a name is a CONTRACT
@@ -126,7 +126,55 @@ export interface RunStartedPayload {
   cwd: string;
   permission_mode: string;
   claude_session_id: string;
+  /** The capabilities the run actually applied (additive since v1.4), echoed so
+   *  the UI — including late joiners via backfill — reflects a run's real scope.
+   *  Omitted means "today's defaults" (nothing disabled / no connectors / no
+   *  skills). These are the RESOLVED values, not the raw request. */
+  disallowed_tools?: string[];
+  connectors?: string[];
+  skills?: string[];
 }
+
+// --- Run capability selection (additive since v1.4) --------------------------
+// Shared shapes for the per-run tool/connector/skill surface. Tools are a FIXED
+// constant (they never vary by host/repo); connectors + skills are discovered
+// per session by the sidecar and proxied by Rails.
+
+export interface ToolInfo {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface ConnectorInfo {
+  name: string;
+  /** Transport kind only — never the server's command/url/headers/env/tokens. */
+  transport: string;
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
+/** The canonical built-in tools offered in the picker (all default-ON). The web
+ *  picker and Rails validation both read this — there is no /api/tools endpoint.
+ *  Turning one OFF sends it in `disallowed_tools`, which the sidecar maps to the
+ *  SDK `disallowedTools` (a bare name genuinely removes the tool, even under
+ *  bypassPermissions — `allowedTools` only pre-approves). */
+export const BUILTIN_TOOLS: readonly ToolInfo[] = [
+  { id: "Read", label: "Read", description: "Read files" },
+  { id: "Write", label: "Write", description: "Create & overwrite files" },
+  { id: "Edit", label: "Edit", description: "Edit files in place" },
+  { id: "Bash", label: "Bash", description: "Run shell commands" },
+  { id: "Glob", label: "Glob", description: "Find files by pattern" },
+  { id: "Grep", label: "Grep", description: "Search file contents" },
+  { id: "WebSearch", label: "WebSearch", description: "Search the web" },
+  { id: "WebFetch", label: "WebFetch", description: "Fetch & read web pages" },
+] as const;
+
+/** The bare tool ids, for validating a `disallowed_tools` selection. */
+export const BUILTIN_TOOL_IDS: readonly string[] = BUILTIN_TOOLS.map((t) => t.id);
 /** The human's prompt that drives a run — the initial prompt and each follow-up.
  *  Run-scoped + durable; emitted by the sidecar (it owns the per-run seq space).
  *  Attribution is on the envelope `actor` ({ kind: "user", id }), not the payload. */

@@ -12,7 +12,12 @@ module Runs
     class UnsupportedPermissionMode < StandardError; end
     class SessionArchived < StandardError; end
 
-    DEFAULT_ALLOWED_TOOLS = %w[Read Write Edit Bash].freeze
+    # The pre-approval base — the 8 built-in tools the composer advertises ON
+    # (kept in sync with packages/contracts BUILTIN_TOOLS; Rails can't import TS,
+    # so this is the Ruby source of truth). Turning a tool OFF is modeled as
+    # `disallowed_tools`, not by shrinking this set (only a bare disallowedTools
+    # truly removes a tool — see design D1/D8).
+    DEFAULT_ALLOWED_TOOLS = %w[Read Write Edit Bash Glob Grep WebSearch WebFetch].freeze
     # Claude permission modes users may pick (the CLI Shift+Tab modes we support).
     # `default`/`dontAsk`/ask-per-tool are intentionally excluded (no per-tool
     # approval UI). `bypassPermissions` is owner-gated in the controller.
@@ -26,13 +31,17 @@ module Runs
     end
 
     def initialize(session:, requested_by:, prompt:, model:, mode: 'fresh',
-                   permission_mode: DEFAULT_PERMISSION_MODE, client: Sidecar::Client.new, worktree: nil)
+                   permission_mode: DEFAULT_PERMISSION_MODE, disallowed_tools: [], connectors: [], skills: [],
+                   client: Sidecar::Client.new, worktree: nil)
       @session = session
       @requested_by = requested_by
       @prompt = prompt
       @model = model
       @mode = mode
       @permission_mode = permission_mode
+      @disallowed_tools = disallowed_tools
+      @connectors = connectors
+      @skills = skills
       @client = client
       @worktree = worktree || Git::WorktreeManager.new(session)
     end
@@ -126,6 +135,9 @@ module Runs
         allowed_tools: DEFAULT_ALLOWED_TOOLS
       }
       payload[:claude_session_id] = claude_session_id if claude_session_id
+      payload[:disallowed_tools] = @disallowed_tools if @disallowed_tools.present?
+      payload[:connectors] = @connectors if @connectors.present?
+      payload[:skills] = @skills if @skills.present?
       @client.start_run(payload).status
     end
   end
