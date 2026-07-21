@@ -219,8 +219,8 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
 
       {/* One card per file: header (badge · path · stats · caret) + tinted diff.
           No fixed height / inner scrollbar — the card is exactly as tall as the
-          diff. The sticky wrapper (session_page) floats it over the activity feed,
-          which fills the pane and scrolls underneath the pinned card. */}
+          diff and scrolls inline with the center pane (not pinned), so scrolling
+          past it reveals the activity feed rather than hiding it behind a fixed box. */}
       <div data-testid="diff-patch" className="space-y-3">
         {parsed.map((file) => {
           const path = parsedPath(file);
