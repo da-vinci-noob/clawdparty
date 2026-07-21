@@ -46,6 +46,39 @@ export function inferContextWindow(id: string): number {
   return ONE_MILLION_FAMILIES.some((token) => lower.includes(token)) ? 1_000_000 : 200_000;
 }
 
+// Bedrock exposes a separate cross-region inference profile per routing scope
+// (us./global./eu./apac.) for the SAME model, so ListInferenceProfiles yields
+// apparent duplicates ("US …" + "Global …"). Collapse to one entry per model,
+// preferring the global profile (region-agnostic), then us, then whatever's first.
+const PROFILE_PREFIX_RANK: Record<string, number> = { global: 0, us: 1, eu: 2, apac: 3 };
+
+export function dedupeByModel(models: ModelInfo[]): ModelInfo[] {
+  // Key by the model part (everything from "anthropic." on), ignoring the region prefix.
+  const baseKey = (id: string): string => {
+    const i = id.toLowerCase().indexOf("anthropic.");
+    return i === -1 ? id.toLowerCase() : id.slice(i).toLowerCase();
+  };
+  const rank = (id: string): number => {
+    const prefix = id.split(".")[0]?.toLowerCase() ?? "";
+    return PROFILE_PREFIX_RANK[prefix] ?? 9;
+  };
+  const best = new Map<string, ModelInfo>();
+  for (const m of models) {
+    const key = baseKey(m.id);
+    const existing = best.get(key);
+    if (!existing || rank(m.id) < rank(existing.id)) {
+      best.set(key, m);
+    }
+  }
+  return [...best.values()];
+}
+
+// Stable, predictable ordering for the picker (Bedrock returns an arbitrary order).
+// Alphabetical by label naturally groups by family (Fable/Haiku/Opus/Sonnet) + version.
+function sortByLabel(models: ModelInfo[]): ModelInfo[] {
+  return [...models].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function isBedrock(env: NodeJS.ProcessEnv): boolean {
   const v = env.CLAUDE_CODE_USE_BEDROCK;
   return v === "1" || v === "true";
@@ -77,7 +110,7 @@ async function listBedrockModels(env: NodeJS.ProcessEnv): Promise<ModelInfo[]> {
     }
     nextToken = res.nextToken;
   } while (nextToken);
-  return models;
+  return dedupeByModel(models);
 }
 
 // Enumerate models from the Anthropic API (direct API key or OAuth token login).
@@ -126,7 +159,7 @@ export async function listModels(
     if (models.length === 0) {
       return { models: FALLBACK_MODELS, source: "fallback" };
     }
-    return { models, source: bedrock ? "bedrock" : "anthropic" };
+    return { models: sortByLabel(models), source: bedrock ? "bedrock" : "anthropic" };
   } catch (err) {
     return { models: FALLBACK_MODELS, source: "fallback", error: String(err) };
   }

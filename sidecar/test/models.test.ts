@@ -114,9 +114,55 @@ describe("listModels — Bedrock path", () => {
       ],
     });
     const res = await listModels({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-west-2" });
+    // Sorted alphabetically by label: "Haiku 4.5" before "Sonnet 5".
     expect(res.models).toEqual([
-      { id: "us.anthropic.claude-sonnet-5-20250101", label: "Sonnet 5", context_window: 1_000_000 },
       { id: "us.anthropic.claude-haiku-4-5-20251001", label: "Haiku 4.5", context_window: 200_000 },
+      { id: "us.anthropic.claude-sonnet-5-20250101", label: "Sonnet 5", context_window: 1_000_000 },
+    ]);
+  });
+
+  it("returns the models sorted alphabetically by label", async () => {
+    send.mockReset().mockResolvedValueOnce({
+      inferenceProfileSummaries: [
+        { inferenceProfileId: "us.anthropic.claude-sonnet-5", inferenceProfileName: "Sonnet 5" },
+        { inferenceProfileId: "us.anthropic.claude-opus-4-8", inferenceProfileName: "Opus 4.8" },
+        { inferenceProfileId: "us.anthropic.claude-haiku-4-5", inferenceProfileName: "Haiku 4.5" },
+      ],
+    });
+    const res = await listModels({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-west-2" });
+    expect(res.models.map((m) => m.label)).toEqual(["Haiku 4.5", "Opus 4.8", "Sonnet 5"]);
+  });
+
+  it("collapses US/Global regional profiles to one per model, preferring global", async () => {
+    send.mockReset().mockResolvedValueOnce({
+      inferenceProfileSummaries: [
+        {
+          inferenceProfileId: "us.anthropic.claude-opus-4-8",
+          inferenceProfileName: "US Anthropic Claude Opus 4.8",
+        },
+        {
+          inferenceProfileId: "global.anthropic.claude-opus-4-8",
+          inferenceProfileName: "Global Anthropic Claude Opus 4.8",
+        },
+        {
+          inferenceProfileId: "us.anthropic.claude-haiku-4-5-20251001",
+          inferenceProfileName: "US Anthropic Claude Haiku 4.5",
+        },
+      ],
+    });
+    const res = await listModels({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-west-2" });
+    // One Opus entry (the global profile wins), plus the single Haiku profile.
+    expect(res.models).toEqual([
+      {
+        id: "global.anthropic.claude-opus-4-8",
+        label: "Global Anthropic Claude Opus 4.8",
+        context_window: 1_000_000,
+      },
+      {
+        id: "us.anthropic.claude-haiku-4-5-20251001",
+        label: "US Anthropic Claude Haiku 4.5",
+        context_window: 200_000,
+      },
     ]);
   });
 });
