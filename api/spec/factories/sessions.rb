@@ -5,17 +5,19 @@
 # Table name: sessions
 # Database name: primary
 #
-#  id              :bigint           not null, primary key
-#  base_branch     :string
-#  branch_name     :string
-#  objective       :text
-#  repository_path :string
-#  status          :string           default("active"), not null
-#  title           :string           not null
-#  worktree_path   :string
-#  created_at      :datetime         not null
-#  updated_at      :datetime         not null
-#  host_id         :bigint
+#  id               :bigint           not null, primary key
+#  base_branch      :string
+#  branch_name      :string
+#  last_activity_at :datetime
+#  mode             :string           default("review"), not null
+#  objective        :text
+#  repository_path  :string
+#  status           :string           default("active"), not null
+#  title            :string           not null
+#  worktree_path    :string
+#  created_at       :datetime         not null
+#  updated_at       :datetime         not null
+#  host_id          :bigint
 #
 # Indexes
 #

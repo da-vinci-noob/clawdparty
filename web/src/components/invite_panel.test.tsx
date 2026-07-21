@@ -45,6 +45,29 @@ describe("InvitePanel (owner-only; presentation gate)", () => {
     }
   });
 
+  it("does not render or fetch when the stored participant is for a DIFFERENT session", async () => {
+    // Owner of session "other", now viewing session "s" (e.g. navigated via the
+    // session list). The global store still holds role=owner for "other"; the
+    // panel must NOT treat that as authority for "s" — no owner UI, no
+    // owner-only GET /invites against "s" (which the server would 403).
+    let invitesFetched = false;
+    server.use(
+      http.get("/api/sessions/:id/invites", () => {
+        invitesFetched = true;
+        return HttpResponse.json([]);
+      }),
+    );
+    useParticipantStore
+      .getState()
+      .setCurrent({ id: "1", session_id: "other", role: "owner", name: "Me" });
+
+    render(<InvitePanel sessionId="s" />);
+
+    expect(screen.queryByTestId("invite-panel")).not.toBeInTheDocument();
+    // give any stray mount effect a tick to (not) fire
+    await waitFor(() => expect(invitesFetched).toBe(false));
+  });
+
   it("surfaces a server refusal on mint", async () => {
     server.use(
       http.get("/api/sessions/:id/invites", () => HttpResponse.json([])),

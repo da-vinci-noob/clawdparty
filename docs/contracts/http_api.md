@@ -32,6 +32,8 @@ implement this convention; it is pinned here as the single source.
 | area | endpoint(s) |
 |---|---|
 | session | create / join |
+| **session history** | `GET /api/sessions` (the caller's sessions — host or participant) |
+| **session archive** | `POST /api/sessions/:id/archive` (owner hard-close) |
 | invites | generate / use |
 | run | start `POST /api/sessions/:id/runs` |
 | run input | follow-up · interrupt |
@@ -39,6 +41,24 @@ implement this convention; it is pinned here as the single source.
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
 | changeset | approve · reject |
 | files | tree · content read |
+
+### Session history — `GET /api/sessions`
+
+A **per-user index** (not scoped to one session): returns **`200`** with an array of the caller's
+sessions — every session they **host** or **participate in**, de-duplicated, ordered by
+`last_activity_at` **descending**. Each row is
+`{ id, title, mode, status, my_role, last_activity_at, created_at }` (`id` a string; `status` one
+of `active`/`archived`; `my_role` the caller's role, or `owner` when host without a participant
+row). Gated only by a valid `clawd_uid`; an unauthenticated request is **`404`** `{ errors }` (the
+shared `require_user` anti-enumeration posture — not a distinct `401`).
+
+### Session archive — `POST /api/sessions/:id/archive`
+
+**Owner-only** (per the matrix below). Transitions the session `active → archived` and returns
+**`200`** `{ id, status: "archived" }`; **idempotent** (re-archiving is a `200` no-op). Archive is
+a **hard close** — `archived` is terminal (no un-archive) and starting a run on an archived session
+is refused with **`409`** `{ errors }`. A non-owner participant is `403`; a non-participant/unknown
+session is `404`.
 
 ### Event backfill — `GET /api/sessions/:id/events?after=<cursor>`
 
@@ -63,10 +83,12 @@ A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delive
 | action | owner | editor | reviewer | viewer |
 |---|:---:|:---:|:---:|:---:|
 | view / event backfill / read diffs & files | ✓ | ✓ | ✓ | ✓ |
+| list own sessions (`GET /api/sessions`) | ✓ | ✓ | ✓ | ✓ |
 | send `chat_message` | ✓ | ✓ | ✓ | ✓ |
 | create / update tasks | ✓ | ✓ | ✓ | ✗ |
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
 | approve / reject changeset | ✓ | ✗ | ✗ | ✗ |
+| archive session | ✓ | ✗ | ✗ | ✗ |
 
 (Per `docs/PLAN.md §9`: owner = everything incl. approve/reject; editor =
 runs/follow-ups/interrupt/tasks/chat; reviewer = tasks/chat/view; viewer = view/chat.)

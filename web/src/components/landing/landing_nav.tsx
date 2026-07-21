@@ -1,4 +1,5 @@
 import type { CSSProperties, FC } from "react";
+import { Link } from "react-router-dom";
 
 type Theme = "dark" | "light";
 
@@ -41,6 +42,9 @@ export const LandingNav: FC<{ theme: Theme; onToggleTheme: () => void }> = ({
       <span style={{ color: "var(--accent)" }}>▚</span>clawdparty
     </a>
     <div style={{ display: "flex", gap: 26, alignItems: "center", ...linkBox }}>
+      <Link className="cp-navlink" to="/sessions">
+        sessions
+      </Link>
       <a className="cp-navlink cp-navlinks-extra" href="#preview">
         the session
       </a>

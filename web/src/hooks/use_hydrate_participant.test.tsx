@@ -49,4 +49,32 @@ describe("useHydrateParticipant", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(useParticipantStore.getState().current).toBeNull();
   });
+
+  it("clears a STALE participant from a different session, then hydrates this one", async () => {
+    // Viewing session "42" while the store still holds an owner role for session
+    // "7" (navigated via the session list). The stale participant must be cleared
+    // immediately so no owner UI renders with the wrong role, then replaced by
+    // this session's real (lower) role once the server responds.
+    useParticipantStore
+      .getState()
+      .setCurrent({ id: "1", session_id: "7", role: "owner", name: "Me" });
+    server.use(
+      http.get("/api/sessions/:id/participant", () =>
+        HttpResponse.json(
+          { id: "9", session_id: "42", role: "editor", name: "Me" },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    renderHook(() => useHydrateParticipant("42"));
+
+    // Ends up as this session's real role; never leaves the stale owner in place.
+    await waitFor(() =>
+      expect(useParticipantStore.getState().current).toMatchObject({
+        session_id: "42",
+        role: "editor",
+      }),
+    );
+  });
 });

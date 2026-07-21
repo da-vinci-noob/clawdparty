@@ -10,12 +10,22 @@
 class SessionsController < ApplicationController
   class DirectoryEscape < StandardError; end
 
-  # Only #update requires an identity; #create is the unauthenticated bootstrap.
-  before_action :require_user, only: :update
+  # #create is the unauthenticated bootstrap; every other action requires an identity.
+  before_action :require_user, only: %i[index update archive]
 
   rescue_from DirectoryEscape do
     render(json: { errors: [{ message: 'Working directory must be inside the repo root' }] },
            status: :unprocessable_content)
+  end
+
+  # GET /api/sessions — the caller's session history: every session they host OR
+  # participate in, de-duplicated, newest activity first. A per-user index (not
+  # scoped to one session), so it is gated only by a valid clawd_uid; an
+  # unauthenticated request is 404 via require_user (anti-enumeration). Each row
+  # carries the caller's role (owner when host without a participant row).
+  def index
+    sessions = Session.for_user(current_user).includes(:participants)
+    render(json: sessions.map { |session| history_row(session) }, status: :ok)
   end
 
   def create
@@ -41,7 +51,47 @@ class SessionsController < ApplicationController
     render(json: session_json(session), status: :ok)
   end
 
+  # POST /api/sessions/:id/archive — owner hard-closes the session (active →
+  # archived, terminal). Idempotent: archiving an already-archived session is a
+  # 200 no-op. Non-participant/unknown => 404 (anti-enumeration); non-owner => 403
+  # (both via authorize!). A run cannot be started on an archived session — that
+  # guard lives in Runs::Start.
+  def archive
+    session = Session.find_by(id: params[:id])
+    raise(ActiveRecord::RecordNotFound) if session.nil?
+
+    authorize!(:archive, session)
+    session.update!(status: 'archived') unless session.archived?
+    render(json: { id: session.id.to_s, status: session.status }, status: :ok)
+  end
+
   private
+
+  # One row of the per-user history list. `status` is server-derived (active /
+  # archived); the web layer maps archived → the "revoked" badge. `owned` (am I the
+  # host) lets the UI split "Your sessions" from "Joined".
+  def history_row(session)
+    {
+      id: session.id.to_s,
+      title: session.title,
+      mode: session.mode,
+      status: session.status,
+      my_role: my_role(session),
+      owned: session.host_id == current_user.id,
+      last_activity_at: session.last_activity_at&.iso8601,
+      created_at: session.created_at.iso8601
+    }
+  end
+
+  # The caller's role in a session: their participant row's role, or `owner` when
+  # they are the host without a participant row (belt-and-suspenders — creators
+  # are made owner participants, but a host row alone still reads as owner).
+  def my_role(session)
+    participant = session.participants.find { |p| p.user_id == current_user.id }
+    return participant.role if participant
+
+    session.host_id == current_user.id ? 'owner' : nil
+  end
 
   def render_created(participant)
     announce_participant_joined(participant)

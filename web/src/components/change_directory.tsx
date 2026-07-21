@@ -7,14 +7,16 @@ import { DirectoryPicker } from "./directory_picker";
 // with { repository_path }. Client gating is presentation only — the server
 // SessionPolicy (manage_session) is the authoritative gate.
 export const ChangeDirectory: FC<{ sessionId: string }> = ({ sessionId }) => {
-  const { can } = useCurrentParticipant();
+  const { participant, can } = useCurrentParticipant();
   const [open, setOpen] = useState(false);
   const [directory, setDirectory] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!can("manage_session")) {
+  // Only trust the global participant store when it is for THIS session, so a
+  // stale higher role from a previously-viewed session cannot reveal owner UI.
+  if (participant?.session_id !== sessionId || !can("manage_session")) {
     return null;
   }
 

@@ -101,6 +101,19 @@ RSpec.describe(Runs::Start) do
     expect { start }.to(raise_error(Runs::Start::DirtyWorktree))
   end
 
+  describe 'archive is a hard close (no new run on an archived session)' do
+    it 'refuses to start on an archived session and posts nothing' do
+      session.update!(status: 'archived')
+      expect { start }.to(raise_error(Runs::Start::SessionArchived))
+      expect(posted).to(be_empty)
+      expect(session.ai_runs.count).to(eq(0))
+    end
+
+    it 'still starts on an active session' do
+      expect { start }.not_to(raise_error)
+    end
+  end
+
   describe 'permission_mode (selectable Claude mode, default acceptEdits)' do
     def start_with(permission_mode)
       described_class.call(session: session, requested_by: owner, prompt: 'build it',

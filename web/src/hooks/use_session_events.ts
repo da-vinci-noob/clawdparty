@@ -20,6 +20,13 @@ export function useSessionEvents(sessionId: string): SessionEventsStatus {
 
   useEffect(() => {
     setStatus("loading");
+    // The event store is GLOBAL. Navigating between sessions (now possible via the
+    // session list) without a full reload would otherwise leave the previous
+    // session's durable events AND its maxAppliedId cursor in place — the backfill
+    // would start from that high cursor (`after=<prev max>`) and return nothing,
+    // leaving a blank session, while any stale events still render. Reset FIRST so
+    // the cursor is 0 and the backfill replays THIS session's full history.
+    useEventStore.getState().reset();
     let controller: CableController | null = null;
 
     const channel: SessionChannel = {
