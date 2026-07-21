@@ -82,7 +82,7 @@ describe("LandingPage — create flow", () => {
   beforeEach(() => useParticipantStore.getState().clear());
   afterEach(() => useParticipantStore.getState().clear());
 
-  it("defaults to review mode and omits repository_path when the dir is blank", async () => {
+  it("defaults to review mode and posts the git working dir chosen in the picker", async () => {
     let captured: Record<string, unknown> | null = null;
     server.use(
       http.post("/api/sessions", async ({ request }) => {
@@ -92,18 +92,45 @@ describe("LandingPage — create flow", () => {
           { status: 201 },
         );
       }),
+      // Path-aware picker: the root is not a git repo; opening my-repo is, so
+      // review mode's "Use this folder" enables only inside it.
+      http.get("/api/directories", ({ request }) => {
+        const path = new URL(request.url).searchParams.get("path") ?? "";
+        if (path === "my-repo") {
+          return HttpResponse.json({
+            path: "my-repo",
+            is_git_repo: true,
+            entries: [{ name: "nested", path: "my-repo/nested", is_git_repo: false }],
+          });
+        }
+        return HttpResponse.json({
+          path: "",
+          is_git_repo: false,
+          entries: [{ name: "my-repo", path: "my-repo", is_git_repo: true }],
+        });
+      }),
     );
     renderLanding();
     switchToCreate();
 
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Ship it" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    // The create button is gated until a working directory is chosen.
+    expect(screen.getByRole("button", { name: "create session" })).toBeDisabled();
+    fireEvent.click(await screen.findByLabelText("Open my-repo"));
+    await screen.findByLabelText("Open nested"); // wait for the re-list
+    fireEvent.click(screen.getByRole("button", { name: "Use this folder" }));
     fireEvent.click(screen.getByRole("button", { name: "create session" }));
 
     await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
     // Left untouched, the mode select posts "review" (git worktree + approve/reject)
-    // and no working directory is sent.
-    expect(captured).toEqual({ title: "Ship it", name: "Alice", mode: "review" });
+    // with the chosen git repo as the working directory.
+    expect(captured).toEqual({
+      title: "Ship it",
+      name: "Alice",
+      mode: "review",
+      repository_path: "my-repo",
+    });
     expect(useParticipantStore.getState().current).toMatchObject({
       session_id: "7",
       role: "owner",
@@ -152,10 +179,20 @@ describe("LandingPage — create flow", () => {
       http.post("/api/sessions", () =>
         HttpResponse.json({ errors: [{ message: "Title can't be blank" }] }, { status: 422 }),
       ),
+      http.get("/api/directories", () =>
+        HttpResponse.json({
+          path: "",
+          entries: [{ name: "my-repo", path: "my-repo", is_git_repo: true }],
+        }),
+      ),
     );
     renderLanding();
     switchToCreate();
+    // chat mode so any chosen folder enables the (dir-gated) create button.
+    fireEvent.change(screen.getByLabelText("Session mode"), { target: { value: "chat" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
+    fireEvent.click(await screen.findByLabelText("Open my-repo"));
+    fireEvent.click(screen.getByRole("button", { name: "Use this folder" }));
     fireEvent.click(screen.getByRole("button", { name: "create session" }));
 
     expect(await screen.findByTestId("join-error")).toHaveTextContent("Title can't be blank");
