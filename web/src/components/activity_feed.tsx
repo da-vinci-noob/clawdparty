@@ -1,5 +1,5 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
-import type { FC } from "react";
+import { type FC, useEffect, useRef } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
 import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
 import { FileChangedRow } from "./feed/file_changed_row";
@@ -15,6 +15,23 @@ import { useParticipantList } from "./participant_list";
 
 // Cap the rendered durable set so a long run doesn't render thousands of nodes.
 const FEED_CAP = 500;
+
+// Within this many px of the bottom counts as "pinned to the bottom".
+const STICK_THRESHOLD_PX = 80;
+
+// The feed's nearest scrollable ancestor (the AppShell center <section>), found
+// by walking up — so auto-scroll doesn't hard-code the DOM nesting.
+function getScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll") {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
 
 const RUN_LIFECYCLE = new Set([
   "run_started",
@@ -44,6 +61,38 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const thinkingByBlock = useEventStore((s) => s.thinkingByBlock);
   const activeRunId = useEventStore(selectActiveRunId);
 
+  const feedRef = useRef<HTMLDivElement>(null);
+  // Whether the user is pinned to the bottom. Starts true (open at newest); flips
+  // to false when they scroll up to read history, so new content doesn't yank them.
+  const stick = useRef(true);
+
+  // Track the pinned-to-bottom state from the scroll container.
+  useEffect(() => {
+    const scroller = getScrollParent(feedRef.current);
+    if (!scroller) {
+      return;
+    }
+    const onScroll = (): void => {
+      const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      stick.current = distanceFromBottom < STICK_THRESHOLD_PX;
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Auto-scroll to the newest content as the feed grows — new events AND streaming
+  // text/thinking — but only while pinned to the bottom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally re-runs on rendered-content growth
+  useEffect(() => {
+    if (!stick.current) {
+      return;
+    }
+    const scroller = getScrollParent(feedRef.current);
+    if (scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  }, [durable, textByBlock, thinkingByBlock]);
+
   // Pair each tool_started with its tool_finished/tool_failed (same tool_use_id).
   const finishByToolId = new Map<string, EventEnvelope>();
   for (const e of durable) {
@@ -56,7 +105,11 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const windowed = durable.slice(-FEED_CAP);
 
   return (
-    <div data-testid="activity-feed" className="space-y-4 font-mono text-[13px] leading-[1.65]">
+    <div
+      ref={feedRef}
+      data-testid="activity-feed"
+      className="space-y-4 font-mono text-[13px] leading-[1.65]"
+    >
       {windowed.map((event) => (
         <div key={event.id ?? `${event.type}-${event.ts}`}>
           {renderEvent(event, finishByToolId, resolvedNames)}
