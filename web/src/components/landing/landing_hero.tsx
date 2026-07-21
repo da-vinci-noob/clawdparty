@@ -147,6 +147,12 @@ export const LandingHero: FC<{ form: HeroForm }> = ({ form }) => {
       ? "creating…"
       : "create session";
 
+  // Create must have a working directory chosen from the picker before it can
+  // submit (the picker sets form.directory only on "Use this folder"; review
+  // additionally restricts that to git repos). Join is never gated on a directory.
+  const needsDirectory = !isJoin && form.directory.trim() === "";
+  const submitDisabled = form.busy || needsDirectory;
+
   return (
     <header
       style={{
@@ -360,13 +366,21 @@ export const LandingHero: FC<{ form: HeroForm }> = ({ form }) => {
                     requireGit={form.mode === "review"}
                   />
                 </div>
+                {needsDirectory && (
+                  <p
+                    data-testid="create-directory-hint"
+                    style={{ color: "var(--muted-2)", fontSize: 11.5, margin: "0 0 10px" }}
+                  >
+                    Select a working directory to continue.
+                  </p>
+                )}
               </>
             )}
 
             <button
               className="cp-btn"
               type="submit"
-              disabled={form.busy}
+              disabled={submitDisabled}
               style={{
                 width: "100%",
                 marginTop: 4,
@@ -378,8 +392,8 @@ export const LandingHero: FC<{ form: HeroForm }> = ({ form }) => {
                 fontFamily: "inherit",
                 fontSize: 14,
                 fontWeight: 700,
-                cursor: form.busy ? "default" : "pointer",
-                opacity: form.busy ? 0.7 : 1,
+                cursor: submitDisabled ? "default" : "pointer",
+                opacity: submitDisabled ? 0.7 : 1,
               }}
             >
               {submitLabel}
