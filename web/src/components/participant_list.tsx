@@ -9,6 +9,12 @@ interface ParticipantJoinedPayload {
   role?: string;
 }
 
+export interface JoinedParticipant {
+  id: string;
+  name: string;
+  role: string;
+}
+
 // Build the (participant_id → name) map from participant_joined events, for
 // actor attribution elsewhere (chat, banners).
 export function useParticipantList(): ParticipantNames {
@@ -27,14 +33,13 @@ export function useParticipantList(): ParticipantNames {
   }, [durable]);
 }
 
-// The participant list with a minimal online/offline indicator from the
-// last-writer-wins presence_changed map. Presence beyond this stub is out of scope.
-export const ParticipantList: FC = () => {
+// The deduped roster of everyone who has joined the session, derived from
+// participant_joined events (id, display name, role) — the client's only source
+// of the roster (there is no participants index endpoint).
+export function useJoinedParticipants(): JoinedParticipant[] {
   const durable = useEventStore(selectDurableEvents);
-  const presence = useEventStore((s) => s.presenceByParticipant);
-
-  const participants = useMemo(() => {
-    const list: { id: string; name: string; role: string }[] = [];
+  return useMemo(() => {
+    const list: JoinedParticipant[] = [];
     const seen = new Set<string>();
     for (const e of durable) {
       if (e.type !== "participant_joined") {
@@ -52,6 +57,13 @@ export const ParticipantList: FC = () => {
     }
     return list;
   }, [durable]);
+}
+
+// The participant list with a minimal online/offline indicator from the
+// last-writer-wins presence_changed map. Presence beyond this stub is out of scope.
+export const ParticipantList: FC = () => {
+  const presence = useEventStore((s) => s.presenceByParticipant);
+  const participants = useJoinedParticipants();
 
   return (
     <ul data-testid="participant-list" className="space-y-1 text-xs">
