@@ -43,6 +43,9 @@ function mockDiff(runId = "run_1") {
 
 describe("DiffView (all roles review; owner-only controls)", () => {
   beforeEach(() => {
+    // jsdom has no layout engine → Element.scrollIntoView is undefined; stub it so
+    // the jump-to-file handler doesn't throw.
+    Element.prototype.scrollIntoView = () => {};
     useParticipantStore.getState().clear();
     useEventStore.getState().reset();
   });
@@ -63,6 +66,68 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     expect(screen.getByTestId("diff-patch")).toBeInTheDocument();
     // A reviewer cannot approve/reject.
     expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
+  });
+
+  it("renders one collapsible section per file and toggles it on header click", async () => {
+    const multiPatch = [
+      "diff --git a/a.txt b/a.txt",
+      "index e69de29..3b18e51 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -1 +1 @@",
+      "-a",
+      "+A",
+      "diff --git a/b.txt b/b.txt",
+      "index e69de29..3b18e51 100644",
+      "--- a/b.txt",
+      "+++ b/b.txt",
+      "@@ -1 +1 @@",
+      "-b",
+      "+B",
+      "",
+    ].join("\n");
+    server.use(
+      http.get("/api/runs/run_1/diff", () =>
+        HttpResponse.json(
+          {
+            run_id: "run_1",
+            base_sha: "abc123",
+            files: [
+              { path: "a.txt", insertions: 1, deletions: 1, binary: false },
+              { path: "b.txt", insertions: 1, deletions: 1, binary: false },
+            ],
+            patch: multiPatch,
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+    setRole("reviewer");
+    render(<DiffView runId="run_1" />);
+
+    // Two file-list rows and two patch sections, both expanded by default.
+    await waitFor(() => expect(screen.getAllByTestId("diff-file")).toHaveLength(2));
+    const headers = screen.getAllByTestId("diff-patch-header");
+    expect(headers).toHaveLength(2);
+    const [firstHeader] = headers as [HTMLElement, HTMLElement];
+    expect(firstHeader).toHaveAttribute("aria-expanded", "true");
+
+    // Collapsing the first section hides its hunks (aria-expanded flips to false).
+    fireEvent.click(firstHeader);
+    expect(screen.getAllByTestId("diff-patch-header")[0]).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("expands a collapsed section when its file-list row is clicked", async () => {
+    mockDiff();
+    setRole("reviewer");
+    render(<DiffView runId="run_1" />);
+
+    const header = await screen.findByTestId("diff-patch-header");
+    fireEvent.click(header); // collapse
+    expect(screen.getByTestId("diff-patch-header")).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByTestId("diff-file-jump")); // jump re-expands
+    expect(screen.getByTestId("diff-patch-header")).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows an empty state when there are no changes", async () => {
@@ -94,7 +159,7 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     mockDiff();
     setRole("owner");
     const { unmount } = render(<DiffView runId="run_1" />);
-    expect(screen.getByTestId("approve-button")).toBeInTheDocument();
+    expect(await screen.findByTestId("approve-button")).toBeInTheDocument();
     expect(screen.getByTestId("reject-button")).toBeInTheDocument();
     unmount();
 
@@ -118,7 +183,7 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     setRole("owner");
     render(<DiffView runId="run_1" />);
 
-    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(await screen.findByTestId("approve-button"));
     await waitFor(() => expect(approvedRunId).toBe("run_1"));
   });
 
@@ -134,7 +199,7 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     setRole("owner");
     render(<DiffView runId="run_1" />);
 
-    fireEvent.click(screen.getByTestId("reject-button"));
+    fireEvent.click(await screen.findByTestId("reject-button"));
     await waitFor(() => expect(rejectedRunId).toBe("run_1"));
   });
 
@@ -148,7 +213,7 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     setRole("owner");
     render(<DiffView runId="run_1" />);
 
-    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(await screen.findByTestId("approve-button"));
     expect(await screen.findByTestId("review-error")).toHaveTextContent(
       "Run is not awaiting review",
     );
