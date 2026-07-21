@@ -152,6 +152,11 @@ services:
     volumes:
       - ./web:/app:delegated
       - web_node_modules:/app/node_modules
+      # The frozen contracts package, mounted at /packages so the
+      # web/node_modules/@clawdparty/contracts symlink (../../../packages/contracts
+      # → /packages/contracts) resolves in-container — needed once web imports a
+      # runtime VALUE from it (type-only imports are erased and never resolved).
+      - ./packages:/packages:ro
     # No `ports:` key — the browser reaches the SPA only via the rails reverse-proxy.
 
 volumes:
