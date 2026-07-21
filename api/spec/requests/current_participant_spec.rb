@@ -5,7 +5,8 @@ require 'rails_helper'
 RSpec.describe('GET /api/sessions/:id/participant (re-hydrate from cookie)') do
   let(:session) { create(:session) }
 
-  it 'returns the current participant for a joined user (cookie-authenticated)' do
+  it 'returns the current participant + the session working directory (cookie-authenticated)' do
+    session.update!(repository_path: '/repo/proj')
     participant = join_as(session, role: 'owner')
     get("/api/sessions/#{session.id}/participant")
 
@@ -14,6 +15,8 @@ RSpec.describe('GET /api/sessions/:id/participant (re-hydrate from cookie)') do
     expect(body['id']).to(eq(participant.id.to_s))
     expect(body['role']).to(eq('owner'))
     expect(body['session_id']).to(eq(session.id.to_s))
+    # The titlebar renders "<name>@clawdparty : <dir>" from this.
+    expect(body['repository_path']).to(eq('/repo/proj'))
   end
 
   it 'refuses an unauthenticated request with 404' do
