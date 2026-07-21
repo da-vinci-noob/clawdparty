@@ -110,7 +110,7 @@ describe("LandingPage — create flow", () => {
     });
   });
 
-  it("creates a chat-mode session with a typed working directory", async () => {
+  it("creates a chat-mode session with a working directory chosen via the folder picker", async () => {
     let captured: Record<string, unknown> | null = null;
     server.use(
       http.post("/api/sessions", async ({ request }) => {
@@ -120,21 +120,29 @@ describe("LandingPage — create flow", () => {
           { status: 201 },
         );
       }),
+      // The folder picker browses repo-root-relative dirs (with git-repo badges),
+      // so the working dir is CHOSEN, not typed — no literal "~/…" ever reaches the API.
+      http.get("/api/directories", () =>
+        HttpResponse.json({
+          path: "",
+          entries: [{ name: "my-repo", path: "my-repo", is_git_repo: true }],
+        }),
+      ),
     );
     renderLanding();
     switchToCreate();
     fireEvent.change(screen.getByLabelText("Session mode"), { target: { value: "chat" } });
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Chatty" } });
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Alice" } });
-    fireEvent.change(screen.getByLabelText("Working directory"), {
-      target: { value: "~/dev/my-repo" },
-    });
+    // Open the "my-repo" folder in the picker, then use it as the working directory.
+    fireEvent.click(await screen.findByLabelText("Open my-repo"));
+    fireEvent.click(screen.getByRole("button", { name: "Use this folder" }));
     fireEvent.click(screen.getByRole("button", { name: "create session" }));
 
     await waitFor(() => expect(screen.getByTestId("session-route")).toBeInTheDocument());
     expect(captured).toMatchObject({
       mode: "chat",
-      repository_path: "~/dev/my-repo",
+      repository_path: "my-repo",
       title: "Chatty",
     });
   });
