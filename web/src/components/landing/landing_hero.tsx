@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import { DirectoryPicker } from "../directory_picker";
 
 type Mode = "join" | "create";
 type SessionMode = "review" | "chat";
@@ -352,14 +353,9 @@ export const LandingHero: FC<{ form: HeroForm }> = ({ form }) => {
                   <option value="review">review — git diff + approve/reject</option>
                   <option value="chat">chat — run in a directory, no git</option>
                 </select>
-                <input
-                  className="cp-a"
-                  aria-label="Working directory"
-                  placeholder="~/dev/my-repo  (working directory)"
-                  value={form.directory}
-                  onChange={(e) => form.setDirectory(e.target.value)}
-                  style={inputStyle}
-                />
+                <div style={{ marginBottom: 10 }}>
+                  <DirectoryPicker value={form.directory} onChange={form.setDirectory} />
+                </div>
               </>
             )}
 
