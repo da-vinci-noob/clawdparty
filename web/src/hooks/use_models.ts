@@ -1,8 +1,13 @@
 // Fetches the models available to the host's Claude/Bedrock login from
-// GET /api/models (proxied from the sidecar, discovered at runtime). Falls back
-// to a small static list so the picker always has options even before the fetch
-// resolves or if discovery fails server-side. On Bedrock the ids are inference-
-// profile ids (e.g. "us.anthropic.claude-opus-4-8") — exactly what run start needs.
+// GET /api/models (proxied from the sidecar, discovered at runtime). On Bedrock the
+// ids are inference-profile ids (e.g. "global.anthropic.claude-opus-4-8") — exactly
+// what run start needs.
+//
+// IMPORTANT: only models the sidecar actually DISCOVERED (source "bedrock" or
+// "anthropic") are safe to run. A hardcoded plain id like "claude-opus-4-8" is
+// invalid on Bedrock (which requires the inference-profile id), so we never offer a
+// static fallback in the picker — until discovery resolves (and if it fails), the
+// only choice is "Default model" (the server's configured model), which always works.
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -19,34 +24,32 @@ interface ModelList {
   error?: string;
 }
 
-// Mirrors the sidecar's FALLBACK_MODELS; used as initialData so the dropdown is
-// never empty during the first fetch.
-export const FALLBACK_MODELS: ModelInfo[] = [
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)", context_window: 1_000_000 },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)", context_window: 1_000_000 },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)", context_window: 200_000 },
-];
+// Only these sources are real, host-valid discoveries; "fallback"/loading/errors
+// carry ids that may not resolve for this login, so the picker ignores them.
+const REAL_SOURCES = new Set(["bedrock", "anthropic"]);
 
-async function fetchModels(): Promise<ModelInfo[]> {
-  const res = await fetch("/api/models", {
-    headers: { accept: "application/json" },
-    credentials: "include",
-  });
-  if (!res.ok) {
-    return FALLBACK_MODELS;
+async function fetchModels(): Promise<ModelList> {
+  try {
+    const res = await fetch("/api/models", {
+      headers: { accept: "application/json" },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      return { models: [], source: "unavailable" };
+    }
+    return (await res.json()) as ModelList;
+  } catch {
+    return { models: [], source: "unavailable" };
   }
-  const body = (await res.json()) as ModelList;
-  return body.models?.length ? body.models : FALLBACK_MODELS;
 }
 
+// The discovered, host-valid models (empty while loading or if discovery failed).
+// Consumers pair this with a "Default model" option that uses the server default.
 export function useModels(): ModelInfo[] {
   const { data } = useQuery({
     queryKey: ["models"],
     queryFn: fetchModels,
-    // placeholderData (not initialData) so the dropdown shows the fallback list
-    // immediately AND a real discovery fetch still fires on mount.
-    placeholderData: FALLBACK_MODELS,
     staleTime: 60_000,
   });
-  return data ?? FALLBACK_MODELS;
+  return data?.source && REAL_SOURCES.has(data.source) ? data.models : [];
 }
