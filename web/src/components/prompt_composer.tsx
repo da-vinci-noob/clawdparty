@@ -1,6 +1,8 @@
 import { type FC, type FormEvent, useState } from "react";
+import { useConnectors } from "../hooks/use_connectors";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
 import { useModels } from "../hooks/use_models";
+import { useSkills } from "../hooks/use_skills";
 import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
@@ -33,6 +35,11 @@ const tokensToK = (n: number): string =>
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const models = useModels();
+  // Capabilities have no per-item toggle: every host connector + installed skill is
+  // available to the run (all tools stay on). The composer sends that enablement on
+  // run start; these are the real discovered lists (for the badge + what to send).
+  const connectors = useConnectors(sessionId);
+  const skills = useSkills(sessionId);
   const activeRunId = useEventStore(selectActiveRunId);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   const planRunId = useEventStore(selectExecutablePlanRunId);
@@ -64,6 +71,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         permission_mode: mode,
         ...(model ? { model } : {}),
         ...(revising ? { mode: "revise" } : {}),
+        // No per-item toggles: every discovered connector + skill is enabled (all
+        // tools stay on, so no disallowed_tools). Omitted when the host has none →
+        // today's behavior.
+        ...(connectors.length ? { connectors: connectors.map((c) => c.name) } : {}),
+        ...(skills.length ? { skills: "all" as const } : {}),
       }),
     });
 
@@ -134,7 +146,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   return (
     <div className="relative z-[2] px-[18px] pb-4">
-      {skillOpen && <SkillsPopover onClose={() => setSkillOpen(false)} />}
+      {skillOpen && showModeControl && (
+        <SkillsPopover sessionId={sessionId} onClose={() => setSkillOpen(false)} />
+      )}
 
       <form
         onSubmit={submit}
@@ -224,22 +238,30 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             </select>
           )}
 
-          {/* MOCK skills button — allowed_tools is hardcoded server-side; toggling
-              skills is not wired to the backend. */}
-          <button
-            type="button"
-            onClick={() => setSkillOpen((v) => !v)}
-            className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
-              skillOpen
-                ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
-                : "border-[#17231b] bg-[#0e140f] text-[#cdd2cd] hover:border-[#2c5580]"
-            }`}
-          >
-            <span className="text-[12px]">✦</span> Skills
-            <span className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]">
-              3
-            </span>
-          </button>
+          {/* Tools/Connectors/Skills popover trigger. The badge shows how many
+              skills the host has available (all are usable by the run — skills have
+              no per-skill toggle). Only shown when a new run is being configured; the
+              whole composer is already hidden from reviewer/viewer (no `run` cap). */}
+          {showModeControl && (
+            <button
+              type="button"
+              data-testid="skills-toggle"
+              onClick={() => setSkillOpen((v) => !v)}
+              className={`flex items-center gap-[7px] rounded-[9px] border px-[11px] py-[7px] font-mono text-[12px] ${
+                skillOpen
+                  ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
+                  : "border-[#17231b] bg-[#0e140f] text-[#cdd2cd] hover:border-[#2c5580]"
+              }`}
+            >
+              <span className="text-[12px]">✦</span> Skills
+              <span
+                data-testid="skills-count"
+                className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]"
+              >
+                {skills.length}
+              </span>
+            </button>
+          )}
 
           {/* permission mode — kept as the existing select (restyled) */}
           {showModeControl && (

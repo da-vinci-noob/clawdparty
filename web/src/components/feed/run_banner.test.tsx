@@ -37,3 +37,24 @@ describe("RunBanner permission mode", () => {
     expect(screen.queryByTestId("run-mode")).not.toBeInTheDocument();
   });
 });
+
+describe("RunBanner has no capability echo", () => {
+  it("never renders connectors/skills on run_started (always-on, not echoed)", () => {
+    render(
+      <RunBanner
+        event={evt("run_started", {
+          model: "m",
+          cwd: "/r",
+          permission_mode: "acceptEdits",
+          claude_session_id: "x",
+          connectors: ["github"],
+          skills: ["pdf"],
+        })}
+        names={new Map([["p1", "Alice"]])}
+      />,
+    );
+    expect(screen.queryByTestId("run-caps")).not.toBeInTheDocument();
+    expect(screen.queryByText(/connectors:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/skills:/)).not.toBeInTheDocument();
+  });
+});

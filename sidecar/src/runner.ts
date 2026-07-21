@@ -8,6 +8,7 @@
 
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { EventEnvelope } from "@clawdparty/contracts";
+import { resolveConnectors } from "./capabilities.js";
 import { Normalizer } from "./normalizer.js";
 import type { Transport } from "./transport.js";
 
@@ -22,6 +23,11 @@ export interface StartRunInput {
   permission_mode?: string;
   allowed_tools?: string[];
   claude_session_id?: string;
+  // Per-run capability selection (additive, v1.4). All default to today's behavior
+  // when omitted: nothing disabled, no connectors, no skills.
+  disallowed_tools?: string[];
+  connectors?: string[];
+  skills?: string[] | "all";
 }
 
 // The SDK Query surface the runner needs: an async-iterable of messages + interrupt,
@@ -239,10 +245,12 @@ function userMessage(text: string): unknown {
 }
 
 function buildOptions(input: StartRunInput): Record<string, unknown> {
+  // A fresh array so appended connector patterns never mutate the caller's input.
+  const allowedTools = [...(input.allowed_tools ?? ["Read", "Write", "Edit", "Bash"])];
   const options: Record<string, unknown> = {
     cwd: input.repo_path,
     permissionMode: input.permission_mode ?? "acceptEdits",
-    allowedTools: input.allowed_tools ?? ["Read", "Write", "Edit", "Bash"],
+    allowedTools,
     // Live streaming: interleave partial content_block_delta events (text +
     // thinking) with the complete messages, and enable adaptive thinking so
     // thinking_delta events are produced. Mapped in normalizer.mapStreamEvent.
@@ -257,6 +265,32 @@ function buildOptions(input: StartRunInput): Record<string, unknown> {
   }
   if (input.claude_session_id) {
     options.resume = input.claude_session_id;
+  }
+  // OFF tools → disallowedTools (BARE names): the only true disable, and it holds
+  // even under bypassPermissions (allowedTools merely pre-approves). Omitted when
+  // empty so the default is identical to today.
+  if (input.disallowed_tools && input.disallowed_tools.length > 0) {
+    options.disallowedTools = [...input.disallowed_tools];
+  }
+  // Selected connectors → resolved against host config into mcpServers + allowed
+  // `mcp__<name>__*` patterns. Built explicitly here so these win over anything a
+  // settings file (loaded once skills enable settingSources) might inject —
+  // unselected settings-file servers never leak into the run.
+  if (input.connectors && input.connectors.length > 0) {
+    const { mcpServers, allowedToolPatterns } = resolveConnectors(
+      input.repo_path,
+      input.connectors,
+    );
+    if (Object.keys(mcpServers).length > 0) {
+      options.mcpServers = mcpServers;
+      allowedTools.push(...allowedToolPatterns);
+    }
+  }
+  // Skills: enabling requires settingSources so SKILL.md files load (this also
+  // auto-adds the Skill tool). Default-OFF — set only when a selection is present.
+  if (input.skills === "all" || (Array.isArray(input.skills) && input.skills.length > 0)) {
+    options.settingSources = ["user", "project"];
+    options.skills = input.skills;
   }
   return options;
 }

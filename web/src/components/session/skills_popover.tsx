@@ -1,42 +1,47 @@
+import { BUILTIN_TOOLS } from "@clawdparty/contracts";
 import { type FC, useState } from "react";
+import { useConnectors } from "../../hooks/use_connectors";
+import { useSkills } from "../../hooks/use_skills";
 
-// ⚠️ MOCK — the sidecar's allowed_tools is hardcoded (Read/Write/Edit/Bash) and
-// there is no skills/tool-toggle API. This popover is a visual placeholder: the
-// toggles keep local state only and are NOT sent to the backend. Wire to a real
-// allowed_tools param on run start when that exists.
-interface Skill {
-  icon: string;
+// A read-only panel of the capabilities available to a run — Tools, Connectors,
+// and Skills. There are NO per-item toggles: every built-in tool, every
+// host-configured MCP connector, and every installed skill is available to the
+// run (Claude uses them as needed), matching how Claude Code normally works. The
+// composer sends the enablement (all connectors + skills: "all") on run start; this
+// component only displays what the host has.
+interface Item {
   name: string;
   desc: string;
-  on: boolean;
 }
 
-const INITIAL: Record<string, Skill[]> = {
-  Tools: [
-    { icon: "◈", name: "web-search", desc: "Search the web for context", on: true },
-    { icon: "⛁", name: "code-interpreter", desc: "Run code in a sandbox", on: true },
-    { icon: "⎘", name: "file-edit", desc: "Read & edit repo files", on: true },
-  ],
-  Connectors: [
-    { icon: "▲", name: "Amplitude", desc: "Product analytics & funnels", on: false },
-    { icon: "◇", name: "Linear", desc: "Issues & projects", on: false },
-    { icon: "⬡", name: "GitHub", desc: "PRs, issues, code search", on: false },
-  ],
+const TABS = ["Tools", "Connectors", "Skills"] as const;
+type Tab = (typeof TABS)[number];
+
+const CAPTION: Record<Tab, string> = {
+  Tools: "All built-in tools are available to every run.",
+  Connectors: "All host-configured MCP servers are available to every run.",
+  Skills: "All installed skills are available — Claude uses them as needed.",
 };
 
-const TABS = Object.keys(INITIAL);
-const FIRST_TAB = TABS[0] ?? "Tools";
+export const SkillsPopover: FC<{ sessionId: string; onClose: () => void }> = ({
+  sessionId,
+  onClose,
+}) => {
+  const [tab, setTab] = useState<Tab>("Tools");
+  const connectors = useConnectors(sessionId);
+  const skills = useSkills(sessionId);
 
-export const SkillsPopover: FC<{ onClose: () => void }> = ({ onClose }) => {
-  const [tab, setTab] = useState<string>(FIRST_TAB);
-  const [skills, setSkills] = useState(INITIAL);
-  const rows = skills[tab] ?? [];
+  const items: Item[] =
+    tab === "Tools"
+      ? BUILTIN_TOOLS.map((t) => ({ name: t.id, desc: t.description }))
+      : tab === "Connectors"
+        ? connectors.map((c) => ({ name: c.name, desc: `${c.transport} connector` }))
+        : skills.map((s) => ({ name: s.name, desc: s.description }));
 
-  const toggle = (name: string): void =>
-    setSkills((prev) => ({
-      ...prev,
-      [tab]: (prev[tab] ?? []).map((s: Skill) => (s.name === name ? { ...s, on: !s.on } : s)),
-    }));
+  const emptyLabel =
+    tab === "Connectors"
+      ? "No connectors configured on the host"
+      : "No skills installed on the host";
 
   return (
     <div className="mb-[10px] overflow-hidden rounded-[13px] border border-[#17231b] bg-[#0c0e0c] shadow-[0_12px_40px_rgba(0,0,0,.45)]">
@@ -64,36 +69,26 @@ export const SkillsPopover: FC<{ onClose: () => void }> = ({ onClose }) => {
         </button>
       </div>
       <div className="max-h-[220px] overflow-y-auto px-3 pb-[14px] pt-[10px]">
-        {rows.map((s) => (
-          <button
-            key={s.name}
-            type="button"
-            onClick={() => toggle(s.name)}
-            className="flex w-full items-center justify-between rounded-[9px] px-[10px] py-[9px] text-left hover:bg-[#0e140f]"
+        <p className="px-[10px] pb-[6px] font-mono text-[11px] text-[#565d58]">{CAPTION[tab]}</p>
+        {items.length === 0 ? (
+          <p
+            data-testid="cap-empty"
+            className="px-[10px] py-[9px] font-mono text-[12px] text-[#6b726b]"
           >
-            <span className="flex min-w-0 items-center gap-[11px]">
-              <span className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[8px] border border-[#1c2a20] bg-[#0e140f] text-[12px] text-[#3b9dff]">
-                {s.icon}
-              </span>
-              <span className="flex min-w-0 flex-col">
-                <span className="font-mono text-[13px] text-[#e6e8e6]">{s.name}</span>
-                <span className="truncate text-[11px] text-[#6b726b]">{s.desc}</span>
-              </span>
-            </span>
-            <span
-              className="flex h-[18px] w-[30px] flex-none items-center rounded-full px-[2px] transition"
-              style={{ background: s.on ? "#1d3652" : "#16211a" }}
+            {emptyLabel}
+          </p>
+        ) : (
+          items.map((it) => (
+            <div
+              key={it.name}
+              data-testid={`cap-item-${it.name}`}
+              className="flex min-w-0 flex-col rounded-[9px] px-[10px] py-[9px]"
             >
-              <span
-                className="h-[14px] w-[14px] rounded-full transition"
-                style={{
-                  background: s.on ? "#3b9dff" : "#6b726b",
-                  marginLeft: s.on ? 12 : 0,
-                }}
-              />
-            </span>
-          </button>
-        ))}
+              <span className="font-mono text-[13px] text-[#e6e8e6]">{it.name}</span>
+              <span className="truncate text-[11px] text-[#6b726b]">{it.desc}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

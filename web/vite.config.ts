@@ -1,6 +1,15 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+// This file's dir = the Vite project root (`/app` in-container, `<repo>/web` on
+// host). `@clawdparty/contracts` is a symlinked workspace package whose real
+// source lives in the sibling `packages/` dir — outside the project root — so
+// Vite's fs.allow must include it, or a runtime value import from it is refused.
+const webDir = path.dirname(fileURLToPath(import.meta.url));
+const packagesDir = path.resolve(webDir, "..", "packages");
 
 // The browser/LAN entry point is the published rails:3000 port, NOT 5173 (which
 // is unpublished, compose-network only). In the normal Docker flow `rails`
@@ -12,7 +21,18 @@ const usePolling = process.env.VITE_USE_POLLING === "true";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Serve the linked contracts package as source rather than pre-bundling it
+  // (its entry is a .ts file resolved via the node_modules symlink).
+  optimizeDeps: {
+    exclude: ["@clawdparty/contracts"],
+  },
   server: {
+    // Allow serving the project root AND the sibling packages/ dir (the real
+    // target of the @clawdparty/contracts symlink). Without this Vite refuses to
+    // serve files outside the root, breaking a runtime value import from it.
+    fs: {
+      allow: [webDir, packagesDir],
+    },
     // Bind all interfaces so the rails reverse-proxy can reach the unpublished
     // vite service over the compose network.
     host: true,

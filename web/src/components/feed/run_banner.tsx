@@ -29,10 +29,9 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
 }) => {
   const label = LABELS[event.type] ?? event.type;
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
-  const mode =
-    event.type === "run_started"
-      ? (event.payload as { permission_mode?: string }).permission_mode
-      : undefined;
+  const started =
+    event.type === "run_started" ? (event.payload as { permission_mode?: string }) : undefined;
+  const mode = started?.permission_mode;
   return (
     <div
       data-testid="feed-run-banner"

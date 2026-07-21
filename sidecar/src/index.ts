@@ -8,6 +8,7 @@
 // heartbeat report the runner's real active_run_ids.
 
 import Fastify, { type FastifyInstance } from "fastify";
+import { listConnectors, listSkills } from "./capabilities.js";
 import { type SidecarConfig, loadConfig } from "./config.js";
 import { listModels } from "./models.js";
 import { type QueryFn, RunConflict, Runner, type StartRunInput, UnknownRun } from "./runner.js";
@@ -23,6 +24,17 @@ export function buildServer(runner: Runner): FastifyInstance {
   // profiles or Anthropic API models), discovered at runtime. Never 500s: on any
   // failure listModels() returns a static fallback list tagged source "fallback".
   app.get("/models", async () => listModels());
+
+  // GET /connectors?cwd= / GET /skills?cwd= — read-only, cwd-scoped discovery of
+  // the host's MCP servers + skills (name/transport and name/description only).
+  // Rails proxies these per session. Never 500: missing/unparseable config
+  // degrades to an empty list tagged source "unavailable".
+  app.get<{ Querystring: { cwd?: string } }>("/connectors", async (req) =>
+    listConnectors(req.query.cwd ?? process.cwd()),
+  );
+  app.get<{ Querystring: { cwd?: string } }>("/skills", async (req) =>
+    listSkills(req.query.cwd ?? process.cwd()),
+  );
 
   // POST /runs — start a run. 202 on accept; 409 when a run is already active.
   app.post("/runs", async (req, reply) => {

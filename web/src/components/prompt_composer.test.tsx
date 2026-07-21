@@ -156,6 +156,73 @@ describe("PromptComposer permission modes", () => {
   });
 });
 
+describe("PromptComposer capability selection", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+  afterEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+
+  function discovery(connectors: unknown[], skills: unknown[]): void {
+    server.use(
+      http.get("/api/sessions/:id/connectors", () =>
+        HttpResponse.json({ connectors, source: connectors.length ? "project" : "unavailable" }),
+      ),
+      http.get("/api/sessions/:id/skills", () =>
+        HttpResponse.json({ skills, source: skills.length ? "project" : "unavailable" }),
+      ),
+    );
+  }
+
+  it("hides the Skills control for a reviewer (no run permission)", () => {
+    setRole("reviewer");
+    renderComposer(<PromptComposer sessionId="s" />);
+    expect(screen.queryByTestId("skills-toggle")).not.toBeInTheDocument();
+  });
+
+  it("auto-enables all discovered connectors + skills on run start (no toggles)", async () => {
+    discovery(
+      [
+        { name: "github", transport: "stdio" },
+        { name: "linear", transport: "http" },
+      ],
+      [{ name: "pdf", description: "Fill PDF forms" }],
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // Badge shows the DISCOVERED (available) skills count — no per-skill toggle.
+    await waitFor(() => expect(screen.getByTestId("skills-count")).toHaveTextContent("1"));
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    // All connectors enabled by name; all skills enabled; all tools stay on.
+    expect(cap.last()).toMatchObject({ connectors: ["github", "linear"], skills: "all" });
+    expect(cap.last()).not.toHaveProperty("disallowed_tools");
+  });
+
+  it("omits the capability fields on run start when the host has none", async () => {
+    discovery([], []);
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).not.toHaveProperty("disallowed_tools");
+    expect(cap.last()).not.toHaveProperty("connectors");
+    expect(cap.last()).not.toHaveProperty("skills");
+  });
+});
+
 describe("PromptComposer context bar", () => {
   beforeEach(() => {
     useParticipantStore.getState().clear();

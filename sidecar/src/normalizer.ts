@@ -237,17 +237,13 @@ export class Normalizer {
   }
 
   private runStartedFromInit(msg: RawMessage, nowMs: number): EventEnvelope {
-    return this.envelope(
-      "run_started",
-      this.userActor(),
-      {
-        model: msg.model ?? "",
-        cwd: msg.cwd ?? "",
-        permission_mode: msg.permissionMode ?? "",
-        claude_session_id: msg.session_id ?? "",
-      },
-      nowMs,
-    );
+    const payload: Record<string, unknown> = {
+      model: msg.model ?? "",
+      cwd: msg.cwd ?? "",
+      permission_mode: msg.permissionMode ?? "",
+      claude_session_id: msg.session_id ?? "",
+    };
+    return this.envelope("run_started", this.userActor(), payload, nowMs);
   }
 
   private mapAssistant(msg: RawMessage, nowMs: number): EventEnvelope[] {

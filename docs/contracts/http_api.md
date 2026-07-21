@@ -37,6 +37,7 @@ implement this convention; it is pinned here as the single source.
 | invites | generate / use |
 | run | start `POST /api/sessions/:id/runs` |
 | run input | follow-up · interrupt |
+| **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
 | changeset | approve · reject |
@@ -69,6 +70,34 @@ on the envelope cursor (`id`) and dedupe-by-`id` for durable events.
 ### Diffs are REST-only
 
 A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delivered over cable.**
+
+### Run start — capability selection (additive)
+
+`POST /api/sessions/:id/runs` accepts three optional body fields alongside `prompt` / `model` /
+`permission_mode`, each defaulting to today's behavior when omitted:
+
+- `disallowed_tools: string[]` — built-in tool ids to turn OFF (validated ⊆ the shared
+  `BUILTIN_TOOLS` constant),
+- `connectors: string[]` — host-configured MCP server names to enable (validated ⊆ the session's
+  discovered connectors),
+- `skills: "all" | string[]` — skills to enable (`"all"` or validated ⊆ discovered skills).
+
+An unknown/non-selectable value is refused **`422`** `{ errors }` and starts no run; when discovery
+is unavailable, validation **fails open** (the sidecar is the backstop). Setting these follows the
+existing **start-run** role gate (owner/editor) — a reviewer/viewer is **`403`** `{ errors }`. On
+success the run returns its existing **`202`** shape. The `run_started` event echoes the resolved
+selection.
+
+### Capability discovery — `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills`
+
+Read-only, **session-scoped** (the repo is per-session), proxied from the sidecar and cached like
+model discovery (cache key includes the repo path). Return **`200`** with
+`{ connectors: [{ name, transport }], source }` and `{ skills: [{ name, description }], source }`
+respectively — an empty list with an unavailable `source` when the repo has no config, and **`502`**
+when the sidecar is unreachable. Any participant may read them; a non-participant/cross-session
+request is **`404`** `{ errors }`. Connector responses never contain a server's
+command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
+an endpoint.
 
 ## 3. Cable — `/~cable`, one envelope shape
 

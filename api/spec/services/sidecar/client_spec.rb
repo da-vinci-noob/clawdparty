@@ -49,4 +49,27 @@ RSpec.describe(Sidecar::Client) do
     client.interrupt('9', requested_by: '3')
     expect(JSON.parse(calls.last[:json])).to(eq({ 'requested_by' => '3' }))
   end
+
+  it 'GETs /connectors with the cwd query and returns the parsed body' do
+    http, calls = fake_http(200, '{"connectors":[{"name":"github","transport":"stdio"}],"source":"project"}')
+    res = described_class.new(http: http).list_connectors(cwd: '/repo/app')
+    expect(calls.last[:uri].to_s).to(eq('http://sidecar:8787/connectors?cwd=%2Frepo%2Fapp'))
+    expect(calls.last[:json]).to(be_nil)
+    expect(res.status).to(eq(200))
+    expect(res.body['connectors'].first).to(eq({ 'name' => 'github', 'transport' => 'stdio' }))
+    expect(res.body['source']).to(eq('project'))
+  end
+
+  it 'GETs /skills with the cwd query and returns the parsed body' do
+    http, calls = fake_http(200, '{"skills":[{"name":"deploy","description":"Ship it"}],"source":"user"}')
+    res = described_class.new(http: http).list_skills(cwd: '/repo/app')
+    expect(calls.last[:uri].to_s).to(eq('http://sidecar:8787/skills?cwd=%2Frepo%2Fapp'))
+    expect(res.body['skills'].first).to(eq({ 'name' => 'deploy', 'description' => 'Ship it' }))
+  end
+
+  it 'raises TransportError when a discovery GET fails' do
+    http = ->(_uri, _json) { raise(Errno::ECONNREFUSED, 'connection refused') }
+    expect { described_class.new(http: http).list_connectors(cwd: '/repo') }
+      .to(raise_error(Sidecar::Client::TransportError))
+  end
 end

@@ -41,6 +41,18 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
     });
   });
 
+  it("does not echo capability fields on run_started (always-on model, no per-run selection)", () => {
+    const ev = first(
+      normalizeAll([
+        { type: "system", subtype: "init", model: "m", cwd: "/repo", session_id: "s" },
+      ]),
+    );
+    const payload = ev.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("disallowed_tools");
+    expect(payload).not.toHaveProperty("connectors");
+    expect(payload).not.toHaveProperty("skills");
+  });
+
   it("maps assistant text → durable ai_text and thinking → ai_thinking", () => {
     const out = normalizeAll([
       {

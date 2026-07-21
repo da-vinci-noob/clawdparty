@@ -39,7 +39,10 @@ Body (at least):
 | `model` | string? | optional model override |
 | `max_turns` | integer? | optional |
 | `permission_mode` | string | one of `plan` / `acceptEdits` / `bypassPermissions`; default `acceptEdits` when omitted (see §5) |
-| `allowed_tools` | string[] | tool whitelist (see §5) |
+| `allowed_tools` | string[] | pre-approval whitelist (see §5) |
+| `disallowed_tools` | string[]? | built-in tool ids to hard-disable (→ SDK `disallowedTools`; see §5). Omitted = nothing disabled |
+| `connectors` | string[]? | host-configured MCP server names to enable (see §5). Omitted = none |
+| `skills` | `"all"` \| string[]? | discovered skills to enable (see §5). Omitted = none |
 
 Responses:
 - **`202 Accepted`** `{ "run_id": "...", "status": "running" }` — the run proceeds
@@ -138,3 +141,39 @@ Values outside the allowlist (incl. `default`/`dontAsk`/ask-per-tool) are reject
 reaching the sidecar. The mode may be switched mid-run via `POST /runs/:id/permission_mode` (§2).
 The `canUseTool` permission hook remains **allow-all for the MVP** and is the seam for later
 per-tool Bash gating; live per-tool approval remains out of scope.
+
+### Per-run tool / connector / skill scoping (additive)
+
+`POST /runs` additionally accepts three optional, additive fields, each defaulting to today's
+behavior when omitted:
+
+- **`disallowed_tools`** — built-in tool ids the user turned OFF. Because `allowed_tools` only
+  *pre-approves* (an omitted tool still falls through to the permission mode / `canUseTool`), the
+  **only true disable** is the SDK `disallowedTools` with a **bare** name, which removes the tool
+  from context and applies **even under `bypassPermissions`** (deny rules always win). The sidecar
+  maps `disallowed_tools` straight to `disallowedTools`.
+- **`connectors`** — host-configured MCP **server names** to enable. The sidecar resolves each name
+  against host-owned config (the session repo's `.mcp.json` + `~/.claude`) into an `mcpServers`
+  entry and appends `mcp__<name>__*` to `allowed_tools`. The client **never** supplies a server's
+  command/url/headers — only names; an unknown name is rejected by Rails (`422`).
+- **`skills`** — `"all"` or discovered skill names. When non-empty the sidecar sets
+  `settingSources: ["user", "project"]` + `skills` (which auto-adds the `Skill` tool). Note this
+  also loads other host-owned user/project settings; the sidecar's explicitly-built
+  `mcpServers`/`disallowedTools`/`allowed_tools` take precedence.
+
+The `run_started` event echoes the **resolved** `disallowed_tools` / `connectors` / `skills`
+(additive optional payload fields, `CONTRACT_VERSION` 1.4) so the UI reflects a run's real scope.
+
+### Discovery (read-only, `cwd`-scoped)
+
+The sidecar exposes two read-only discovery endpoints Rails proxies (the built-in **tools** set is a
+shared `packages/contracts` constant, not discovered):
+
+- **`GET /connectors?cwd=<path>`** → **`200`** `{ "connectors": [{ "name", "transport" }], "source" }`
+  — MCP servers configured for that repo path + `~/.claude`; **name + transport only** (never
+  command/url/headers/env/tokens).
+- **`GET /skills?cwd=<path>`** → **`200`** `{ "skills": [{ "name", "description" }], "source" }` —
+  from scanning `<cwd>/.claude/skills/*/SKILL.md` + `~/.claude/skills/*/SKILL.md` frontmatter.
+
+Neither starts a run. Missing/unparseable config degrades to an empty list with an unavailable
+`source` (still `200`); it never throws.

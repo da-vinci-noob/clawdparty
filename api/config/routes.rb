@@ -39,6 +39,11 @@ Rails.application.routes.draw do
       resources :events, only: :index
       # Run start: POST /api/sessions/:session_id/runs
       resources :runs, only: :create
+      # Session-scoped capability discovery (any participant), proxied + cached
+      # from the sidecar against the session's repo path:
+      # GET /api/sessions/:session_id/connectors|skills
+      get 'connectors', to: 'connectors#index'
+      get 'skills', to: 'skills#index'
       # Chat: POST /api/sessions/:session_id/messages
       resources :messages, only: :create
       # Read-only repo browse: GET /api/sessions/:session_id/files (tree) and

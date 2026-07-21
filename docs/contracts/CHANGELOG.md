@@ -28,6 +28,30 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [run-tools-connectors-skills] — per-run tool/connector/skill selection (additive)
+
+**`CONTRACT_VERSION` bumps `{ major: 1, minor: 3 }` → `{ major: 1, minor: 4 }`** — additive
+optional payload fields + new additive endpoints/body fields; no event type, envelope, or
+**existing** endpoint signature changes. Change: `run-tools-connectors-skills`.
+
+### Added (additive — nothing removed or renamed)
+
+- **`RunStartedPayload`** gains optional `disallowed_tools?` / `connectors?` / `skills?`
+  (`events.ts`), echoing the **resolved** capabilities a run applied.
+- **Shared types + constant** in `events.ts`: `ToolInfo`, `ConnectorInfo`, `SkillInfo`, and the
+  canonical `BUILTIN_TOOLS` / `BUILTIN_TOOL_IDS` (the 8 built-ins; there is no `/api/tools`
+  endpoint — tools never vary by host/repo).
+- **`POST /runs`** (`sidecar_protocol.md` §5) gains optional `disallowed_tools` (→ SDK
+  `disallowedTools`, the only true disable), `connectors` (host MCP server names → `mcpServers` +
+  `mcp__<name>__*`), and `skills` (`"all"` | names → `settingSources` + `skills`).
+- **Sidecar discovery** `GET /connectors?cwd=` · `GET /skills?cwd=` (read-only, name+transport
+  only, degrade to empty+unavailable).
+- **Client REST** `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills`
+  (`http_api.md`) — session-scoped proxy (participant-gated, `404` cross-session, `502` sidecar
+  down); run start accepts the additive body fields (`422` unknown; existing `:run` `403` gate).
+
+Omitting every field reproduces today's behavior, so the change is backward-compatible at every hop.
+
 ## [http-api] — session history + owner archive (http-api-contract, additive)
 
 **`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this adds two REST endpoints

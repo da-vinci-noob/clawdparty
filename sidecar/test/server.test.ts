@@ -47,6 +47,22 @@ describe("Fastify server (runner-backed)", () => {
     expect(res.json()).toHaveProperty("active_run_ids");
   });
 
+  it("GET /connectors and /skills return the pinned 200 shapes", async () => {
+    // The cwd has no config; the route also reads the real host home, so assert
+    // the shape (never a 500) rather than emptiness.
+    const conn = await app.inject({ method: "GET", url: "/connectors?cwd=/nonexistent-repo-xyz" });
+    expect(conn.statusCode).toBe(200);
+    const connBody = conn.json();
+    expect(Array.isArray(connBody.connectors)).toBe(true);
+    expect(typeof connBody.source).toBe("string");
+
+    const skills = await app.inject({ method: "GET", url: "/skills?cwd=/nonexistent-repo-xyz" });
+    expect(skills.statusCode).toBe(200);
+    const skillBody = skills.json();
+    expect(Array.isArray(skillBody.skills)).toBe(true);
+    expect(typeof skillBody.source).toBe("string");
+  });
+
   it("POST /runs returns 202 with the frozen success shape", async () => {
     const { app: a } = buildTestServer();
     await a.ready();

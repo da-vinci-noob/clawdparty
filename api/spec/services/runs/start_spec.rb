@@ -48,6 +48,41 @@ RSpec.describe(Runs::Start) do
     expect(payload[:allowed_tools]).to(include('Bash', 'Write'))
   end
 
+  describe 'capability selection (disallowed_tools / connectors / skills)' do
+    def start_with(**caps)
+      described_class.call(session: session, requested_by: owner, prompt: 'build it',
+                           model: 'claude-opus-4-8', client: client, worktree: worktree, **caps)
+    end
+
+    it 'pre-approves all 8 advertised built-in tools by default' do
+      expect(described_class::DEFAULT_ALLOWED_TOOLS)
+        .to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
+      start
+      expect(posted.last[:allowed_tools]).to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
+    end
+
+    it 'omits the capability keys entirely when nothing is selected (prior behavior)' do
+      start
+      payload = posted.last
+      expect(payload).not_to(have_key(:disallowed_tools))
+      expect(payload).not_to(have_key(:connectors))
+      expect(payload).not_to(have_key(:skills))
+    end
+
+    it 'threads a selection into the sidecar payload' do
+      start_with(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
+      payload = posted.last
+      expect(payload[:disallowed_tools]).to(eq(['Bash']))
+      expect(payload[:connectors]).to(eq(['github']))
+      expect(payload[:skills]).to(eq(['deploy']))
+    end
+
+    it 'passes skills:"all" through as the literal string' do
+      start_with(skills: 'all')
+      expect(posted.last[:skills]).to(eq('all'))
+    end
+  end
+
   it 'rejects a second active run (one-active-run; surfaced as ActiveRunExists)' do
     create(:ai_run, session: session, status: 'running')
     expect { start }.to(raise_error(Runs::Start::ActiveRunExists))
