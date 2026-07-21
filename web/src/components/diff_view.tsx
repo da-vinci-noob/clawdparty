@@ -218,9 +218,10 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
       </ul>
 
       {/* One card per file: header (badge · path · stats · caret) + tinted diff.
-          Bounded height + internal scroll so a tall diff never crowds out the
-          approve/reject footer or the activity feed below it in the center pane. */}
-      <div data-testid="diff-patch" className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+          Bounded to a modest height with an internal scroll so the review overlay
+          floats over — rather than blocking — the activity feed: the messages keep
+          roughly half the center pane and scroll underneath the pinned card. */}
+      <div data-testid="diff-patch" className="max-h-[30vh] space-y-3 overflow-y-auto pr-1">
         {parsed.map((file) => {
           const path = parsedPath(file);
           const isCollapsed = collapsed.has(path);

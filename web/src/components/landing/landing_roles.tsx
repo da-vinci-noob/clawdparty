@@ -2,11 +2,12 @@ import type { CSSProperties, FC } from "react";
 
 // Mirrors the server-enforced permission matrix — the source of truth is
 // SessionPolicy::MATRIX (api/app/policies/session_policy.rb). Columns map to the
-// real action symbols: run, interrupt, manage_tasks ("tasks"), approve (pairs
-// with reject), manage_session ("change dir"), manage_invites ("invite"), chat.
-// view is universal (omitted); bypass_permissions is an owner-only advanced mode
-// (omitted). manage_tasks is what distinguishes reviewer from viewer.
-const COLS = ["run", "interrupt", "tasks", "approve", "change dir", "invite", "chat"] as const;
+// real action symbols: run, interrupt, approve (pairs with reject), manage_session
+// ("change dir"), manage_invites ("invite"), chat. view is universal (omitted);
+// bypass_permissions is an owner-only advanced mode (omitted). manage_tasks is
+// omitted — the task board is not in the MVP, so it isn't advertised here. approve
+// is what distinguishes reviewer from viewer.
+const COLS = ["run", "interrupt", "approve", "change dir", "invite", "chat"] as const;
 
 interface Role {
   name: string;
@@ -21,26 +22,26 @@ const ROLES: Role[] = [
     name: "owner",
     blurb: "full control",
     owner: true,
-    allowed: [true, true, true, true, true, true, true],
+    allowed: [true, true, true, true, true, true],
   },
   {
     name: "editor",
     blurb: "drives Claude + approves",
-    allowed: [true, true, true, true, false, false, true],
+    allowed: [true, true, true, false, false, true],
   },
   {
     name: "reviewer",
     blurb: "reviews + approves",
-    allowed: [false, false, true, true, false, false, true],
+    allowed: [false, false, true, false, false, true],
   },
   {
     name: "viewer",
     blurb: "watches + chats",
-    allowed: [false, false, false, false, false, false, true],
+    allowed: [false, false, false, false, false, true],
   },
 ];
 
-const GRID = "1.1fr .8fr .8fr .8fr .9fr .9fr .8fr .7fr";
+const GRID = "1.1fr .8fr .8fr .9fr .9fr .8fr .7fr";
 
 const cell: CSSProperties = { textAlign: "center" };
 
