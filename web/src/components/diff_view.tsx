@@ -41,7 +41,8 @@ const TYPE_BADGE: Record<string, string> = {
 // The review pane for a run awaiting review. Fetches the run's diff over REST
 // (never the cable — the diff can be large; frozen http-api invariant) and renders
 // the file list + the unified `patch` via react-diff-view. Visible to ALL roles
-// (the endpoint is :view-gated); the owner-only approve/reject controls self-hide.
+// (the endpoint is :view-gated); the role-gated approve/reject controls self-hide
+// for viewers (owner/editor/reviewer can approve).
 export const DiffView: FC<{ runId: string }> = ({ runId }) => {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
@@ -110,7 +111,7 @@ function parsedPath(file: ParsedFile): string {
 }
 
 // The loaded diff: a header with change totals, a clickable file-list summary, one
-// collapsible card per file, then the owner-only approve/reject footer. Clicking a
+// collapsible card per file, then the approve/reject footer. Clicking a
 // list row scrolls to (and expands) that file's card; clicking a card header toggles
 // it. Collapse state lives here so it survives re-renders but resets when the run
 // changes (DiffBody remounts per DiffView runId fetch).
@@ -216,8 +217,10 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
         ))}
       </ul>
 
-      {/* One card per file: header (badge · path · stats · caret) + tinted diff. */}
-      <div data-testid="diff-patch" className="space-y-3">
+      {/* One card per file: header (badge · path · stats · caret) + tinted diff.
+          Bounded height + internal scroll so a tall diff never crowds out the
+          approve/reject footer or the activity feed below it in the center pane. */}
+      <div data-testid="diff-patch" className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
         {parsed.map((file) => {
           const path = parsedPath(file);
           const isCollapsed = collapsed.has(path);
@@ -281,7 +284,8 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
         })}
       </div>
 
-      {/* Footer: role hint on the left, owner-only approve/reject on the right. */}
+      {/* Footer: role hint on the left, approve/reject on the right (owner,
+          editor and reviewer can approve; viewers only watch). */}
       <div className="flex items-center justify-between border-t border-[#16211a] pt-3">
         <span className="font-mono text-[12px] text-[#6b726b]">
           {can("approve") ? (
@@ -290,7 +294,8 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
             </>
           ) : (
             <>
-              only <span className="font-semibold text-[#3b9dff]">owner</span> can approve
+              only <span className="font-semibold text-[#3b9dff]">reviewers &amp; up</span> can
+              approve
             </>
           )}
         </span>

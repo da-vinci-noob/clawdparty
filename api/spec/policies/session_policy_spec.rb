@@ -10,17 +10,17 @@ RSpec.describe(SessionPolicy) do
     described_class.new(participant: participant, session: session)
   end
 
-  describe 'approve/reject is owner-only' do
-    it 'permits an owner' do
-      expect(policy_for('owner').can?(:approve)).to(be(true))
-      expect(policy_for('owner').can?(:reject)).to(be(true))
+  describe 'approve/reject is everyone except viewer' do
+    %w[owner editor reviewer].each do |role|
+      it "permits a #{role}" do
+        expect(policy_for(role).can?(:approve)).to(be(true))
+        expect(policy_for(role).can?(:reject)).to(be(true))
+      end
     end
 
-    %w[editor reviewer viewer].each do |role|
-      it "denies a #{role}" do
-        expect(policy_for(role).can?(:approve)).to(be(false))
-        expect { policy_for(role).authorize!(:reject) }.to(raise_error(described_class::NotAuthorized))
-      end
+    it 'denies a viewer' do
+      expect(policy_for('viewer').can?(:approve)).to(be(false))
+      expect { policy_for('viewer').authorize!(:reject) }.to(raise_error(described_class::NotAuthorized))
     end
   end
 

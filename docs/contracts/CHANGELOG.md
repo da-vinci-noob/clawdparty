@@ -28,6 +28,21 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [review-approve-roles] — approve/reject extended to editor + reviewer
+
+**`CONTRACT_VERSION` unchanged** — this changes the 4-role matrix (an authorization
+rule in `http_api.md §4`), not the event contract in `events.ts` (no envelope, type,
+payload, or endpoint-signature change). Change: `review-approve-roles-and-layout`.
+
+### Changed (authorization matrix)
+
+- **`approve / reject changeset`** is now permitted for **owner, editor, and reviewer**
+  (previously owner-only); **viewer** still cannot. Server-enforced in
+  `SessionPolicy::MATRIX`; the client mirror + button-gating and the landing roles
+  table follow. Driving Claude (run/follow-up/interrupt) stays owner+editor, and
+  invites/archive/bypass stay owner-only. Updated `http_api.md`,
+  `openspec/specs/http-api-contract`, and `openspec/specs/diff-review-approve`.
+
 ## [run-tools-connectors-skills] — per-run tool/connector/skill selection (additive)
 
 **`CONTRACT_VERSION` bumps `{ major: 1, minor: 3 }` → `{ major: 1, minor: 4 }`** — additive

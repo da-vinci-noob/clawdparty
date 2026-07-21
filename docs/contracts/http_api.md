@@ -116,11 +116,13 @@ an endpoint.
 | send `chat_message` | ✓ | ✓ | ✓ | ✓ |
 | create / update tasks | ✓ | ✓ | ✓ | ✗ |
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
-| approve / reject changeset | ✓ | ✗ | ✗ | ✗ |
+| approve / reject changeset | ✓ | ✓ | ✓ | ✗ |
 | archive session | ✓ | ✗ | ✗ | ✗ |
 
-(Per `docs/PLAN.md §9`: owner = everything incl. approve/reject; editor =
-runs/follow-ups/interrupt/tasks/chat; reviewer = tasks/chat/view; viewer = view/chat.)
+(owner = everything incl. runs + approve/reject + invites/archive; editor =
+runs/follow-ups/interrupt + tasks/chat + approve/reject; reviewer = tasks/chat/view +
+approve/reject; viewer = view/chat. Approve/reject is available to everyone except
+viewer; only owner/editor can drive Claude, and only owner manages invites/archive.)
 
 The server enforces this matrix on **every** endpoint; cable subscriptions independently verify
 participantship. The client only hides buttons. A denied action for a **participant** returns
