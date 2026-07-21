@@ -218,10 +218,10 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
       </ul>
 
       {/* One card per file: header (badge · path · stats · caret) + tinted diff.
-          Bounded to a modest height with an internal scroll so the review overlay
-          floats over — rather than blocking — the activity feed: the messages keep
-          roughly half the center pane and scroll underneath the pinned card. */}
-      <div data-testid="diff-patch" className="max-h-[30vh] space-y-3 overflow-y-auto pr-1">
+          No fixed height / inner scrollbar — the card is exactly as tall as the
+          diff. The sticky wrapper (session_page) floats it over the activity feed,
+          which fills the pane and scrolls underneath the pinned card. */}
+      <div data-testid="diff-patch" className="space-y-3">
         {parsed.map((file) => {
           const path = parsedPath(file);
           const isCollapsed = collapsed.has(path);
