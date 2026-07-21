@@ -13,11 +13,13 @@ function stubDirectories() {
       if (path === "proj") {
         return HttpResponse.json({
           path: "proj",
+          is_git_repo: true,
           entries: [{ name: "nested", path: "proj/nested", is_git_repo: false }],
         });
       }
       return HttpResponse.json({
         path: "",
+        is_git_repo: false,
         entries: [
           { name: "proj", path: "proj", is_git_repo: true },
           { name: "docs", path: "docs", is_git_repo: false },
@@ -72,6 +74,29 @@ describe("DirectoryPicker", () => {
     await screen.findByRole("button", { name: "Open nested" });
     fireEvent.click(screen.getByRole("button", { name: "Use this folder" }));
 
+    expect(onChange).toHaveBeenCalledWith("proj");
+  });
+
+  it("requireGit: disables 'Use this folder' at a non-git dir (with a hint)", async () => {
+    stubDirectories();
+    render(<DirectoryPicker value="" onChange={vi.fn()} requireGit />);
+
+    await screen.findByRole("button", { name: "Open proj" });
+    // Repo root is not a git repo → cannot use it for a review session.
+    expect(screen.getByRole("button", { name: "Use this folder" })).toBeDisabled();
+    expect(screen.getByTestId("require-git-hint")).toBeInTheDocument();
+  });
+
+  it("requireGit: enables 'Use this folder' inside a git repo and selects it", async () => {
+    stubDirectories();
+    const onChange = vi.fn();
+    render(<DirectoryPicker value="" onChange={onChange} requireGit />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open proj" }));
+    await screen.findByRole("button", { name: "Open nested" });
+    const use = screen.getByRole("button", { name: "Use this folder" });
+    expect(use).toBeEnabled();
+    fireEvent.click(use);
     expect(onChange).toHaveBeenCalledWith("proj");
   });
 

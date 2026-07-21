@@ -16,10 +16,18 @@ class DirectoriesController < ApplicationController
   def index
     root = File.realpath(Git::WorktreeManager.repo_root)
     dir = RepoPaths.contain!(root, params[:path])
-    render(json: { path: relative_to(root, dir), entries: entries(root, dir) }, status: :ok)
+    render(json: { path: relative_to(root, dir), is_git_repo: git_repo?(dir), entries: entries(root, dir) },
+           status: :ok)
   end
 
   private
+
+  # True when the directory itself is a git repo (`.git` dir for a normal repo,
+  # file for a worktree). Reported for both the current dir and each child so the
+  # picker can require a git repo for review sessions.
+  def git_repo?(abs)
+    File.exist?(File.join(abs, '.git'))
+  end
 
   # Immediate subdirectories only (no recursion), dot-directories hidden (so
   # `.git`/`.clawdparty` don't clutter the picker), sorted by name. Children that
@@ -46,7 +54,7 @@ class DirectoriesController < ApplicationController
     {
       name: File.basename(abs),
       path: relative_to(root, abs),
-      is_git_repo: File.exist?(File.join(abs, '.git'))
+      is_git_repo: git_repo?(abs)
     }
   end
 
