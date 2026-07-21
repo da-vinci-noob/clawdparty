@@ -4,7 +4,9 @@
 
 *Plan finalized: 2026-06-12 · Updated: 2026-06-19 (timeline compressed to 3 weeks) · local dev runs on **Docker Compose** — one container per process, `bin/start` as the single entry point.*
 
-> **As-of note:** this plan is written in the original pre-build future tense (e.g. "W1 spike before freeze"). The week-by-week schedule (§10) and milestone narration are the historical plan of record; treat the **specs in `openspec/changes/`** as the current authority for what is built, and the dated execution timeline as the original sequencing intent rather than a live status board.
+> **As-of note:** this plan is written in the original pre-build future tense (e.g. "W1 spike before freeze"). The week-by-week schedule (§10) and milestone narration are the historical plan of record; treat the **specs in `openspec/specs/`** (promoted from the archived changes) as the current authority for what is built, and the dated execution timeline as the original sequencing intent rather than a live status board.
+>
+> **Post-MVP additions (shipped since this plan):** invite list + revoke; per-run **permission modes** (plan/acceptEdits/bypassPermissions) with a plan→execute flow; runtime **model discovery** + picker (Bedrock inference profiles / Anthropic API) with a dynamic context-usage bar; a directory picker that requires a git repo for review sessions; per-run **tools/connectors/skills** selection (`run-tools-connectors-skills` — host-discovered, everything available to the run); **approve/reject widened to editor + reviewer** (viewer excluded); and activity-feed **auto-scroll**. The role matrix, review flow, and capability surface here reflect the original MVP — see `README.md`, `CLAUDE.md`, and `openspec/specs/` for the current behavior.
 
 ## 1. Context & goal
 
