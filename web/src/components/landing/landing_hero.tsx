@@ -354,7 +354,11 @@ export const LandingHero: FC<{ form: HeroForm }> = ({ form }) => {
                   <option value="chat">chat — run in a directory, no git</option>
                 </select>
                 <div style={{ marginBottom: 10 }}>
-                  <DirectoryPicker value={form.directory} onChange={form.setDirectory} />
+                  <DirectoryPicker
+                    value={form.directory}
+                    onChange={form.setDirectory}
+                    requireGit={form.mode === "review"}
+                  />
                 </div>
               </>
             )}

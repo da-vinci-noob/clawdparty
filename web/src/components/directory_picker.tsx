@@ -16,6 +16,8 @@ interface DirectoryEntry {
 
 interface DirectoryListing {
   path: string;
+  // Whether the CURRENT directory is itself a git repo (review mode requires this).
+  is_git_repo?: boolean;
   entries: DirectoryEntry[];
 }
 
@@ -28,9 +30,13 @@ export const DirectoryPicker: FC<{
   value: string;
   onChange: (path: string) => void;
   label?: string;
-}> = ({ value, onChange, label = "Working directory" }) => {
+  // When true (review mode), the working dir MUST be a git repo, so "Use this
+  // folder" is disabled unless the current directory is one.
+  requireGit?: boolean;
+}> = ({ value, onChange, label = "Working directory", requireGit = false }) => {
   const [current, setCurrent] = useState(value);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
+  const [currentIsGit, setCurrentIsGit] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,6 +57,7 @@ export const DirectoryPicker: FC<{
         if (!cancelled) {
           setError(null);
           setEntries(listing.entries);
+          setCurrentIsGit(Boolean(listing.is_git_repo));
         }
       } catch {
         if (!cancelled) {
@@ -123,11 +130,18 @@ export const DirectoryPicker: FC<{
           </li>
         ))}
       </ul>
-      <div className="p-[9px]">
+      <div className="space-y-1 p-[9px]">
+        {requireGit && !currentIsGit && (
+          <p data-testid="require-git-hint" className="px-1 font-mono text-[10px] text-[#79817b]">
+            Review mode needs a git repository — open a folder marked{" "}
+            <span className="text-[#4fe89a]">git</span>.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => onChange(current)}
-          className="w-full rounded-[9px] border border-[#2a352d] bg-[#141a16] p-[11px] font-mono text-[12.5px] font-semibold text-[#4fe89a] hover:bg-[#17241b]"
+          disabled={requireGit && !currentIsGit}
+          className="w-full rounded-[9px] border border-[#2a352d] bg-[#141a16] p-[11px] font-mono text-[12.5px] font-semibold text-[#4fe89a] hover:bg-[#17241b] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Use this folder
         </button>
