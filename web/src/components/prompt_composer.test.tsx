@@ -183,60 +183,32 @@ describe("PromptComposer capability selection", () => {
     expect(screen.queryByTestId("skills-toggle")).not.toBeInTheDocument();
   });
 
-  it("sends disallowed_tools when a built-in tool is toggled OFF", async () => {
+  it("auto-enables all discovered connectors + skills on run start (no toggles)", async () => {
+    discovery(
+      [
+        { name: "github", transport: "stdio" },
+        { name: "linear", transport: "http" },
+      ],
+      [{ name: "pdf", description: "Fill PDF forms" }],
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // Badge shows the DISCOVERED (available) skills count — no per-skill toggle.
+    await waitFor(() => expect(screen.getByTestId("skills-count")).toHaveTextContent("1"));
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    // All connectors enabled by name; all skills enabled; all tools stay on.
+    expect(cap.last()).toMatchObject({ connectors: ["github", "linear"], skills: "all" });
+    expect(cap.last()).not.toHaveProperty("disallowed_tools");
+  });
+
+  it("omits the capability fields on run start when the host has none", async () => {
     discovery([], []);
-    const cap = captureRunStart();
-    setRole("owner");
-    renderComposer(<PromptComposer sessionId="s" />);
-
-    fireEvent.click(screen.getByTestId("skills-toggle"));
-    fireEvent.click(await screen.findByTestId("cap-toggle-Bash"));
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() => expect(cap.last()).not.toBeNull());
-    expect(cap.last()).toMatchObject({ disallowed_tools: ["Bash"] });
-  });
-
-  it("sends connectors when a discovered connector is toggled ON", async () => {
-    discovery([{ name: "github", transport: "stdio" }], []);
-    const cap = captureRunStart();
-    setRole("owner");
-    renderComposer(<PromptComposer sessionId="s" />);
-
-    fireEvent.click(screen.getByTestId("skills-toggle"));
-    fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
-    fireEvent.click(await screen.findByTestId("cap-toggle-github"));
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() => expect(cap.last()).not.toBeNull());
-    expect(cap.last()).toMatchObject({ connectors: ["github"] });
-  });
-
-  it("sends skills (and shows the enabled count) when a skill is toggled ON", async () => {
-    discovery([], [{ name: "pdf", description: "Fill PDF forms" }]);
-    const cap = captureRunStart();
-    setRole("owner");
-    renderComposer(<PromptComposer sessionId="s" />);
-
-    // Skills default-OFF → the badge counts ENABLED skills, starting at 0.
-    expect(screen.getByTestId("skills-count")).toHaveTextContent("0");
-
-    fireEvent.click(screen.getByTestId("skills-toggle"));
-    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
-    fireEvent.click(await screen.findByTestId("cap-toggle-pdf"));
-    // The badge reflects the real enabled count.
-    expect(screen.getByTestId("skills-count")).toHaveTextContent("1");
-
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() => expect(cap.last()).not.toBeNull());
-    expect(cap.last()).toMatchObject({ skills: ["pdf"] });
-  });
-
-  it("omits the capability fields on run start when nothing is toggled", async () => {
     const cap = captureRunStart();
     setRole("owner");
     renderComposer(<PromptComposer sessionId="s" />);

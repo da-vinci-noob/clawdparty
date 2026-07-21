@@ -90,6 +90,33 @@ describe("listConnectors", () => {
     expect(res.source).toBe("host");
   });
 
+  it("reads the startup snapshot of ~/.claude.json (~/.claude-host-cache.json) for user servers", () => {
+    // The entrypoint snapshots the real ~/.claude.json here at startup, because a
+    // live single-file mount of it breaks when the app atomically rewrites it.
+    writeFile(
+      home,
+      ".claude-host-cache.json",
+      JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://mcp.linear.app" } } }),
+    );
+    expect(listConnectors(cwd, home).connectors).toEqual([{ name: "linear", transport: "http" }]);
+  });
+
+  it("reads project-scoped mcpServers (projects[<cwd>].mcpServers), not just top-level", () => {
+    writeFile(
+      home,
+      ".claude.json",
+      JSON.stringify({
+        mcpServers: { global: { command: "g" } },
+        projects: { [cwd]: { mcpServers: { scoped: { type: "sse", url: "https://s" } } } },
+      }),
+    );
+    const byName = Object.fromEntries(
+      listConnectors(cwd, home).connectors.map((c) => [c.name, c.transport]),
+    );
+    expect(byName.global).toBe("stdio");
+    expect(byName.scoped).toBe("sse");
+  });
+
   it("returns empty + unavailable when no config exists anywhere (never throws)", () => {
     expect(listConnectors(cwd, home)).toEqual({ connectors: [], source: "unavailable" });
   });

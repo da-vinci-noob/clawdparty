@@ -135,6 +135,12 @@ services:
       # stays READ-ONLY (the Bedrock/AWS credentials — tamper-safe; not in ~/.claude).
       - ${HOME}/.claude:/home/node/.claude
       - ${HOME}/.aws:/home/node/.aws:ro
+      # Claude Code stores user MCP servers in the `~/.claude.json` FILE (beside
+      # the `~/.claude/` dir, so not covered by the mount above). Expose it
+      # READ-ONLY at a side path; the entrypoint snapshots it once at startup
+      # (the app atomically rewrites this file, which would break a live
+      # single-file mount). Read-only so the host's real config is never mutated.
+      - ${HOME}/.claude.json:/home/node/.claude-host.json:ro
     # No `ports:` key at all — reachable only on the compose network.
 
   # --- Vite dev server (dev only) — UNPUBLISHED ----------------------------

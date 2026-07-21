@@ -55,6 +55,22 @@ function extractServers(config: Record<string, unknown>): Record<string, unknown
     : {};
 }
 
+// Claude Code stores MCP servers either at the top level (`mcpServers`) OR
+// project-scoped under `projects[<cwd>].mcpServers`. Merge both for this cwd,
+// with the project-scoped entry winning within a single file.
+function serversFromConfig(config: Record<string, unknown>, cwd: string): Record<string, unknown> {
+  const top = extractServers(config);
+  const projects = config.projects;
+  if (projects === null || typeof projects !== "object") {
+    return top;
+  }
+  const proj = (projects as Record<string, unknown>)[cwd];
+  if (proj === null || typeof proj !== "object") {
+    return top;
+  }
+  return { ...top, ...extractServers(proj as Record<string, unknown>) };
+}
+
 // stdio has `command`; remote transports carry `type: "http" | "sse"`. A bare
 // `url` (no explicit type) is treated as http. Anything else is "unknown" — we
 // still list the server (it is real, host-configured) but never leak its config.
@@ -73,16 +89,25 @@ function deriveTransport(serverConfig: unknown): string {
 }
 
 // Merge the host's MCP server configs from the session repo (`<cwd>/.mcp.json`)
-// and host-wide user config (`~/.claude.json`, `~/.claude/settings.json`).
-// De-dup by name with the REPO (project) source winning over user config — the
-// project file is the more specific, per-repo intent. `hadSource` distinguishes
-// "no config anywhere" (→ unavailable) from "config present but empty".
+// and host-wide user config. Note `~/.claude.json` (where Claude Code actually
+// stores user MCP servers) is a FILE beside the `~/.claude/` dir; the sidecar
+// container mounts only that dir, so the real file is bind-mounted read-only at
+// `~/.claude-host.json` (absent when the sidecar runs on the host, where the real
+// `~/.claude.json` is read directly instead). De-dup by name with the REPO
+// (project) source winning over user config — the project file is the more
+// specific, per-repo intent. `hadSource` distinguishes "no config anywhere"
+// (→ unavailable) from "config present but empty".
 function collectServerConfigs(
   cwd: string,
   home: string,
 ): { configs: Map<string, unknown>; hadSource: boolean } {
   const files = [
     join(cwd, MCP_JSON),
+    // Startup snapshot of the real ~/.claude.json (see docker/entrypoints/sidecar.sh)
+    // — a live single-file mount of that path breaks when the app atomically
+    // rewrites it, so discovery reads the stable copy.
+    join(home, ".claude-host-cache.json"),
+    // Direct read for a sidecar running on the host (no container / no snapshot).
     join(home, ".claude.json"),
     join(home, ".claude", "settings.json"),
   ];
@@ -94,7 +119,7 @@ function collectServerConfigs(
       continue;
     }
     hadSource = true;
-    for (const [name, serverConfig] of Object.entries(extractServers(parsed))) {
+    for (const [name, serverConfig] of Object.entries(serversFromConfig(parsed, cwd))) {
       if (!configs.has(name)) {
         configs.set(name, serverConfig); // first (project) wins
       }

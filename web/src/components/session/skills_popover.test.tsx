@@ -1,58 +1,53 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { server } from "../../../test/msw_server";
 import { renderWithQuery } from "../../../test/render_with_query";
-import { type CapabilitySelection, EMPTY_CAPABILITIES, SkillsPopover } from "./skills_popover";
+import { SkillsPopover } from "./skills_popover";
 
 function discovery(connectors: unknown[], skills: unknown[]): void {
   server.use(
     http.get("/api/sessions/:id/connectors", () =>
-      HttpResponse.json({ connectors, source: connectors.length ? "project" : "unavailable" }),
+      HttpResponse.json({ connectors, source: connectors.length ? "host" : "unavailable" }),
     ),
     http.get("/api/sessions/:id/skills", () =>
-      HttpResponse.json({ skills, source: skills.length ? "project" : "unavailable" }),
+      HttpResponse.json({ skills, source: skills.length ? "host" : "unavailable" }),
     ),
   );
 }
 
-function renderPopover(value: CapabilitySelection = EMPTY_CAPABILITIES): {
-  onChange: ReturnType<typeof vi.fn>;
-} {
-  const onChange = vi.fn();
-  renderWithQuery(
-    <SkillsPopover sessionId="s" value={value} onChange={onChange} onClose={() => {}} />,
-  );
-  return { onChange };
+function renderPopover(): void {
+  renderWithQuery(<SkillsPopover sessionId="s" onClose={() => {}} />);
 }
 
-describe("SkillsPopover", () => {
+describe("SkillsPopover (read-only capability display)", () => {
   afterEach(() => server.resetHandlers());
 
-  it("renders the built-in tools on the default Tools tab (all ON)", () => {
+  it("lists the built-in tools on the default Tools tab (no toggles)", () => {
     discovery([], []);
     renderPopover();
-    expect(screen.getByTestId("cap-toggle-Bash")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("cap-toggle-Read")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("cap-item-Bash")).toBeInTheDocument();
+    expect(screen.getByTestId("cap-item-Read")).toBeInTheDocument();
+    // No per-item toggle switches anywhere.
+    expect(screen.queryByTestId("cap-toggle-Bash")).not.toBeInTheDocument();
   });
 
-  it("renders discovered connectors (name + transport only)", async () => {
+  it("lists discovered connectors (name + transport only, read-only)", async () => {
     discovery([{ name: "github", transport: "stdio" }], []);
     renderPopover();
     fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
-    const row = await screen.findByTestId("cap-toggle-github");
-    // Default OFF, and only transport is shown — never command/url/env.
-    expect(row).toHaveAttribute("aria-pressed", "false");
+    const row = await screen.findByTestId("cap-item-github");
     expect(row).toHaveTextContent("stdio connector");
+    expect(screen.queryByTestId("cap-toggle-github")).not.toBeInTheDocument();
   });
 
-  it("renders discovered skills (name + description)", async () => {
+  it("lists discovered skills (name + description, read-only)", async () => {
     discovery([], [{ name: "pdf", description: "Fill PDF forms" }]);
     renderPopover();
     fireEvent.click(screen.getByRole("button", { name: "Skills" }));
-    const row = await screen.findByTestId("cap-toggle-pdf");
-    expect(row).toHaveAttribute("aria-pressed", "false");
+    const row = await screen.findByTestId("cap-item-pdf");
     expect(row).toHaveTextContent("Fill PDF forms");
+    expect(row).not.toHaveAttribute("aria-pressed");
   });
 
   it("shows an empty state when the host has no connectors", async () => {
@@ -62,20 +57,5 @@ describe("SkillsPopover", () => {
     await waitFor(() =>
       expect(screen.getByTestId("cap-empty")).toHaveTextContent("No connectors configured"),
     );
-  });
-
-  it("toggling a tool OFF calls onChange with it added to disallowed_tools", () => {
-    discovery([], []);
-    const { onChange } = renderPopover();
-    fireEvent.click(screen.getByTestId("cap-toggle-Bash"));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ disallowed_tools: ["Bash"] }));
-  });
-
-  it("toggling a connector ON calls onChange with its name added", async () => {
-    discovery([{ name: "github", transport: "stdio" }], []);
-    const { onChange } = renderPopover();
-    fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
-    fireEvent.click(await screen.findByTestId("cap-toggle-github"));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ connectors: ["github"] }));
   });
 });

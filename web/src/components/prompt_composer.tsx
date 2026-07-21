@@ -1,6 +1,8 @@
 import { type FC, type FormEvent, useState } from "react";
+import { useConnectors } from "../hooks/use_connectors";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
 import { useModels } from "../hooks/use_models";
+import { useSkills } from "../hooks/use_skills";
 import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
@@ -8,11 +10,7 @@ import {
   selectLatestUsage,
   useEventStore,
 } from "../stores/event_store";
-import {
-  type CapabilitySelection,
-  EMPTY_CAPABILITIES,
-  SkillsPopover,
-} from "./session/skills_popover";
+import { SkillsPopover } from "./session/skills_popover";
 
 // The Claude permission modes a user may pick (CLI Shift+Tab). Bypass is owner-only
 // (it ignores the tool whitelist); the server re-enforces every choice.
@@ -37,6 +35,11 @@ const tokensToK = (n: number): string =>
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const models = useModels();
+  // Capabilities have no per-item toggle: every host connector + installed skill is
+  // available to the run (all tools stay on). The composer sends that enablement on
+  // run start; these are the real discovered lists (for the badge + what to send).
+  const connectors = useConnectors(sessionId);
+  const skills = useSkills(sessionId);
   const activeRunId = useEventStore(selectActiveRunId);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   const planRunId = useEventStore(selectExecutablePlanRunId);
@@ -49,9 +52,6 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   // chooses; the option list itself comes from runtime discovery (useModels).
   const [model, setModel] = useState("");
   const [skillOpen, setSkillOpen] = useState(false);
-  // Per-run capability selection (built-ins OFF / connectors ON / skills ON),
-  // lifted here so the popover stays controlled and the choice reaches run start.
-  const [caps, setCaps] = useState<CapabilitySelection>(EMPTY_CAPABILITIES);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,10 +71,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         permission_mode: mode,
         ...(model ? { model } : {}),
         ...(revising ? { mode: "revise" } : {}),
-        // Additive capability scoping — omitted (today's behavior) when untouched.
-        ...(caps.disallowed_tools.length ? { disallowed_tools: caps.disallowed_tools } : {}),
-        ...(caps.connectors.length ? { connectors: caps.connectors } : {}),
-        ...(caps.skills.length ? { skills: caps.skills } : {}),
+        // No per-item toggles: every discovered connector + skill is enabled (all
+        // tools stay on, so no disallowed_tools). Omitted when the host has none →
+        // today's behavior.
+        ...(connectors.length ? { connectors: connectors.map((c) => c.name) } : {}),
+        ...(skills.length ? { skills: "all" as const } : {}),
       }),
     });
 
@@ -146,12 +147,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   return (
     <div className="relative z-[2] px-[18px] pb-4">
       {skillOpen && showModeControl && (
-        <SkillsPopover
-          sessionId={sessionId}
-          value={caps}
-          onChange={setCaps}
-          onClose={() => setSkillOpen(false)}
-        />
+        <SkillsPopover sessionId={sessionId} onClose={() => setSkillOpen(false)} />
       )}
 
       <form
@@ -243,9 +239,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
           )}
 
           {/* Tools/Connectors/Skills popover trigger. The badge shows how many
-              skills are enabled for this run (skills default-OFF → 0 until opted in).
-              Only shown when a new run is being configured; the whole composer is
-              already hidden from reviewer/viewer (they lack the `run` capability). */}
+              skills the host has available (all are usable by the run — skills have
+              no per-skill toggle). Only shown when a new run is being configured; the
+              whole composer is already hidden from reviewer/viewer (no `run` cap). */}
           {showModeControl && (
             <button
               type="button"
@@ -262,7 +258,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 data-testid="skills-count"
                 className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#3b9dff]"
               >
-                {caps.skills.length}
+                {skills.length}
               </span>
             </button>
           )}
