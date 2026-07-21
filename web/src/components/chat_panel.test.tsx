@@ -62,6 +62,26 @@ describe("ChatPanel", () => {
     await waitFor(() => expect(posted).toEqual({ body: "ship it" }));
   });
 
+  it("shows a deduped roster of joined participants and the matching count", () => {
+    render(<ChatPanel sessionId="s" />);
+    act(() => {
+      useEventStore.getState().apply(joinEvent(1, "p1", "Alice"));
+      useEventStore.getState().apply(joinEvent(2, "p2", "Bob"));
+      useEventStore.getState().apply(joinEvent(3, "p1", "Alice"));
+    });
+    const roster = screen.getByTestId("participant-roster");
+    expect(roster).toHaveTextContent("Alice");
+    expect(roster).toHaveTextContent("Bob");
+    expect(screen.getAllByTestId("roster-participant")).toHaveLength(2);
+    expect(screen.getByText("2 here")).toBeInTheDocument();
+  });
+
+  it("hides the roster before anyone has joined", () => {
+    render(<ChatPanel sessionId="s" />);
+    expect(screen.queryByTestId("participant-roster")).not.toBeInTheDocument();
+    expect(screen.getByText("0 here")).toBeInTheDocument();
+  });
+
   it("a late joiner sees prior chat (durable, in the store)", () => {
     // Prior chat already in the store (as if backfilled) before this panel mounts.
     act(() => useEventStore.getState().apply(chatEvent(2, "earlier message", "p1")));
