@@ -25,13 +25,13 @@ const ROLES: Role[] = [
   },
   {
     name: "editor",
-    blurb: "drives Claude",
-    allowed: [true, true, true, false, false, false, true],
+    blurb: "drives Claude + approves",
+    allowed: [true, true, true, true, false, false, true],
   },
   {
     name: "reviewer",
-    blurb: "diffs, tasks + chat",
-    allowed: [false, false, true, false, false, false, true],
+    blurb: "reviews + approves",
+    allowed: [false, false, true, true, false, false, true],
   },
   {
     name: "viewer",

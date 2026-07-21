@@ -64,8 +64,8 @@ describe("DiffView (all roles review; owner-only controls)", () => {
     expect(file).toHaveTextContent("+2");
     expect(file).toHaveTextContent("1");
     expect(screen.getByTestId("diff-patch")).toBeInTheDocument();
-    // A reviewer cannot approve/reject.
-    expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
+    // A reviewer can now approve/reject (owner/editor/reviewer all can).
+    expect(screen.getByTestId("approve-button")).toBeInTheDocument();
   });
 
   it("renders one collapsible section per file and toggles it on header click", async () => {

@@ -38,34 +38,34 @@ The diff SHALL NOT be delivered over the cable channel.
 - **THEN** the session view fetches `GET /api/runs/:id/diff` and renders the file list + patch for the viewing
   participant, regardless of role
 
-### Requirement: An owner can approve a reviewed changeset
+### Requirement: Any role except viewer can approve a reviewed changeset
 
-`POST /api/runs/:id/approve` SHALL let an **owner** approve an `awaiting_review` run: the run becomes `approved`
-and a `changeset_approved` event is recorded. A non-owner SHALL be refused `403`; a non-participant/unknown run
-SHALL be refused `404`; a run that is not `awaiting_review` SHALL be refused with a client error. Approve keeps
-the worktree as-is (no revert).
+`POST /api/runs/:id/approve` SHALL let an **owner, editor, or reviewer** approve an `awaiting_review` run: the
+run becomes `approved` and a `changeset_approved` event is recorded. A **viewer** SHALL be refused `403`; a
+non-participant/unknown run SHALL be refused `404`; a run that is not `awaiting_review` SHALL be refused with a
+client error. Approve keeps the worktree as-is (no revert).
 
-#### Scenario: Owner approves an awaiting_review run
+#### Scenario: An approver approves an awaiting_review run
 
-- **WHEN** an owner approves a run that is `awaiting_review`
+- **WHEN** an owner, editor, or reviewer approves a run that is `awaiting_review`
 - **THEN** the run becomes `approved`, a `changeset_approved` event is recorded, and the worktree is unchanged
 
-#### Scenario: A non-owner cannot approve
+#### Scenario: A viewer cannot approve
 
-- **WHEN** an editor/reviewer/viewer attempts to approve
+- **WHEN** a viewer attempts to approve
 - **THEN** the request is refused `403` and the run status is unchanged
 
-### Requirement: An owner can reject a reviewed changeset, reverting the worktree
+### Requirement: Any role except viewer can reject a reviewed changeset, reverting the worktree
 
-`POST /api/runs/:id/reject` SHALL let an **owner** reject an `awaiting_review` run: the worktree is reverted
-(`git reset --hard HEAD` then `git clean -fd`), the run becomes `rejected`, and a `changeset_rejected` event is
-recorded. A non-owner SHALL be refused `403`; a non-participant/unknown run SHALL be refused `404`; a run that
-is not `awaiting_review` SHALL be refused with a client error. After a reject, the next run SHALL NOT resume the
-rejected run's Claude session (chaining is severed); only a revise resumes.
+`POST /api/runs/:id/reject` SHALL let an **owner, editor, or reviewer** reject an `awaiting_review` run: the
+worktree is reverted (`git reset --hard HEAD` then `git clean -fd`), the run becomes `rejected`, and a
+`changeset_rejected` event is recorded. A **viewer** SHALL be refused `403`; a non-participant/unknown run SHALL
+be refused `404`; a run that is not `awaiting_review` SHALL be refused with a client error. After a reject, the
+next run SHALL NOT resume the rejected run's Claude session (chaining is severed); only a revise resumes.
 
-#### Scenario: Owner rejects an awaiting_review run
+#### Scenario: An approver rejects an awaiting_review run
 
-- **WHEN** an owner rejects a run that is `awaiting_review`
+- **WHEN** an owner, editor, or reviewer rejects a run that is `awaiting_review`
 - **THEN** the worktree is reset to a clean HEAD, the run becomes `rejected`, and a `changeset_rejected` event
   is recorded
 
@@ -76,16 +76,17 @@ rejected run's Claude session (chaining is severed); only a revise resumes.
 
 ### Requirement: The web presents role-appropriate review controls
 
-The session view SHALL show Approve and Reject controls only to an owner (the `approve`/`reject` capability),
-and a Revise affordance to participants who can run (owner + editor) that submits a follow-up as `mode:
-"revise"` while the current run is `awaiting_review`. The diff itself SHALL be visible to all roles; only the
-mutating controls are role-gated (the server enforces the roles; the client only hides buttons).
+The session view SHALL show Approve and Reject controls to participants with the `approve`/`reject` capability
+(owner, editor, reviewer), and a Revise affordance to participants who can run (owner + editor) that submits a
+follow-up as `mode: "revise"` while the current run is `awaiting_review`. The diff itself SHALL be visible to
+all roles; only the mutating controls are role-gated (the server enforces the roles; the client only hides
+buttons).
 
-#### Scenario: Owner sees approve/reject; a viewer does not
+#### Scenario: An approver sees approve/reject; a viewer does not
 
 - **WHEN** the current run is `awaiting_review`
-- **THEN** an owner sees Approve and Reject controls, while a viewer sees the diff but no approve/reject/revise
-  controls
+- **THEN** an owner, editor, or reviewer sees Approve and Reject controls, while a viewer sees the diff but no
+  approve/reject controls
 
 #### Scenario: A revise follow-up resumes the session on the dirty tree
 

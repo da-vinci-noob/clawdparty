@@ -10,8 +10,8 @@ class SessionPolicy
   MATRIX = {
     'owner' => %i[view chat manage_tasks run interrupt approve reject
                   manage_invites manage_session archive bypass_permissions].freeze,
-    'editor' => %i[view chat manage_tasks run interrupt].freeze,
-    'reviewer' => %i[view chat manage_tasks].freeze,
+    'editor' => %i[view chat manage_tasks run interrupt approve reject].freeze,
+    'reviewer' => %i[view chat manage_tasks approve reject].freeze,
     'viewer' => %i[view chat].freeze
   }.freeze
 

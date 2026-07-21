@@ -28,15 +28,26 @@ RSpec.describe('Run review (approve / reject)') do
       expect(run.reviewed_by_id).to(eq(participant.id))
     end
 
-    %w[editor reviewer viewer].each do |role|
-      it "denies #{role} with 403 and leaves the run unchanged" do
-        join_as(session, role: role)
+    %w[editor reviewer].each do |role|
+      it "lets a #{role} approve an awaiting_review run (200 + approved + event + commit)" do
+        participant = join_as(session, role: role)
         run = awaiting_run
+        expect_any_instance_of(Git::WorktreeManager).to(receive(:commit!))
         expect { post("/api/runs/#{run.id}/approve") }
-          .not_to(change { events_of(run, 'changeset_approved').count })
-        expect(response).to(have_http_status(:forbidden))
-        expect(run.reload.status).to(eq('awaiting_review'))
+          .to(change { events_of(run, 'changeset_approved').count }.by(1))
+        expect(response).to(have_http_status(:ok))
+        expect(run.reload.status).to(eq('approved'))
+        expect(run.reviewed_by_id).to(eq(participant.id))
       end
+    end
+
+    it 'denies a viewer with 403 and leaves the run unchanged' do
+      join_as(session, role: 'viewer')
+      run = awaiting_run
+      expect { post("/api/runs/#{run.id}/approve") }
+        .not_to(change { events_of(run, 'changeset_approved').count })
+      expect(response).to(have_http_status(:forbidden))
+      expect(run.reload.status).to(eq('awaiting_review'))
     end
 
     it 'refuses a cross-session / non-participant run with 404' do
@@ -70,15 +81,26 @@ RSpec.describe('Run review (approve / reject)') do
       expect(run.reviewed_by_id).to(eq(participant.id))
     end
 
-    %w[editor reviewer viewer].each do |role|
-      it "denies #{role} with 403 and leaves the run unchanged" do
-        join_as(session, role: role)
+    %w[editor reviewer].each do |role|
+      it "lets a #{role} reject an awaiting_review run (200 + rejected + event + worktree reset)" do
+        participant = join_as(session, role: role)
         run = awaiting_run
+        expect_any_instance_of(Git::WorktreeManager).to(receive(:reset_hard!))
         expect { post("/api/runs/#{run.id}/reject") }
-          .not_to(change { events_of(run, 'changeset_rejected').count })
-        expect(response).to(have_http_status(:forbidden))
-        expect(run.reload.status).to(eq('awaiting_review'))
+          .to(change { events_of(run, 'changeset_rejected').count }.by(1))
+        expect(response).to(have_http_status(:ok))
+        expect(run.reload.status).to(eq('rejected'))
+        expect(run.reviewed_by_id).to(eq(participant.id))
       end
+    end
+
+    it 'denies a viewer with 403 and leaves the run unchanged' do
+      join_as(session, role: 'viewer')
+      run = awaiting_run
+      expect { post("/api/runs/#{run.id}/reject") }
+        .not_to(change { events_of(run, 'changeset_rejected').count })
+      expect(response).to(have_http_status(:forbidden))
+      expect(run.reload.status).to(eq('awaiting_review'))
     end
 
     it 'refuses a cross-session / non-participant run with 404' do

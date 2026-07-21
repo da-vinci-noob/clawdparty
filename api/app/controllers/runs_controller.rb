@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
 # Client-facing run control (routed under the /api scope). Each action is
-# SessionPolicy-gated (run/interrupt/follow-up = owner+editor); status derives
-# from events, never a bespoke cable message. Start is async: respond after the
-# sidecar accepts, do not block on completion.
+# SessionPolicy-gated (run/interrupt/follow-up = owner+editor; approve/reject =
+# owner+editor+reviewer); status derives from events, never a bespoke cable
+# message. Start is async: respond after the sidecar accepts, do not block on
+# completion.
 class RunsController < ApplicationController
   include RunPermissionModes
   include RunCapabilities
@@ -58,8 +59,9 @@ class RunsController < ApplicationController
            }, status: :ok)
   end
 
-  # POST /api/runs/:id/approve — owner keeps the reviewed changeset. The run
-  # becomes approved + a changeset_approved event; the worktree is untouched.
+  # POST /api/runs/:id/approve — owner/editor/reviewer keeps the reviewed
+  # changeset. The run becomes approved + a changeset_approved event; the worktree
+  # is untouched.
   def approve
     run = find_run!
     participant = authorize_action!(:approve, run.session)
@@ -67,8 +69,9 @@ class RunsController < ApplicationController
     render(json: { id: result.id.to_s, status: result.status }, status: :ok)
   end
 
-  # POST /api/runs/:id/reject — owner discards the reviewed changeset. The
-  # worktree is reverted, the run becomes rejected + a changeset_rejected event.
+  # POST /api/runs/:id/reject — owner/editor/reviewer discards the reviewed
+  # changeset. The worktree is reverted, the run becomes rejected + a
+  # changeset_rejected event.
   def reject
     run = find_run!
     participant = authorize_action!(:reject, run.session)

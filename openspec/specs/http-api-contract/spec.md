@@ -67,16 +67,16 @@ The contract SHALL define the 4-role matrix as an explicit action×role table (r
 | send `chat_message` | ✓ | ✓ | ✓ | ✓ |
 | create / update tasks | ✓ | ✓ | ✓ | ✗ |
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
-| approve / reject changeset | ✓ | ✗ | ✗ | ✗ |
+| approve / reject changeset | ✓ | ✓ | ✓ | ✗ |
 
-(Per `docs/PLAN.md §9`: owner = everything incl. approve/reject; editor = runs/follow-ups/interrupt/tasks/chat; reviewer = tasks/chat/view; viewer = view/chat.)
+(owner = everything incl. runs + approve/reject + invites/archive; editor = runs/follow-ups/interrupt + tasks/chat + approve/reject; reviewer = tasks/chat/view + approve/reject; viewer = view/chat. Approve/reject is available to every role except viewer.)
 
 The contract SHALL state that the server enforces this matrix on every endpoint and that cable subscriptions independently verify participantship; the client only hides buttons.
 
-#### Scenario: Only owner may approve or reject
+#### Scenario: Every role except viewer may approve or reject
 
-- **WHEN** a non-owner attempts to approve or reject a changeset
-- **THEN** the server denies the action regardless of what the client UI shows
+- **WHEN** an owner, editor, or reviewer approves or rejects an awaiting-review changeset
+- **THEN** the server permits it, while a viewer's attempt is denied `403` regardless of what the client UI shows
 
 #### Scenario: Cable subscription verifies participantship
 
