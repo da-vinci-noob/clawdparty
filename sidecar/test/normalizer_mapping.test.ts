@@ -41,30 +41,7 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
     });
   });
 
-  it("echoes the resolved capabilities on run_started when the context carries them", () => {
-    const n = new Normalizer({
-      sessionId: "sess_demo",
-      aiRunId: "run_demo",
-      requestedBy: "part_alice",
-      disallowedTools: ["Bash"],
-      connectors: ["github"],
-      skills: ["deploy"],
-    });
-    const ev = first(
-      n.normalize(
-        { type: "system", subtype: "init", model: "m", cwd: "/repo", session_id: "s" },
-        0,
-      ),
-    );
-    expect(ev.type).toBe("run_started");
-    expect(ev.payload).toMatchObject({
-      disallowed_tools: ["Bash"],
-      connectors: ["github"],
-      skills: ["deploy"],
-    });
-  });
-
-  it("omits the capability fields on run_started when the context has none", () => {
+  it("does not echo capability fields on run_started (always-on model, no per-run selection)", () => {
     const ev = first(
       normalizeAll([
         { type: "system", subtype: "init", model: "m", cwd: "/repo", session_id: "s" },

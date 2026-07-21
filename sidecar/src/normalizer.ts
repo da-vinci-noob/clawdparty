@@ -37,13 +37,6 @@ export interface NormalizeContext {
   aiRunId: string;
   // The originating participant id for run_started / run_interrupted attribution.
   requestedBy?: string;
-  // The RESOLVED capabilities the run actually applied (additive, v1.4). When
-  // present, runStartedFromInit echoes them so participants — including late
-  // joiners via REST backfill — see a run's real scope. Omitted → today's
-  // defaults (nothing disabled / no connectors / no skills).
-  disallowedTools?: string[];
-  connectors?: string[];
-  skills?: string[];
 }
 
 // --- redaction + bounding (unchanged from v1; the ai_raw safety valve) --------
@@ -250,17 +243,6 @@ export class Normalizer {
       permission_mode: msg.permissionMode ?? "",
       claude_session_id: msg.session_id ?? "",
     };
-    // Additively echo the applied capabilities (v1.4) — only when present, so a
-    // run with no selection produces exactly the pre-v1.4 payload.
-    if (this.ctx.disallowedTools && this.ctx.disallowedTools.length > 0) {
-      payload.disallowed_tools = this.ctx.disallowedTools;
-    }
-    if (this.ctx.connectors && this.ctx.connectors.length > 0) {
-      payload.connectors = this.ctx.connectors;
-    }
-    if (this.ctx.skills && this.ctx.skills.length > 0) {
-      payload.skills = this.ctx.skills;
-    }
     return this.envelope("run_started", this.userActor(), payload, nowMs);
   }
 

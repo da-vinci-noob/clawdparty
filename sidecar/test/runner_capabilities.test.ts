@@ -115,8 +115,8 @@ describe("buildOptions — capability mapping", () => {
   });
 });
 
-describe("startRun — threads the RESOLVED capabilities into run_started", () => {
-  it("echoes disallowed_tools, resolved connector names, and enabled skills", async () => {
+describe("startRun — run_started stays lean (capabilities are not echoed)", () => {
+  it("does not echo disallowed_tools/connectors/skills even when a selection is applied", async () => {
     writeMcpJson({ github: { command: "gh" } });
     const { transport, durable } = captureTransport();
     const handle = Object.assign(
@@ -150,12 +150,13 @@ describe("startRun — threads the RESOLVED capabilities into run_started", () =
     });
     await vi.waitFor(() => expect(durable.some((e) => e.type === "run_started")).toBe(true));
 
-    const started = durable.find((e) => e.type === "run_started");
-    expect(started?.payload).toMatchObject({
-      disallowed_tools: ["Bash"],
-      connectors: ["github"], // "unknown" is dropped — only resolved names are echoed
-      skills: ["deploy"],
-    });
+    const payload = durable.find((e) => e.type === "run_started")?.payload as Record<
+      string,
+      unknown
+    >;
+    expect(payload).not.toHaveProperty("disallowed_tools");
+    expect(payload).not.toHaveProperty("connectors");
+    expect(payload).not.toHaveProperty("skills");
   });
 
   it("omits the capability fields from run_started when nothing was selected", async () => {

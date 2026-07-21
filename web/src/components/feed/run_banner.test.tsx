@@ -38,8 +38,8 @@ describe("RunBanner permission mode", () => {
   });
 });
 
-describe("RunBanner capability echo", () => {
-  it("shows the applied capabilities from a run_started payload", () => {
+describe("RunBanner has no capability echo", () => {
+  it("never renders connectors/skills on run_started (always-on, not echoed)", () => {
     render(
       <RunBanner
         event={evt("run_started", {
@@ -47,31 +47,14 @@ describe("RunBanner capability echo", () => {
           cwd: "/r",
           permission_mode: "acceptEdits",
           claude_session_id: "x",
-          disallowed_tools: ["Bash"],
           connectors: ["github"],
           skills: ["pdf"],
         })}
         names={new Map([["p1", "Alice"]])}
       />,
     );
-    const caps = screen.getByTestId("run-caps");
-    expect(caps).toHaveTextContent("tools −Bash");
-    expect(caps).toHaveTextContent("connectors: github");
-    expect(caps).toHaveTextContent("skills: pdf");
-  });
-
-  it("shows no capability chip when the payload carries none", () => {
-    render(
-      <RunBanner
-        event={evt("run_started", {
-          model: "m",
-          cwd: "/r",
-          permission_mode: "acceptEdits",
-          claude_session_id: "x",
-        })}
-        names={new Map()}
-      />,
-    );
     expect(screen.queryByTestId("run-caps")).not.toBeInTheDocument();
+    expect(screen.queryByText(/connectors:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/skills:/)).not.toBeInTheDocument();
   });
 });

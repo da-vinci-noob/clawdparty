@@ -8,7 +8,7 @@
 
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { EventEnvelope } from "@clawdparty/contracts";
-import { listSkills, resolveConnectors } from "./capabilities.js";
+import { resolveConnectors } from "./capabilities.js";
 import { Normalizer } from "./normalizer.js";
 import type { Transport } from "./transport.js";
 
@@ -125,7 +125,6 @@ export class Runner {
       sessionId: input.session_id,
       aiRunId: input.run_id,
       requestedBy: input.requested_by,
-      ...resolveAppliedCapabilities(input),
     });
     // The initial prompt becomes seq 1 (assigned now), shipped before the drain
     // loop emits run_started (seq 2) — so the human's words lead the transcript.
@@ -294,35 +293,4 @@ function buildOptions(input: StartRunInput): Record<string, unknown> {
     options.skills = input.skills;
   }
   return options;
-}
-
-// Derive the RESOLVED capabilities the run actually applied, for the run_started
-// echo (D5): the disallowed tools as sent, the connector names that actually
-// resolved against host config, and the skill names actually enabled ("all" is
-// expanded to the discovered names). Empty selections yield undefined so the
-// payload omits them (→ "today's defaults").
-function resolveAppliedCapabilities(input: StartRunInput): {
-  disallowedTools?: string[];
-  connectors?: string[];
-  skills?: string[];
-} {
-  const applied: { disallowedTools?: string[]; connectors?: string[]; skills?: string[] } = {};
-  if (input.disallowed_tools && input.disallowed_tools.length > 0) {
-    applied.disallowedTools = input.disallowed_tools;
-  }
-  if (input.connectors && input.connectors.length > 0) {
-    const resolved = Object.keys(resolveConnectors(input.repo_path, input.connectors).mcpServers);
-    if (resolved.length > 0) {
-      applied.connectors = resolved;
-    }
-  }
-  if (input.skills === "all") {
-    const discovered = listSkills(input.repo_path).skills.map((s) => s.name);
-    if (discovered.length > 0) {
-      applied.skills = discovered;
-    }
-  } else if (Array.isArray(input.skills) && input.skills.length > 0) {
-    applied.skills = input.skills;
-  }
-  return applied;
 }

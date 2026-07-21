@@ -30,28 +30,8 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   const label = LABELS[event.type] ?? event.type;
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const started =
-    event.type === "run_started"
-      ? (event.payload as {
-          permission_mode?: string;
-          disallowed_tools?: string[];
-          connectors?: string[];
-          skills?: string[];
-        })
-      : undefined;
+    event.type === "run_started" ? (event.payload as { permission_mode?: string }) : undefined;
   const mode = started?.permission_mode;
-  // Compact echo of the capabilities the run actually applied (additive optional
-  // run_started fields; absent parts are omitted).
-  const capParts: string[] = [];
-  if (started?.disallowed_tools?.length) {
-    capParts.push(`tools −${started.disallowed_tools.join(", ")}`);
-  }
-  if (started?.connectors?.length) {
-    capParts.push(`connectors: ${started.connectors.join(", ")}`);
-  }
-  if (started?.skills?.length) {
-    capParts.push(`skills: ${started.skills.join(", ")}`);
-  }
-  const caps = capParts.join(" · ");
   return (
     <div
       data-testid="feed-run-banner"
@@ -71,14 +51,6 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
             className="ml-1 rounded-[5px] border border-[#1c2a20] bg-[#0e140f] px-1 text-[10px] uppercase text-[#7c847c]"
           >
             {MODE_LABELS[mode] ?? mode}
-          </span>
-        )}
-        {caps && (
-          <span
-            data-testid="run-caps"
-            className="ml-1 rounded-[5px] border border-[#1c2a20] bg-[#0e140f] px-1 text-[10px] text-[#7c847c]"
-          >
-            {caps}
           </span>
         )}
       </span>
