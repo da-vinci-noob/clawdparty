@@ -131,6 +131,18 @@ describe("PromptComposer permission modes", () => {
     expect(cap.last()).toMatchObject({ model: "us.anthropic.claude-opus-4-8" });
   });
 
+  it("offers only 'Default model' until discovery resolves (no invalid fallback ids)", () => {
+    // No /api/models mock → discovery hasn't produced host-valid ids yet. The picker
+    // must NOT offer hardcoded plain-id fallbacks (they're invalid on Bedrock); only
+    // "Default model" (the server's configured model) is safe until the real list loads.
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+    const options = Array.from(screen.getByTestId("model").querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options).toEqual(["Default model"]);
+  });
+
   it("omits model on run start when left on Default", async () => {
     const cap = captureRunStart();
     setRole("owner");
@@ -205,7 +217,10 @@ describe("PromptComposer context bar", () => {
     setRole("owner");
     renderComposer(<PromptComposer sessionId="s" />);
 
-    expect(await screen.findByTestId("context-usage")).toHaveTextContent("124K / 1M · 12%");
+    // Window comes from model discovery (async), so wait for it to resolve to 1M.
+    await waitFor(() =>
+      expect(screen.getByTestId("context-usage")).toHaveTextContent("124K / 1M · 12%"),
+    );
     expect(screen.getByTestId("context-bar-fill")).toHaveStyle({ width: "12%" });
     // The actual model that ran is surfaced (confirms the selection took effect).
     expect(screen.getByTestId("context-model")).toHaveTextContent("Opus 4.8");
