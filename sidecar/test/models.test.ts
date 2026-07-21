@@ -119,6 +119,39 @@ describe("listModels — Bedrock path", () => {
       { id: "us.anthropic.claude-haiku-4-5-20251001", label: "Haiku 4.5", context_window: 200_000 },
     ]);
   });
+
+  it("collapses US/Global regional profiles to one per model, preferring global", async () => {
+    send.mockReset().mockResolvedValueOnce({
+      inferenceProfileSummaries: [
+        {
+          inferenceProfileId: "us.anthropic.claude-opus-4-8",
+          inferenceProfileName: "US Anthropic Claude Opus 4.8",
+        },
+        {
+          inferenceProfileId: "global.anthropic.claude-opus-4-8",
+          inferenceProfileName: "Global Anthropic Claude Opus 4.8",
+        },
+        {
+          inferenceProfileId: "us.anthropic.claude-haiku-4-5-20251001",
+          inferenceProfileName: "US Anthropic Claude Haiku 4.5",
+        },
+      ],
+    });
+    const res = await listModels({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-west-2" });
+    // One Opus entry (the global profile wins), plus the single Haiku profile.
+    expect(res.models).toEqual([
+      {
+        id: "global.anthropic.claude-opus-4-8",
+        label: "Global Anthropic Claude Opus 4.8",
+        context_window: 1_000_000,
+      },
+      {
+        id: "us.anthropic.claude-haiku-4-5-20251001",
+        label: "US Anthropic Claude Haiku 4.5",
+        context_window: 200_000,
+      },
+    ]);
+  });
 });
 
 describe("FALLBACK_MODELS windows", () => {
