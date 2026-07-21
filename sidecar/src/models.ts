@@ -73,6 +73,12 @@ export function dedupeByModel(models: ModelInfo[]): ModelInfo[] {
   return [...best.values()];
 }
 
+// Stable, predictable ordering for the picker (Bedrock returns an arbitrary order).
+// Alphabetical by label naturally groups by family (Fable/Haiku/Opus/Sonnet) + version.
+function sortByLabel(models: ModelInfo[]): ModelInfo[] {
+  return [...models].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 function isBedrock(env: NodeJS.ProcessEnv): boolean {
   const v = env.CLAUDE_CODE_USE_BEDROCK;
   return v === "1" || v === "true";
@@ -153,7 +159,7 @@ export async function listModels(
     if (models.length === 0) {
       return { models: FALLBACK_MODELS, source: "fallback" };
     }
-    return { models, source: bedrock ? "bedrock" : "anthropic" };
+    return { models: sortByLabel(models), source: bedrock ? "bedrock" : "anthropic" };
   } catch (err) {
     return { models: FALLBACK_MODELS, source: "fallback", error: String(err) };
   }
