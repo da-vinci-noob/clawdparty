@@ -1,40 +1,97 @@
 /* Dark-theme overrides for react-diff-view (its bundled index.css is light-theme:
  * light-green/-red row backgrounds that leave the app's light text invisible).
- * Imported AFTER the library CSS so equal-specificity rules win. */
-.diff {
+ * Imported AFTER the library CSS so equal-specificity rules win.
+ *
+ * The `.cp-diff` scope styles the gutterless (gutterType="none") unified diff to
+ * match the design's review card: full-width tinted rows, an inline +/- marker,
+ * roomy line-height, and no line-number columns. */
+
+.cp-diff .diff {
   background: transparent;
   color: #cdd2cd;
+  border-collapse: collapse;
+  width: 100%;
 }
 
-.diff-gutter {
-  color: #6b726b;
+/* Roomy, readable rows (the reference has generous vertical rhythm). */
+.cp-diff .diff-line {
+  line-height: 1.9;
+}
+
+.cp-diff .diff-code {
+  color: #cdd2cd;
+  padding: 1px 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Hunk separators (the "@@ ..." rows) read as faint context, not noise. */
+.cp-diff .diff-hunk-header,
+.cp-diff .diff-decoration {
+  background: #0b0d0b;
+  color: #5f665f;
+}
+.cp-diff .diff-hunk-header-content {
+  padding: 4px 18px;
+  font-size: 11px;
+}
+
+/* Context (unchanged) lines: muted, transparent — like the "end" row in the ref. */
+.cp-diff .diff-code {
   background: transparent;
 }
 
-.diff-code {
-  color: #cdd2cd;
+/* Added lines: blue tint + a "+" marker in the left padding. */
+.cp-diff .diff-code-insert {
+  background-color: rgba(59, 157, 255, 0.1);
+  color: #cdd6dd;
+  position: relative;
 }
-
-/* Added lines: dark-green tint + readable text. */
-.diff-gutter-insert {
-  background-color: rgba(59, 157, 255, 0.28);
+.cp-diff .diff-code-insert::before {
+  content: "+";
+  position: absolute;
+  left: 6px;
+  color: #3b9dff;
 }
-.diff-code-insert {
-  background-color: rgba(59, 157, 255, 0.16);
-}
-.diff-code-insert .diff-code-edit {
-  background-color: rgba(59, 157, 255, 0.45);
+.cp-diff .diff-code-insert .diff-code-edit {
+  background-color: rgba(59, 157, 255, 0.32);
   color: #e6e8e6;
 }
 
-/* Removed lines: dark-red tint + readable text. */
-.diff-gutter-delete {
-  background-color: rgba(248, 81, 73, 0.28);
+/* Removed lines: red tint + a "-" marker in the left padding. */
+.cp-diff .diff-code-delete {
+  background-color: rgba(248, 81, 73, 0.1);
+  color: #d8b4b4;
+  position: relative;
 }
-.diff-code-delete {
-  background-color: rgba(248, 81, 73, 0.16);
+.cp-diff .diff-code-delete::before {
+  content: "-";
+  position: absolute;
+  left: 6px;
+  color: #f0a8a8;
 }
-.diff-code-delete .diff-code-edit {
-  background-color: rgba(248, 81, 73, 0.45);
+.cp-diff .diff-code-delete .diff-code-edit {
+  background-color: rgba(248, 81, 73, 0.32);
   color: #e6e8e6;
+}
+
+/* A file's hunks fade + slide in when its section expands (smooth expand). */
+@keyframes cp-diff-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.cp-diff-in {
+  animation: cp-diff-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-diff-in {
+    animation: none;
+  }
 }
