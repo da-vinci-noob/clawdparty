@@ -28,6 +28,30 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## [http-api] — session history + owner archive (http-api-contract, additive)
+
+**`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this adds two REST endpoints
+(`http_api.md`); no event type, envelope, payload, or **existing** endpoint signature changes, so
+the event contract version does not move. Change: `session-history-and-archive`.
+
+### Added (additive — nothing removed or renamed)
+
+- **New endpoint `GET /api/sessions`** — a per-user index of the caller's sessions (host or
+  participant), `200` with an ordered array of
+  `{ id, title, mode, status, my_role, last_activity_at, created_at }`, newest activity first.
+  Gated only by a valid `clawd_uid`; unauthenticated is `404` (the shared `require_user`
+  anti-enumeration posture). Adding an endpoint is additive; no existing signature changed.
+- **New endpoint `POST /api/sessions/:id/archive`** — owner-only hard close (`active → archived`,
+  terminal), `200 { id, status: "archived" }`, idempotent. New role-matrix row **archive session**
+  (owner-only). Starting a run on an archived session is now refused (`409`) — a new refusal on the
+  **existing** `POST /api/sessions/:id/runs`, not a signature change.
+
+### Unchanged (why this is not a `major`)
+
+The event envelope, the 22-name taxonomy, all payloads, the `(ai_run_id, seq)` rules, and every
+**existing** endpoint request/response signature are untouched. The data model gains a
+`sessions.last_activity_at` column, which is internal (not part of any wire contract).
+
 ## [protocol] — selectable Claude permission mode (sidecar-protocol, additive)
 
 **`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this touches the **sidecar protocol**

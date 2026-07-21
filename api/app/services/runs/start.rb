@@ -10,6 +10,7 @@ module Runs
     class ActiveRunExists < StandardError; end
     class DirtyWorktree < StandardError; end
     class UnsupportedPermissionMode < StandardError; end
+    class SessionArchived < StandardError; end
 
     DEFAULT_ALLOWED_TOOLS = %w[Read Write Edit Bash].freeze
     # Claude permission modes users may pick (the CLI Shift+Tab modes we support).
@@ -37,8 +38,7 @@ module Runs
     end
 
     def call
-      raise(UnsupportedPermissionMode, "unsupported permission_mode: #{@permission_mode}") unless
-        PERMISSION_MODES.include?(@permission_mode)
+      preflight!
 
       revise = @mode == 'revise'
       prior = @session.ai_runs.active.first
@@ -58,6 +58,15 @@ module Runs
     end
 
     private
+
+    # Guards that must hold before any run is created, independent of mode. Archive
+    # is a hard close: no new run may start on an archived session — enforced in the
+    # service (not just the controller) so the invariant holds for every caller.
+    def preflight!
+      raise(UnsupportedPermissionMode, "unsupported permission_mode: #{@permission_mode}") unless
+        PERMISSION_MODES.include?(@permission_mode)
+      raise(SessionArchived) if @session.archived?
+    end
 
     def chat_cwd
       @session.repository_path.presence || Git::WorktreeManager.repo_root

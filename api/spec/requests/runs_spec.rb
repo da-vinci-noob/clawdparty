@@ -60,6 +60,14 @@ RSpec.describe('Run control') do
       expect(response).to(have_http_status(:conflict))
     end
 
+    it 'surfaces 409 when the session is archived (hard close blocks new runs)' do
+      join_as(session, role: 'owner')
+      session.update!(status: 'archived')
+      expect { start_run }.not_to(change(AiRun, :count))
+      expect(response).to(have_http_status(:conflict))
+      expect(response.parsed_body['errors'].first['message']).to(be_present)
+    end
+
     it 'surfaces a sidecar transport failure as 502 (not an unhandled 500) and leaves no queued run' do
       join_as(session, role: 'owner')
       allow_any_instance_of(Sidecar::Client).to(receive(:start_run)

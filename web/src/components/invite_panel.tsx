@@ -26,14 +26,20 @@ const STATUS_CLASS: Record<InviteStatus, string> = {
 // Tokens are hashed server-side, so a minted link is shown once and the list never
 // re-displays it (metadata + status only).
 export const InvitePanel: FC<{ sessionId: string }> = ({ sessionId }) => {
-  const { can } = useCurrentParticipant();
+  const { participant, can } = useCurrentParticipant();
   const [role, setRole] = useState<Role>("editor");
   const [link, setLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
 
-  const owner = can("manage_invites");
+  // The participant store is global; only trust it when it is for THIS session.
+  // Otherwise a stale participant from a previously-viewed session (with a
+  // possibly higher role) would render owner UI and fire the owner-only invites
+  // request against this session — which the server rejects (403). Effects run
+  // child-first, so this session-scoped gate (not just the parent's hydrate) is
+  // what prevents that request until the real role for this session is confirmed.
+  const owner = participant?.session_id === sessionId && can("manage_invites");
 
   const load = useCallback(async (): Promise<void> => {
     try {

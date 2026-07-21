@@ -23,8 +23,13 @@ Rails.application.routes.draw do
     get 'models', to: 'models#index'
 
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
-    # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id
-    resources :sessions, only: %i[create update] do
+    # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id.
+    # #index lists the caller's sessions (host or participant): GET /api/sessions.
+    # member #archive hard-closes a session (owner only): POST /api/sessions/:id/archive.
+    resources :sessions, only: %i[index create update] do
+      member do
+        post :archive
+      end
       # Who am I in this session (re-hydrate the client from the clawd_uid cookie
       # after a refresh): GET /api/sessions/:session_id/participant
       get 'participant', to: 'participants#show'

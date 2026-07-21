@@ -24,6 +24,11 @@ module Events
       ActiveRecord::Base.transaction do
         record = yield if block_given?
         built = Event.create!(persist_attrs)
+        # Advance the session's recency signal in the same transaction as the
+        # event insert, so the per-user history list (session-history) orders by
+        # real activity. update_column skips validations/callbacks/updated_at by
+        # design — this is a bookkeeping touch, not a domain mutation.
+        @session.update_column(:last_activity_at, built.created_at) # rubocop:disable Rails/SkipsModelValidations
       end
       # Broadcast only after the transaction commits successfully.
       SessionChannel.broadcast_to(@session, built.to_envelope)

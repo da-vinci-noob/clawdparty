@@ -43,4 +43,15 @@ RSpec.describe(Events::Append) do
       ) { Message.create!(session: session, author: participant, kind: 'user', body: 'hi') }
     end.to(have_broadcasted_to(session).from_channel(SessionChannel))
   end
+
+  it "advances the session's last_activity_at to the appended event's timestamp" do
+    session.update!(last_activity_at: 1.hour.ago)
+
+    described_class.call(
+      session: session,
+      event: { type: 'chat_message', actor: { kind: 'user', id: participant.id } }
+    ) { Message.create!(session: session, author: participant, kind: 'user', body: 'hi') }
+
+    expect(session.reload.last_activity_at).to(eq(Event.last.created_at))
+  end
 end

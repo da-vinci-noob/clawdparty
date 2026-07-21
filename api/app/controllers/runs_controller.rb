@@ -6,30 +6,9 @@
 # sidecar accepts, do not block on completion.
 class RunsController < ApplicationController
   include RunPermissionModes
+  include RunErrorResponses
 
   before_action :require_user
-
-  rescue_from Runs::Start::ActiveRunExists, Sidecar::Client::ActiveRunConflict do
-    render(json: { errors: [{ message: 'A run is already active for this session' }] }, status: :conflict)
-  end
-  rescue_from Runs::Start::DirtyWorktree do
-    render(json: { errors: [{ message: 'Worktree is dirty; cannot start a fresh run' }] },
-           status: :unprocessable_content)
-  end
-  rescue_from Sidecar::Client::UnknownRun do
-    render_not_found
-  end
-  rescue_from Runs::Approve::NotReviewable, Runs::Reject::NotReviewable do
-    render(json: { errors: [{ message: 'Run is not awaiting review' }] }, status: :conflict)
-  end
-  rescue_from Sidecar::Client::TransportError do
-    render(json: { errors: [{ message: 'The Claude sidecar is unavailable; try again' }] }, status: :bad_gateway)
-  end
-  rescue_from Git::WorktreeManager::GitError do
-    render(json: { errors: [{ message: 'Could not prepare the session worktree — is the target ' \
-                                       'repo a git repository? (set TARGET_REPO_PATH to a repo with a commit)' }] },
-           status: :unprocessable_content)
-  end
 
   # POST /api/sessions/:session_id/runs
   def create
