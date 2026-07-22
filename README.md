@@ -12,12 +12,14 @@ Pairing on AI-assisted coding usually means one person screen-sharing while ever
 
 ## Features
 
-- **Watch Claude live** — streamed text, thinking, tool calls, and terminal output as they happen, in an activity feed built for high event volume.
-- **Shared chat** — a per-session chat sidebar is the coordination backbone, always visible.
+- **Watch Claude live** — streamed text, thinking, tool calls, and terminal output as they happen, in an activity feed built for high event volume that **auto-scrolls** to the newest message (and stays put when you scroll up to read history).
+- **Shared chat** — a per-session chat sidebar is the coordination backbone, always visible, with a live roster of who's in the room.
 - **Prompt, follow up, interrupt** — send the initial prompt, push mid-run follow-ups into the live session, or interrupt cleanly.
-- **Changeset review & approval** — Claude works in an isolated git worktree; when it finishes, everyone reviews the diff and the owner approves (commit) or rejects (revert).
+- **Pick the model & permission mode** — choose the Claude **model** (discovered live from your login — Bedrock inference profiles or the Anthropic API) and the **permission mode** per run: **Plan** (read-only exploration), **Auto-accept** (default), or **Bypass** (owner-only). A live CONTEXT bar shows token usage against the model's real window.
+- **Per-run capabilities** — every run has the host's built-in tools, host-configured **MCP connectors**, and installed **skills** available; the composer shows what's available and Claude uses them as needed.
+- **Changeset review & approval** — Claude works in an isolated git worktree; when it finishes, everyone reviews the diff and any **owner, editor, or reviewer** approves (commit) or rejects (revert).
 - **Gap-free late join** — join mid-run and catch up to the exact current state, then go live.
-- **Role-scoped access** — reusable invite links map to roles (owner / editor / reviewer / viewer); the server enforces every action.
+- **Role-scoped access** — reusable invite links map to roles (owner / editor / reviewer / viewer); the owner can list and **revoke** invites; the server enforces every action.
 - **File and diff viewers** — browse the worktree and review per-file diffs; Claude's terminal output replays read-only inside the activity feed (no separate terminal tab).
 
 ## How it works
@@ -95,21 +97,23 @@ Open a session, generate an invite link for the role you want to grant, share it
    - **Review mode** — Claude works in an isolated **git worktree** of the repo you pick; its changes are held for review and approve/reject. Pick a folder that *is* a git repo.
    - **Chat mode** — Claude runs directly in the chosen folder — no worktree, no diff/approval. Good for exploring, or working in a non-git directory.
 2. **Invite your team.** As owner, mint a **role-scoped invite link** (owner / editor / reviewer / viewer) and share it. The invitee opens it, picks a display name, and joins the same live session. Roles are enforced server-side — the UI just hides what a role can't do.
-3. **Drive Claude.** Type a prompt and **Run**. The activity feed streams Claude's text, thinking, tool calls, and terminal output live. Send **mid-run follow-ups**, or **Interrupt** to stop cleanly. Chat is always available in the sidebar for coordination.
-4. **Review & decide (review mode).** When a run finishes with changes, the **diff appears for everyone**. The owner then:
+3. **Drive Claude.** Optionally pick the **model** and **permission mode** (Plan / Auto-accept / Bypass), type a prompt, and **Run**. The activity feed streams Claude's text, thinking, tool calls, and terminal output live and auto-scrolls to the newest. Send **mid-run follow-ups**, or **Interrupt** to stop cleanly. Chat is always available in the sidebar for coordination.
+4. **Review & decide (review mode).** When a run finishes with changes, the **diff appears for everyone**. Any **owner, editor, or reviewer** then:
    - **Approve** → commits the changeset onto the session branch (`clawd/session-<id>`) and leaves a clean tree for the next run,
    - **Reject** → reverts the worktree (`git reset --hard && git clean -fd`), or
-   - **Revise** → send a follow-up that keeps the changes and continues (resuming Claude's session).
+   - **Revise** (owner/editor) → send a follow-up that keeps the changes and continues (resuming Claude's session).
 5. **Iterate.** Each run's diff is incremental from the last approval. Your **main checkout is never touched** — everything lands in the per-session worktree under `<repo>/.clawdparty/worktrees/`.
 
 ### Roles
 
 | Role | Can do |
 |---|---|
-| **owner** | Everything: run / interrupt, **approve / reject**, change the working directory, mint invites |
-| **editor** | Run Claude, follow-ups, interrupt, revise, chat |
-| **reviewer** | View the session + diffs, chat — no running Claude |
+| **owner** | Everything: run / interrupt, **approve / reject**, change the working directory, mint & revoke invites, archive |
+| **editor** | Run Claude, follow-ups, interrupt, revise, **approve / reject**, chat |
+| **reviewer** | Review + **approve / reject**, tasks, chat — no running Claude |
 | **viewer** | Watch + chat only |
+
+Approve/reject is available to everyone except **viewer**; driving Claude (run / follow-up / interrupt / revise) is owner + editor; invites and archive are owner-only. The server (`SessionPolicy`) enforces this on every request — the UI only hides what a role can't do.
 
 ## Repo layout
 
