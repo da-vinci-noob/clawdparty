@@ -28,6 +28,90 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
+## ⚠️ MIGRATION WINDOW — OPEN (harness architecture)
+
+**Opened: 2026-08-16.** **Must close by: 2026-09-15.** Status: **OPEN — breaking
+changes permitted.** Change: `001-sidecar-harness-architecture`.
+
+This is the first and intended-only declared window in the project's life. Per ,
+breaking interface changes are permitted **only** inside it; outside it, changes are
+additive or they are defects. Per  the rename rides in the same window as the
+protocol breaks, so the coordination cost is paid once instead of twice.
+
+**The close date is a deadline, not a forecast.** `plan.md` sequences milestones
+(M-1 → M7) but assigns no calendar dates, so 30 days is a bound chosen here to make the
+window falsifiable — a window that cannot be breached is not a window. Move it
+deliberately if M0 needs longer; do not let it lapse silently. **A follow-up writes the closing
+entry** with the real ship date and the final list of what actually shipped.
+
+Every breaking change below is foreseen **now**, and all of them land in **M0**
+(`harness_http.md` → Compatibility and sequencing). Anything discovered later that would
+break a contract *outside* this window is a defect, not an amendment (Principle I).
+
+### Breaking — endpoint & protocol signatures
+
+| # | Change | Streams |
+|---|---|---|
+| B1 | **`POST /runs` request shape** — gains `lane`, `provider`, `effort`; **drops `claude_session_id`**. Resumption becomes harness `session_id` + lane, because the harness now owns the session record. | api, harness |
+| B2 | **`POST /runs/:id/permission_mode` REMOVED** — an Agent SDK concept with no meaning once we own the loop. Replaced by extension-point policy (`tool:before`) plus the per-run tool set. **The web app must stop calling it and stop rendering the mid-run switch**. | api, harness, web |
+| B3 | **`GET /models` response shape** — becomes `{ providers: [{ id, available, reason?, remedy?, credentialSource?, models: [...] }] }`. Never 500s; an unavailable provider is *reported*, not omitted. | api, harness, web |
+| B4 | **`POST /internal/sidecar/heartbeat` → `POST /internal/harness/heartbeat`**, body gains `store_seq_high_water` per active run. | api, harness |
+| B5 | **One-active-run-per-session is lifted** (M7) — the partial unique index on `ai_runs` gives way to one-active-run-per-**lane**. A client that assumed at most one active run per session is wrong afterwards. | api |
+
+### Breaking — rename
+
+| Old | New |
+|---|---|
+| `sidecar/` (directory) | `harness/` |
+| `sidecar` (compose service) | **removed** — the harness is a host process (Q6) |
+| `docker/sidecar.Dockerfile` | `docker/harness.Dockerfile` |
+| `SIDECAR_URL` | `HARNESS_URL` |
+| `SIDECAR_SHARED_SECRET` | `HARNESS_SHARED_SECRET` |
+| `SIDECAR_PORT` | `HARNESS_PORT` |
+| `Sidecar::Client` | `Harness::Client` |
+| `Sidecar::HealthcheckJob` | `Harness::HealthcheckJob` |
+| `docs/contracts/sidecar_protocol.md` | `docs/contracts/harness_protocol.md` (the link in this file's preamble moves with it) |
+| `openspec/specs/sidecar-*` (6 dirs) | `openspec/specs/harness-*` |
+
+**Not renamed:** `openspec/changes/archive/**`. It records what was accurate when written
+. Old config names **fail loudly** naming the new variable — never a silent
+fallback to a default .
+
+### Additive, riding the same window
+
+- **Eight new event types** — `request_header`, `context_compacted`, `context_usage`,
+  `tool_refused`, `plugin_enabled`, `plugin_disabled`, `provider_error`,
+  `recovery_applied`. `CONTRACT_VERSION` `{1,4}` → `{1,5}`; `EVENT_TYPE_COUNT` 22 → 30.
+  Recorded in its own entry below.
+- **New endpoints** — `GET /runs` (the authoritative active-run list, and the
+  reconciliation source), `GET /plugins`, `POST /sessions/:id/plugins`,
+  `GET /sessions/:id/entries?after=<store_seq>`.
+- **`POST /internal/events`** keeps its wire shape and gains `store_seq` per event. Its
+  *role* changes from the record to a projection channel — invisible to clients, which is
+  what keeps M0 behaviour-neutral.
+
+### ⚠️ Unreconciled governance question (raised, not decided)
+
+The table at the top of this file says a frozen **endpoint signature** change is breaking
+and bumps `CONTRACT_VERSION.major`. Two prior entries — `[protocol]` and `[http-api]` —
+did the opposite, holding `CONTRACT_VERSION` still on the grounds that it versions the
+*event* contract, not the protocol. **This entry follows that precedent**: B1–B5 change
+endpoint signatures and `CONTRACT_VERSION.major` stays at 1.
+
+The consequence is worth stating plainly rather than leaving implicit: **B1–B5 ship with
+no machine-detectable version signal.** A consumer cannot assert its way out of them; it
+finds out at runtime. That is tolerable only because this window is declared and
+coordinated by sign-off. Either the governance table's endpoint row or the precedent is
+wrong, and reconciling them is a **separate decision** — not something this entry settles.
+
+### Sign-off — all three streams, before M0 merges
+
+Each stream signs that it has read B1–B5 + the rename table and has its side scheduled.
+
+- [ ] **api** — signed: ______________________ date: __________
+- [ ] **harness** — signed: ______________________ date: __________
+- [ ] **web** — signed: ______________________ date: __________
+
 ## [review-approve-roles] — approve/reject extended to editor + reviewer
 
 **`CONTRACT_VERSION` unchanged** — this changes the 4-role matrix (an authorization
