@@ -21,8 +21,7 @@ export const WEB_FETCH_TOOL_TYPE = "web_fetch_20260209";
 
 const serverSideOnly = (name: string) =>
   textResult(
-    `${name} executes on the provider, not in the harness. A local dispatch means the ` +
-      "loop treated a server-side tool as a local one.",
+    `${name} executes on the provider, not in the harness. A local dispatch means the loop treated a server-side tool as a local one.`,
     true,
   );
 

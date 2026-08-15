@@ -328,7 +328,7 @@ describe("anthropic-direct — mapping specifics", () => {
       });
       expect(JSON.stringify(result)).not.toContain(KNOWN_TEST_SECRET);
     } finally {
-      delete process.env.ANTHROPIC_API_KEY;
+      process.env.ANTHROPIC_API_KEY = undefined;
     }
   });
 
