@@ -433,16 +433,10 @@ export class RunLoop {
       // The id has to be threaded in: `terminal_output` is keyed by tool_use_id so
       // the feed can attach output to the right chip.
       onOutput: (chunk) => emitted.push(...normalizer.terminalOutput(toolUseId, chunk, this.now())),
-      // `onFileChanged` is deliberately NOT subscribed. `file_changed` is derived
-      // from the tool CALL in the normalizer, which is what the fixture and the
-      // existing feed expect, so subscribing here emitted it twice.
-      //
-      // Known consequence, inherited from the fixture rather than introduced: a
-      // write that FAILS still reports file_changed, because the event is derived
-      // from intent rather than outcome. Switching to the execution-derived source
-      // would be more truthful but moves the event after `tool_finished`, which is
-      // a visible behaviour change and so is out of scope for M0's
-      // "nothing changed" criterion.
+      // `onFileChanged` is deliberately NOT subscribed: `file_changed` is derived
+      // from the tool CALL in the normalizer, so subscribing here emitted it twice.
+      // A failed write therefore still reports a file as changed — fixed by a follow-up,
+      // which owns the behaviour change and the contract update it needs.
     };
 
     try {
