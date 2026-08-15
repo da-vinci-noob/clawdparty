@@ -1,0 +1,43 @@
+name: contracts
+
+# The executable contract (packages/contracts/fixtures/sample_run.test.ts) is the
+# FIRST of the four artifacts required to pass against
+# sample_run.jsonl — and it ran in no CI job at all. The sidecar and web jobs
+# install the contracts package as a file: dependency and read the fixture DATA,
+# but neither runs the frozen-envelope-rules suite over it.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "packages/**"
+      - ".github/workflows/contracts.yml"
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/contracts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin Node 24 even though the host runs newer, to avoid runtime drift.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Biome
+        run: npx @biomejs/biome@1.9.4 check .
+
+      # Covers fixtures/ as well as src/ — the exhaustive Record<EnvelopeType, …>
+      # guard in the fixture test is only a guard if it is type-checked.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Vitest
+        run: npx vitest run

@@ -10,8 +10,11 @@ module FakeClaude
   class Replay
     FIXTURE = Rails.root.join('../packages/contracts/fixtures/sample_run.jsonl')
 
-    # The contract major this consumer is built against (event-envelope v1).
-    REQUIRED_CONTRACT = { major: 1, minor: 0 }.freeze
+    # The contract this consumer is built against. `minor` tracks the fixture:
+    # sample_run.jsonl now carries v1.5 harness types, so replaying it needs a
+    # contract that defines them. Left at 0 the assertion was vacuous — it could
+    # never fail on a minor bump, which is the only kind this project makes.
+    REQUIRED_CONTRACT = { major: 1, minor: 5 }.freeze
 
     def self.call(session: nil)
       new(session: session).call

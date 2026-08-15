@@ -1,17 +1,18 @@
 /**
  * clawdparty event contract — the machine-checked source of truth for the
- * event envelope and the frozen 22-name type taxonomy.
+ * event envelope and the frozen 30-name type taxonomy.
  *
  * Prose, rationale, and the per-type payload tables live in
- * `docs/contracts/events.md`; this file is the typed shape that `sidecar/` and
+ * `docs/contracts/events.md`; this file is the typed shape that `harness/` and
  * `web/` import. When the two disagree: this file is authoritative for SHAPE,
  * the doc is authoritative for INTENT — keep them in sync and record every
  * change in `docs/contracts/CHANGELOG.md`.
  *
- * FREEZE STATE: the envelope fields, their scalar types, the 22 type names, and
- * the `Actor` union are FROZEN (since v1.0). Per-type `payload` interfaces were
- * FINALIZED from the real SDK spike at v1.1 (`sdk-message-spike`); they are no
- * longer `pending-spike`. See `docs/contracts/sdk_mapping.md` for the derivation.
+ * FREEZE STATE: the envelope fields, their scalar types, and the `Actor` union
+ * are FROZEN (since v1.0). Per-type `payload` interfaces were FINALIZED from the
+ * real SDK spike at v1.1 (`sdk-message-spike`). The taxonomy has grown additively
+ * — 20 at v1.0, 21 at v1.2, 22 at v1.3, 30 at v1.5 (the harness types) — and each
+ * growth is a CHANGELOG entry with a `minor` bump.
  */
 
 /**
@@ -21,10 +22,10 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 4 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 5 } as const;
 
 /**
- * The 22 frozen event type names. Adding or removing a name is a CONTRACT
+ * The 30 frozen event type names. Adding or removing a name is a CONTRACT
  * CHANGE (see `docs/contracts/CHANGELOG.md`). Order is for readability only;
  * clients order events by `id`/`seq`, never by position here.
  */
@@ -51,20 +52,77 @@ export const EVENT_TYPES = [
   "task_updated",
   "participant_joined",
   "presence_changed",
+  // --- Harness types, added at v1.5 (001-sidecar-harness-architecture) --------
+  "request_header",
+  "context_compacted",
+  "context_usage",
+  "tool_refused",
+  "plugin_enabled",
+  "plugin_disabled",
+  "provider_error",
+  "recovery_applied",
 ] as const;
 
-/** One of the 22 frozen taxonomy names. */
+/** One of the 30 frozen taxonomy names. */
 export type EventType = (typeof EVENT_TYPES)[number];
 
 /**
- * The `ai_raw` fallback: any SDK message the normalizer cannot map to a known
- * type is emitted as `ai_raw` rather than dropped or crashing. It is NOT a
- * member of the 22-name taxonomy.
+ * The `ai_raw` fallback: any provider message the normalizer cannot map to a
+ * known type is emitted as `ai_raw` rather than dropped or crashing. It is NOT a
+ * member of the 30-name taxonomy.
  */
 export const AI_RAW = "ai_raw" as const;
 
-/** Any value the `type` field may hold: the 22 names plus the `ai_raw` fallback. */
+/** Any value the `type` field may hold: the 30 names plus the `ai_raw` fallback. */
 export type EnvelopeType = EventType | typeof AI_RAW;
+
+/**
+ * The EPHEMERAL types: broadcast to subscribers but NEVER persisted. They carry
+ * a null `id` (the marker of ephemerality) and a null `seq` — they never consume
+ * a per-run sequence number.
+ *
+ * Exported as data because three streams need the same answer and each had been
+ * deriving it separately: the harness decides what not to send `store_seq` for,
+ * Rails' `Event::EPHEMERAL_TYPES` decides what not to persist, and the web store
+ * decides what not to dedupe by `id`. A type missing from one of those three
+ * lists is a silent bug — `context_usage` absent from the Rails list would be
+ * persisted and handed a durable `id`.
+ */
+export const EPHEMERAL_EVENT_TYPES = [
+  "ai_text_delta",
+  "ai_thinking_delta",
+  "presence_changed",
+  "context_usage",
+] as const;
+
+export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
+
+/**
+ * Types the harness SYNTHESIZES — they map from no provider message at all. The
+ * harness's own decisions (what it sent, refused, recovered, compacted) plus the
+ * human's prompt, which the harness records because it owns the per-run `seq`
+ * space.
+ *
+ * Load-bearing for the normalizer cross-check: that test asserts the ordered
+ * type sequence produced by replaying a captured provider transcript equals the
+ * fixture's durable run-scoped sequence. Synthesized types appear in the fixture
+ * and can never appear in a capture, so they must be excluded EXPLICITLY. It
+ * previously worked by coincidence — "durable and run-scoped" happened to select
+ * only mapped types because the fixture contained no synthesized ones.
+ */
+export const SYNTHESIZED_EVENT_TYPES = [
+  "user_prompt",
+  "request_header",
+  "context_compacted",
+  "context_usage",
+  "tool_refused",
+  "plugin_enabled",
+  "plugin_disabled",
+  "provider_error",
+  "recovery_applied",
+] as const;
+
+export type SynthesizedEventType = (typeof SYNTHESIZED_EVENT_TYPES)[number];
 
 /**
  * Event actor — a discriminated union on `kind`. `id` is present IF AND ONLY IF
@@ -80,13 +138,13 @@ export type Actor = { kind: "claude" } | { kind: "user"; id: string } | { kind: 
  *
  * Scalar types are FROZEN (not spike-gated; only `payload` internals are):
  * - `id`         integer global cursor for DURABLE events; `null` for EPHEMERAL
- *                events (`ai_text_delta`, `presence_changed`) — broadcast,
- *                never persisted, so they carry no cursor.
+ *                events (see `EPHEMERAL_EVENT_TYPES`) — broadcast, never
+ *                persisted, so they carry no cursor.
  * - `session_id` present on every event.
  * - `ai_run_id`  present for run-scoped events; `null` for session-scoped events.
  * - `seq`        per-run monotonic integer for DURABLE run-scoped events;
  *                `null` for ephemeral and for session-scoped events.
- * - `type`       one of the 22 names, or `ai_raw`.
+ * - `type`       one of the 30 names, or `ai_raw`.
  * - `actor`      see `Actor`.
  * - `ts`         ISO-8601 UTC, millisecond precision, `Z` suffix
  *                (e.g. `2026-06-28T20:11:05.123Z`). DISPLAY-ONLY: order by `id`
@@ -272,8 +330,111 @@ export interface AiRawPayload {
   truncated: boolean;
 }
 
+// --- Harness payloads (added v1.5) ------------------------------------------
+// The harness owns the loop, so its own decisions become visible in the same
+// stream as the model's output. Every one of these is emitted by the harness;
+// none maps to a vendor SDK message.
+
 /**
- * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 20
+ * What was actually sent to the provider, recorded BEFORE the request goes out
+ *. Digests, not contents: the system prompt and tool schemas
+ * can be large and are reconstructible from the record, so this carries a hash
+ * to prove which version was used without duplicating it into every run.
+ *
+ * `credential_source` is a source IDENTITY (`CredentialSourceId`), never a value.
+ * That distinction is the whole point of the field — it makes "which login did
+ * this run use?" answerable without a credential ever entering the record.
+ */
+export interface RequestHeaderPayload {
+  provider: string;
+  credential_source: CredentialSourceId;
+  model: string;
+  effort: EffortLevel | null;
+  system_prompt_digest: string;
+  tool_schemas_digest: string;
+  plugins: string[];
+}
+
+/**
+ * A span of the record was replaced by a compaction block. The
+ * replaced range is named by `seq` so the projection can show what collapsed;
+ * `summary_present` is false when the provider compacted without returning a
+ * summary block, which is a real case and must not be reported as a summary.
+ */
+export interface ContextCompactedPayload {
+  replaced_from_seq: number;
+  replaced_to_seq: number;
+  tokens_before: number;
+  summary_present: boolean;
+}
+
+/**
+ * Live context pressure. EPHEMERAL — the durable per-run figure lives
+ * on `run_finished`/`run_failed`. `window` is the REAL budget for the model in
+ * use, read from the adapter's `capabilities()`, never a hardcoded constant.
+ */
+export interface ContextUsagePayload {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  window: number;
+}
+
+/**
+ * A tool call was refused before executing. `by` names what refused —
+ * a policy, a plugin id, or a participant — so a refusal is attributable rather
+ * than appearing as an unexplained gap in the run.
+ */
+export interface ToolRefusedPayload {
+  tool_use_id: string;
+  name: string;
+  by: string;
+  reason: string;
+}
+
+/** Plugin lifecycle. Session-scoped: enabling is a property of the room. */
+export interface PluginTogglePayload {
+  id: string;
+  version: string;
+  origin: "builtin" | "third_party";
+  by: string;
+}
+
+/**
+ * A provider request failed. `remedy` is REQUIRED and must be
+ * actionable — the requirement is that a broken credential names itself and the
+ * fix, so a generic message here is a contract violation, not a lazy string.
+ */
+export interface ProviderErrorPayload {
+  provider: string;
+  kind:
+    | "no_credential"
+    | "credential_expired"
+    | "not_entitled"
+    | "region_unset"
+    | "unreachable"
+    | "api_error";
+  message: string;
+  remedy: string;
+}
+
+/**
+ * Recovery ran after a crash. `uncertain: true` is the load-bearing
+ * value: when the harness died between dispatching a request and recording its
+ * outcome, the fate is genuinely unknown, and /AC4 requires the feed to SAY
+ * so rather than implying either outcome. Never default it to false to make a
+ * display simpler.
+ */
+export interface RecoveryAppliedPayload {
+  run_id: string;
+  from_phase: string;
+  action: "resumed" | "replayed" | "abandoned" | "failed";
+  uncertain: boolean;
+}
+
+/**
+ * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 30
  * names + `ai_raw`) exactly — enforced by `PAYLOAD_MAP_COVERS_TAXONOMY` below.
  */
 export interface EventPayloadMap {
@@ -299,6 +460,14 @@ export interface EventPayloadMap {
   task_updated: TaskPayload;
   participant_joined: ParticipantJoinedPayload;
   presence_changed: PresenceChangedPayload;
+  request_header: RequestHeaderPayload;
+  context_compacted: ContextCompactedPayload;
+  context_usage: ContextUsagePayload;
+  tool_refused: ToolRefusedPayload;
+  plugin_enabled: PluginTogglePayload;
+  plugin_disabled: PluginTogglePayload;
+  provider_error: ProviderErrorPayload;
+  recovery_applied: RecoveryAppliedPayload;
   ai_raw: AiRawPayload;
 }
 
@@ -317,14 +486,142 @@ type Extends<A, B> = [A] extends [B] ? true : false;
 type Equal<A, B> = Extends<A, B> extends true ? (Extends<B, A> extends true ? true : false) : false;
 
 /**
- * Guard: the taxonomy holds EXACTLY 22 names. If `EVENT_TYPES` drifts from 22
+ * Guard: the taxonomy holds EXACTLY 30 names. If `EVENT_TYPES` drifts from 30
  * entries without a contract change, this assignment stops type-checking.
+ *
+ * 30, not 29: `harness_http.md` lists the v1.5 additions in seven table rows
+ * because `plugin_enabled` and `plugin_disabled` share one. Eight names.
  */
-export const EVENT_TYPE_COUNT: 22 = EVENT_TYPES.length;
+export const EVENT_TYPE_COUNT: 30 = EVENT_TYPES.length;
 
 /**
- * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 22 names +
+ * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 30 names +
  * `ai_raw`) — no missing key, no stray key. If they diverge, this assignment's
  * type becomes `false` and `true` no longer satisfies it.
  */
 export const PAYLOAD_MAP_COVERS_TAXONOMY: Equal<keyof EventPayloadMap, EnvelopeType> = true;
+
+/** Guard: every ephemeral name is a real taxonomy name (catches a typo'd entry). */
+export const EPHEMERAL_TYPES_ARE_TAXONOMY: Extends<EphemeralEventType, EventType> = true;
+
+/** Guard: every synthesized name is a real taxonomy name. */
+export const SYNTHESIZED_TYPES_ARE_TAXONOMY: Extends<SynthesizedEventType, EventType> = true;
+
+// --- Provider vocabulary, shared by api/ + harness/ + web/ (v1.5) ------------
+// One capability vocabulary across all three streams. `harness/src/providers/
+// contract.ts` ALIASES `ProviderCapabilities` rather than redeclaring it — two
+// definitions of "what a provider supports" is how the streams drift apart.
+
+/**
+ * Reasoning effort. Replaces the removed `thinking.budget_tokens`, which returns
+ * 400 on current models.
+ */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Where a credential was found — an IDENTITY, never a value. Recorded per run
+ * so "which login did this use?" is answerable from the record alone.
+ *
+ * `keychain:*` is reachable only because the harness is a host process (Q6); a
+ * container cannot read the macOS Keychain under any mount configuration.
+ */
+export type CredentialSourceId =
+  | "env:ANTHROPIC_API_KEY"
+  | "env:ANTHROPIC_AUTH_TOKEN"
+  | "env:CLAUDE_CODE_OAUTH_TOKEN"
+  | "profile:ANTHROPIC_PROFILE"
+  | "profile:active"
+  | "env:workload-identity-federation"
+  | "profile:default"
+  | "file:~/.claude/.credentials.json"
+  | "keychain:anthropic-oauth"
+  | "file:~/.codex/auth.json"
+  | "env:AWS_PROFILE"
+  | "file:~/.aws"
+  | "none";
+
+/**
+ * Credential precedence, FIRST MATCH WINS. Exported as ORDERED data
+ * rather than described in prose so the implementation can be asserted against
+ * it instead of re-deriving it.
+ *
+ * The trap this exists to prevent: an EMPTY `ANTHROPIC_API_KEY=""` still wins
+ * slot 0 and authenticates with nothing. Discovery must report it as
+ * selected-and-invalid, NOT fall through to the next slot — falling through is
+ * the silent-wrong-pick this ordering is meant to make impossible.
+ */
+export const CREDENTIAL_PRECEDENCE: readonly CredentialSourceId[] = [
+  "env:ANTHROPIC_API_KEY",
+  "env:ANTHROPIC_AUTH_TOKEN",
+  "profile:ANTHROPIC_PROFILE",
+  "profile:active",
+  "env:workload-identity-federation",
+  "profile:default",
+] as const;
+
+/**
+ * What a provider supports for a GIVEN MODEL. Capabilities are declared, never
+ * inferred by the caller, and they are NOT uniform across providers — Bedrock
+ * has no web search/fetch, no code execution, no Models API, no automatic prompt
+ * caching, and no server-side refusal fallback. The loop reads this; it must
+ * never special-case a provider id.
+ *
+ * Every field is REQUIRED: a partial capability object is indistinguishable from
+ * "unsupported", and defaulting an unknown to `false` silently disables features
+ * while defaulting to `true` sends requests that 400.
+ */
+export interface ProviderCapabilities {
+  streaming: true;
+  toolUse: true;
+  /** The REAL budget for this model — what the live context indicator divides by. */
+  contextWindow: number;
+  maxOutputTokens: number;
+  adaptiveThinking: boolean;
+  thinkingDisplaySummarized: boolean;
+  effortLevels: readonly EffortLevel[];
+  promptCaching: boolean;
+  /** Model-dependent and NOT monotonic across models — never interpolate it. */
+  minCacheablePrefixTokens: number | null;
+  serverSideCompaction: boolean;
+  contextEditing: boolean;
+  serverSideTools: {
+    webSearch: boolean;
+    webFetch: boolean;
+    codeExecution: boolean;
+  };
+  liveModelDiscovery: boolean;
+  serverSideRefusalFallback: boolean;
+  midConversationSystemMessages: boolean;
+  /** Gates enabling a plugin mid-session (M5). */
+  midConversationToolChanges: boolean;
+}
+
+/** Why a provider cannot serve requests on this host. */
+export type ProviderUnavailableReason =
+  | "no_credential"
+  | "credential_expired"
+  | "not_entitled"
+  | "region_unset"
+  | "unreachable";
+
+/**
+ * One provider's entry in `GET /api/models`. An unavailable provider is
+ * REPORTED, never omitted  — omitting it is what produces "the model
+ * picker is just empty" with no way to learn why.
+ */
+export interface ProviderStatus {
+  id: string;
+  displayName: string;
+  available: boolean;
+  reason?: ProviderUnavailableReason;
+  /** Actionable, and required whenever `available` is false. */
+  remedy?: string;
+  credentialSource?: CredentialSourceId;
+  models: ProviderModelInfo[];
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  displayName: string;
+  capabilities: ProviderCapabilities;
+}

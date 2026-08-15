@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { EventEnvelope } from "@clawdparty/contracts";
+import { type EventEnvelope, SYNTHESIZED_EVENT_TYPES } from "@clawdparty/contracts";
 import { describe, expect, it } from "vitest";
 import { Normalizer } from "../src/normalizer.js";
 
@@ -322,18 +322,27 @@ describe("normalizer full per-type mapping (spike-derived)", () => {
 
 describe("raw-fixtures cross-check (drift fails)", () => {
   // The raw spike capture, fed through normalize(), must produce the same ORDERED
-  // type sequence as the DURABLE run-scoped events in the contract fixture
-  // (sample_run.jsonl). normalize() does not emit the ephemeral ai_text_delta
-  // events (those are the runner's live partial-message path), and the fixture
-  // additionally leads with session-scoped events (participant_joined,
-  // chat_message) that have no SDK producer — so the comparison is against the
-  // fixture's durable, run-scoped subset. Any drift fails this test.
+  // type sequence as the MAPPED events in the contract fixture. Three groups of
+  // fixture events have no SDK producer and are excluded:
+  //
+  //   - ephemeral (ai_text_delta, ai_thinking_delta, context_usage) — the
+  //     runner's live partial-message path, not normalize()'s output;
+  //   - session-scoped (participant_joined, chat_message, plugin_*) — Rails- and
+  //     harness-originated;
+  //   - SYNTHESIZED_EVENT_TYPES — the harness's own decisions plus user_prompt.
+  //
+  // The synthesized exclusion is EXPLICIT rather than implied by "durable and
+  // run-scoped". That filter alone used to be sufficient, but only because the
+  // fixture happened to contain no durable run-scoped synthesized events; once
+  // v1.5 added request_header and friends, the coincidence stopped holding. Any
+  // real drift still fails this test.
   const rawPath = fileURLToPath(new URL("./fixtures/raw_run.jsonl", import.meta.url));
   const samplePath = fileURLToPath(
     new URL("../../packages/contracts/fixtures/sample_run.jsonl", import.meta.url),
   );
+  const synthesized = new Set<string>(SYNTHESIZED_EVENT_TYPES);
 
-  it("normalized raw types match the contract fixture's durable run-scoped types", () => {
+  it("normalized raw types match the contract fixture's mapped run-scoped types", () => {
     const raw = readFileSync(rawPath, "utf8")
       .trim()
       .split("\n")
@@ -344,10 +353,25 @@ describe("raw-fixtures cross-check (drift fails)", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l));
-    const durableRunScoped = sample
-      .filter((e) => e.ai_run_id !== null && e.id !== null)
+    const mappedRunScoped = sample
+      .filter((e) => e.ai_run_id !== null && e.id !== null && !synthesized.has(e.type))
       .map((e) => e.type);
 
-    expect(produced).toEqual(durableRunScoped);
+    expect(produced).toEqual(mappedRunScoped);
+  });
+
+  it("the normalizer never emits a synthesized type", () => {
+    // normalize() maps provider messages. If it ever produces a synthesized
+    // type, the two producers have merged and the exclusion above silently
+    // starts hiding real drift instead of a known absence.
+    const raw = readFileSync(rawPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const leaked = normalizeAll(raw)
+      .map((e) => e.type)
+      .filter((t) => synthesized.has(t));
+
+    expect(leaked, `normalizer emitted synthesized type(s): ${leaked.join(", ")}`).toEqual([]);
   });
 });

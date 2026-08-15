@@ -110,9 +110,32 @@ RSpec.describe(Event) do
     end
   end
 
+  # A count assertion is not a drift guard: TAXONOMY was missing `user_prompt`
+  # (v1.2) and `ai_thinking_delta` (v1.3) while `size == 20` stayed green,
+  # because the list and its guard were edited together and neither was compared
+  # to the contract. These compare against events.ts itself.
   describe 'taxonomy' do
-    it 'freezes exactly 20 type names' do
-      expect(described_class::TAXONOMY.size).to(eq(20))
+    it 'matches EVENT_TYPES in packages/contracts/src/events.ts exactly, in order' do
+      expect(described_class::TAXONOMY).to(eq(ContractVersion.event_types))
+    end
+
+    it 'freezes exactly 30 type names' do
+      expect(described_class::TAXONOMY.size).to(eq(30))
+    end
+
+    it 'matches EPHEMERAL_EVENT_TYPES in events.ts' do
+      expect(described_class::EPHEMERAL_TYPES).to(match_array(ContractVersion.ephemeral_event_types))
+    end
+
+    it 'treats every ephemeral type as a member of the taxonomy' do
+      expect(described_class::TAXONOMY).to(include(*described_class::EPHEMERAL_TYPES))
+    end
+
+    # An ephemeral type absent from EPHEMERAL_TYPES is persisted and handed a
+    # durable id, which is the failure mode that makes this worth asserting from
+    # the ingest side rather than trusting the constant.
+    it 'classifies context_usage as ephemeral' do
+      expect(described_class.ephemeral_type?('context_usage')).to(be(true))
     end
   end
 end

@@ -112,6 +112,65 @@ Each stream signs that it has read B1–B5 + the rename table and has its side s
 - [ ] **harness** — signed: ______________________ date: __________
 - [ ] **web** — signed: ______________________ date: __________
 
+## [1.5.0] — harness event taxonomy (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 5 }`.** Additive `minor` bump
+(`001-sidecar-harness-architecture`): eight new event types so the harness's own
+behaviour — what it sent, what it refused, what it recovered, what it compacted — is
+visible in the same stream as everything else. Rides the migration window above but is
+**not** itself breaking: the envelope, the existing 22 names, and every existing payload
+are untouched.
+
+### Added (additive — nothing removed or renamed)
+
+| type | actor | durability | scope | payload | serves |
+|---|---|---|---|---|---|
+| `request_header` | system | durable | run | `{ provider, credential_source, model, effort, system_prompt_digest, tool_schemas_digest, plugins[] }` |  |
+| `context_compacted` | system | durable | run | `{ replaced_from_seq, replaced_to_seq, tokens_before, summary_present }` |  |
+| `context_usage` | system | **ephemeral** | run | `{ input, output, cache_read, cache_creation, window }` |  |
+| `tool_refused` | system | durable | run | `{ tool_use_id, name, by, reason }` | , /AC1 |
+| `plugin_enabled` | **user** | durable | **session** | `{ id, version, origin, by }` |  |
+| `plugin_disabled` | **user** | durable | **session** | `{ id, version, origin, by }` |  |
+| `provider_error` | system | durable | run | `{ provider, kind, message, remedy }` |  |
+| `recovery_applied` | system | durable | run | `{ run_id, from_phase, action, uncertain }` | , /AC4 |
+
+- **`EVENT_TYPE_COUNT`** freeze guard updated **22 → 30**. Note the count is 30, not 29:
+  `harness_http.md` lists the additions in seven table rows because `plugin_enabled` and
+  `plugin_disabled` share one. Eight names, seven rows.
+- **`context_usage` is ephemeral** — null `id`/`seq`, broadcast never persisted, matching
+  `ai_text_delta`. Registered in `Event::EPHEMERAL_TYPES` on the Rails side, without which
+  ingest would persist it and hand it a durable `id`. The durable per-run figure lives on
+  `run_finished`/`run_failed` as it already did.
+- **`recovery_applied` is what makes /AC4 observable.** After a crash the feed states
+  that a request's fate is *unknown* rather than implying either outcome — `uncertain:
+  true` is a first-class value, not an error.
+- **`plugin_enabled`/`plugin_disabled` are session-scoped** (null `ai_run_id`/`seq`) —
+  enabling a plugin is a property of the room, not of whatever run happens to be open.
+
+### Also corrected in this entry (pre-existing drift, no behaviour change)
+
+Three artifacts still claimed a **20**-name taxonomy after v1.2 and v1.3 had already
+taken it to 22, each with a guard that had drifted alongside the thing it guarded:
+
+- `packages/contracts/src/events.ts` — the `EventPayloadMap` comment said "the 20 names".
+- `docs/contracts/events.md` — the envelope example and field table said "one of the 20
+  names" while §2 of the same document said "exactly 22".
+- `api/app/models/event.rb` — `Event::TAXONOMY` listed 20 entries, missing `user_prompt`
+  and `ai_thinking_delta`, and `event_spec.rb` asserted `size == 20`, so the constant and
+  its guard were wrong together and CI was green.
+
+Additionally, `packages/contracts/tsconfig.json` included only `src/**/*.ts`, so the
+exhaustive `Record<EnvelopeType, …>` in `fixtures/sample_run.test.ts` — the guard that
+should have caught the missing names — **was never type-checked**. The include now covers
+the fixture test, which is what gives that guard teeth.
+
+### Unchanged (why this is a `minor`, not a `major`)
+
+The envelope fields + scalar types, the `Actor` union, all 22 existing names and their
+payloads, the `(ai_run_id, seq)` idempotency + dual-cursor rules, and the
+ephemeral-vs-durable rule are **unchanged**. A consumer requiring exact `major` and
+`minor ≥ 4` stays compatible.
+
 ## [review-approve-roles] — approve/reject extended to editor + reviewer
 
 **`CONTRACT_VERSION` unchanged** — this changes the 4-role matrix (an authorization
