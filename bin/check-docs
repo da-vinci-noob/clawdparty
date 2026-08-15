@@ -43,6 +43,27 @@ anchored() {
   [[ -e "$first" ]]
 }
 
+# Guidance sometimes NAMES a component in order to say it does not exist — a
+# document's own "companion documents that are now stale" list is exactly
+# that. Read literally, those names look like claims, and the gate cannot tell a
+# claim from a quotation. Requiring them to resolve would mean deleting a
+# document's explanation of the drift it is describing, which is the opposite of
+# what this gate is for.
+#
+# So a region may opt out explicitly:
+#
+#     <!-- doc-truth:ignore --> … <!-- doc-truth:end -->
+#
+# Explicit and narrow, deliberately: an inferred exemption ("skip anything near
+# the words 'does not exist'") would silently excuse real drift.
+readable() {
+  awk '
+    /<!-- doc-truth:ignore -->/ { skip = 1; next }
+    /<!-- doc-truth:end -->/    { skip = 0; next }
+    !skip
+  ' "$1"
+}
+
 echo "== 1. Paths named in guidance exist =============================="
 for doc in "${GUIDANCE[@]}"; do
   [[ -f "$doc" ]] || { fail "guidance file itself is missing: $doc"; continue; }
@@ -52,7 +73,7 @@ for doc in "${GUIDANCE[@]}"; do
     path="${path%/}"
     anchored "$path" || continue
     [[ -e "$path" ]] || fail "$doc names a path that does not exist: $path"
-  done < <(grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+`' "$doc" | tr -d '`' | sort -u)
+  done < <(readable "$doc" | grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
 done
 
 echo "== 2. Ruby constants named in guidance resolve =================="
@@ -72,7 +93,7 @@ for doc in "${GUIDANCE[@]}"; do
       neighbours="$(find api -type d -path "*/${dir}" 2>/dev/null -exec ls -1 {} \; | sort -u | tr '\n' ' ')"
       [[ -n "$neighbours" ]] && note "api/**/${dir}/ contains: ${neighbours}(looked for ${base}.rb)"
     fi
-  done < <(for d in "$doc"; do grep -oE '`[A-Z][A-Za-z0-9]*(::[A-Z][A-Za-z0-9]*)+`' "$d"; done | tr -d '`' | sort -u)
+  done < <(readable "$doc" | grep -oE '`[A-Z][A-Za-z0-9]*(::[A-Z][A-Za-z0-9]*)+`' | tr -d '`' | sort -u)
 done
 
 echo "== 3. Interception points can actually intercept ================="
