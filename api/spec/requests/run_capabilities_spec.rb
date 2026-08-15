@@ -105,15 +105,10 @@ RSpec.describe('Run start capability selection') do
       end
     end
 
-    it 'keeps bypassPermissions owner-only when capabilities are set (editor → 403)' do
-      expect do
-        start_run(role: 'editor', permission_mode: 'bypassPermissions', disallowed_tools: ['Bash'])
-      end.not_to(change { AiRun.where(status: 'queued').count })
-      expect(response).to(have_http_status(:forbidden))
-    end
-
-    it 'lets an owner use bypassPermissions with capabilities (202)' do
-      start_run(role: 'owner', permission_mode: 'bypassPermissions', disallowed_tools: ['Bash'])
+    # The bypassPermissions pair went with the parameter. The capability surface
+    # itself is still gated, which is what these two now assert without it.
+    it 'lets an owner set capabilities (202) and forwards them' do
+      start_run(role: 'owner', disallowed_tools: ['Bash'])
       expect(response).to(have_http_status(:accepted))
       expect(posted.last[:disallowed_tools]).to(eq(['Bash']))
     end

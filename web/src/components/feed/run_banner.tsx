@@ -16,22 +16,12 @@ const LABELS: Record<string, string> = {
   participant_joined: "joined the session",
 };
 
-// Human-readable label for a permission mode on the run_started banner.
-const MODE_LABELS: Record<string, string> = {
-  plan: "plan mode",
-  acceptEdits: "auto-accept",
-  bypassPermissions: "bypass",
-};
-
 export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = ({
   event,
   names,
 }) => {
   const label = LABELS[event.type] ?? event.type;
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
-  const started =
-    event.type === "run_started" ? (event.payload as { permission_mode?: string }) : undefined;
-  const mode = started?.permission_mode;
   return (
     <div
       data-testid="feed-run-banner"
@@ -45,14 +35,6 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
       <span>
         {who && <span className="text-[#aeb4ae]">{who}</span>}
         {label}
-        {mode && (
-          <span
-            data-testid="run-mode"
-            className="ml-1 rounded-[5px] border border-[#1c2a20] bg-[#0e140f] px-1 text-[10px] uppercase text-[#7c847c]"
-          >
-            {MODE_LABELS[mode] ?? mode}
-          </span>
-        )}
       </span>
     </div>
   );

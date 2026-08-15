@@ -1,213 +1,349 @@
-import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { EventEnvelope } from "@clawdparty/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { buildServer, flushWithTimeout, startHeartbeat } from "../src/index.js";
-import { type QueryHandle, Runner } from "../src/runner.js";
+import { RunLoop } from "../src/loop/run_loop.js";
+import { Supervisor } from "../src/supervisor.js";
 import { Transport } from "../src/transport.js";
 
-const noopLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+/**
+ * The HTTP surface after the engine swap. Covers the endpoint changes B1-B4 of the
+ * declared migration window, including the two that are ABSENCES — a removed route
+ * and a removed request field — because a removal nothing asserts quietly comes back.
+ */
 
-// A fake SDK query: yields a result message then ends; interrupt is a no-op.
-function fakeQueryHandle(): QueryHandle {
-  async function* gen(): AsyncGenerator<unknown> {
-    yield { type: "result", subtype: "success", stop_reason: "end_turn", num_turns: 1, usage: {} };
-  }
-  const it = gen();
-  return Object.assign(it, { interrupt: () => Promise.resolve() }) as unknown as QueryHandle;
-}
+const CONFIG = {
+  port: 8787,
+  railsInternalUrl: "http://rails:3000",
+  sharedSecret: "s3cret",
+  heartbeatIntervalMs: 50,
+  sigtermFlushTimeoutMs: 20,
+  storeDir: "/tmp/unused",
+};
 
-function buildTestServer(): { app: FastifyInstance; runner: Runner } {
-  const transport = new Transport({
+let dir: string;
+let supervisor: Supervisor;
+const shipped: EventEnvelope[] = [];
+
+function silentTransport(): Transport {
+  return new Transport({
     railsInternalUrl: "http://rails:3000",
     sharedSecret: "s",
-    logger: noopLogger,
-    fetchImpl: vi
-      .fn()
-      .mockResolvedValue(new Response(null, { status: 200 })) as unknown as typeof fetch,
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    fetchImpl: async () => new Response("{}", { status: 200 }),
   });
-  const runner = new Runner(transport, () => fakeQueryHandle());
-  return { app: buildServer(runner), runner };
 }
 
-describe("Fastify server (runner-backed)", () => {
-  let app: FastifyInstance;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "harness-server-"));
+  shipped.length = 0;
 
-  beforeAll(async () => {
-    app = buildTestServer().app;
-    await app.ready();
+  supervisor = new Supervisor(silentTransport(), {
+    storeDir: dir,
+    adapters: {
+      "anthropic-direct": {
+        id: "anthropic-direct",
+        displayName: "stub",
+        entitlement: { credentialKind: "api_key", thirdPartyClientPermitted: "yes", note: "" },
+        probe: async () => ({ available: true, credentialSource: "env:ANTHROPIC_API_KEY" }),
+        listModels: async () => [],
+        capabilities: () => stubCaps(),
+        // Hangs until aborted, so the run stays ACTIVE for the endpoints under
+        // test. A stream that simply returns settles the loop immediately and the
+        // run is gone before the assertion — which is what four failures said.
+        stream: (req: { signal: AbortSignal }) =>
+          (async function* () {
+            await new Promise<void>((resolve) => {
+              if (req.signal.aborted) return resolve();
+              req.signal.addEventListener("abort", () => resolve(), { once: true });
+            });
+          })(),
+      },
+    },
+    buildLoop: ({ store, adapter, emit }) =>
+      new RunLoop({
+        store,
+        adapter,
+        tools: new (class extends Object {
+          get() {
+            return undefined;
+          }
+          policyFor() {
+            return "never" as const;
+          }
+          schemasFor() {
+            return [];
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: minimal registry stand-in
+        })() as any,
+        emit: (events) => {
+          shipped.push(...events);
+          emit(events);
+        },
+      }),
   });
+});
 
-  afterAll(async () => {
+afterEach(async () => {
+  await supervisor.shutdown();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function stubCaps() {
+  return {
+    streaming: true as const,
+    toolUse: true as const,
+    contextWindow: 1000,
+    maxOutputTokens: 100,
+    adaptiveThinking: false,
+    thinkingDisplaySummarized: false,
+    effortLevels: [],
+    promptCaching: false,
+    minCacheablePrefixTokens: null,
+    serverSideCompaction: false,
+    contextEditing: false,
+    serverSideTools: { webSearch: false, webFetch: false, codeExecution: false },
+    liveModelDiscovery: false,
+    serverSideRefusalFallback: true,
+    midConversationSystemMessages: true,
+    midConversationToolChanges: true,
+  };
+}
+
+function startBody(over: Record<string, unknown> = {}) {
+  return {
+    run_id: "1",
+    session_id: "45",
+    lane: "main",
+    repo_path: dir,
+    prompt: "go",
+    requested_by: "7",
+    provider: "anthropic-direct",
+    model: "claude-opus-5",
+    ...over,
+  };
+}
+
+describe("Fastify server (supervisor-backed)", () => {
+  it("GET /healthz reports active_run_ids", async () => {
+    const app = buildServer(supervisor);
+    const res = await app.inject({ method: "GET", url: "/healthz" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ active_run_ids: [] });
     await app.close();
   });
 
-  it("GET /healthz returns active_run_ids", async () => {
-    const res = await app.inject({ method: "GET", url: "/healthz" });
+  it("POST /runs accepts lane + provider and returns 202", async () => {
+    const app = buildServer(supervisor);
+    const res = await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ run_id: "1", status: "running" });
+    await app.close();
+  });
+
+  it("GET /runs is the authoritative active-run list", async () => {
+    const app = buildServer(supervisor);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+
+    const res = await app.inject({ method: "GET", url: "/runs" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toHaveProperty("active_run_ids");
+    expect(res.json().runs).toMatchObject([{ run_id: "1", session_id: "45", lane: "main" }]);
+    await app.close();
   });
 
-  it("GET /connectors and /skills return the pinned 200 shapes", async () => {
-    // The cwd has no config; the route also reads the real host home, so assert
-    // the shape (never a 500) rather than emptiness.
-    const conn = await app.inject({ method: "GET", url: "/connectors?cwd=/nonexistent-repo-xyz" });
-    expect(conn.statusCode).toBe(200);
-    const connBody = conn.json();
-    expect(Array.isArray(connBody.connectors)).toBe(true);
-    expect(typeof connBody.source).toBe("string");
+  it("refuses a second run on the SAME lane with 409", async () => {
+    const app = buildServer(supervisor);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
 
-    const skills = await app.inject({ method: "GET", url: "/skills?cwd=/nonexistent-repo-xyz" });
-    expect(skills.statusCode).toBe(200);
-    const skillBody = skills.json();
-    expect(Array.isArray(skillBody.skills)).toBe(true);
-    expect(typeof skillBody.source).toBe("string");
-  });
-
-  it("POST /runs returns 202 with the frozen success shape", async () => {
-    const { app: a } = buildTestServer();
-    await a.ready();
-    const res = await a.inject({
+    const res = await app.inject({
       method: "POST",
       url: "/runs",
-      payload: {
-        run_id: "r1",
-        session_id: "s1",
-        repo_path: "/repo",
-        prompt: "hi",
-        requested_by: "p1",
-      },
+      payload: startBody({ run_id: "2" }),
     });
-    expect(res.statusCode).toBe(202);
-    expect(res.json()).toEqual({ run_id: "r1", status: "running" });
-    await a.close();
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "run_active" });
+    await app.close();
   });
 
-  it("POST /runs/:id/messages and /interrupt to an unknown run are 404", async () => {
-    const { app: a } = buildTestServer();
-    await a.ready();
-    const m = await a.inject({
+  it("allows a concurrent run on a DIFFERENT lane", async () => {
+    // One-active-run is per LANE now, not per session (B5). Until M7 everything is
+    // on "main", so this asserts the constraint moved rather than vanished.
+    const app = buildServer(supervisor);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs",
+      payload: startBody({ run_id: "2", lane: "review" }),
+    });
+    expect(res.statusCode).toBe(202);
+    await app.close();
+  });
+
+  it("POST /runs/:id/messages queues a follow-up on a live run", async () => {
+    const app = buildServer(supervisor);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs/1/messages",
+      payload: { message: "also do this" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ run_id: "1", accepted: true });
+    await app.close();
+  });
+
+  it("messages and interrupt to an unknown run are 404", async () => {
+    const app = buildServer(supervisor);
+
+    const messages = await app.inject({
       method: "POST",
       url: "/runs/nope/messages",
       payload: { message: "x" },
     });
-    expect(m.statusCode).toBe(404);
-    const i = await a.inject({ method: "POST", url: "/runs/nope/interrupt", payload: {} });
-    expect(i.statusCode).toBe(404);
-    await a.close();
+    const interrupt = await app.inject({ method: "POST", url: "/runs/nope/interrupt" });
+
+    expect([messages.statusCode, interrupt.statusCode]).toEqual([404, 404]);
+    expect(messages.json()).toEqual({ error: "unknown_run" });
+    await app.close();
   });
 
-  it("POST /runs/:id/permission_mode switches an active run (200)", async () => {
-    const setMode = vi.fn().mockResolvedValue(undefined);
-    const transport = new Transport({
-      railsInternalUrl: "http://rails:3000",
-      sharedSecret: "s",
-      logger: noopLogger,
-      fetchImpl: vi
-        .fn()
-        .mockResolvedValue(new Response(null, { status: 200 })) as unknown as typeof fetch,
-    });
-    // A query that stays open so the run is active when we switch its mode.
-    const handle = Object.assign(
-      (async function* (): AsyncGenerator<unknown> {
-        await new Promise(() => {});
-      })(),
-      { interrupt: () => Promise.resolve(), setPermissionMode: setMode },
-    ) as unknown as QueryHandle;
-    const a = buildServer(new Runner(transport, () => handle));
-    await a.ready();
-    await a.inject({
-      method: "POST",
-      url: "/runs",
-      payload: { run_id: "r1", session_id: "s", repo_path: "/r", prompt: "hi", requested_by: "p" },
-    });
+  it("POST /runs/:id/permission_mode is GONE (404, not 200)", async () => {
+    // B2. Asserted because a removal nothing tests quietly comes back — and the
+    // web client stops sending it in the same change.
+    const app = buildServer(supervisor);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
 
-    const res = await a.inject({
+    const res = await app.inject({
       method: "POST",
-      url: "/runs/r1/permission_mode",
+      url: "/runs/1/permission_mode",
       payload: { permission_mode: "acceptEdits" },
     });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("GET /models returns the per-provider shape, never a bare array", async () => {
+    const app = buildServer(supervisor);
+    const res = await app.inject({ method: "GET", url: "/models" });
+
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ run_id: "r1", permission_mode: "acceptEdits" });
-    expect(setMode).toHaveBeenCalledWith("acceptEdits");
-    await a.close();
+    const body = res.json();
+    expect(Array.isArray(body)).toBe(false);
+    expect(Array.isArray(body.providers)).toBe(true);
+    // An unavailable provider is reported, not omitted — so the list is never empty.
+    expect(body.providers.length).toBeGreaterThan(0);
+    expect(body.providers[0]).toHaveProperty("available");
+    await app.close();
   });
 
-  it("POST /runs/:id/permission_mode for a non-active run is 409", async () => {
-    const { app: a } = buildTestServer();
-    await a.ready();
-    const res = await a.inject({
-      method: "POST",
-      url: "/runs/nope/permission_mode",
-      payload: { permission_mode: "acceptEdits" },
-    });
-    expect(res.statusCode).toBe(409);
-    await a.close();
+  it("GET /connectors and /skills keep their pinned shapes", async () => {
+    const app = buildServer(supervisor);
+    const connectors = await app.inject({ method: "GET", url: "/connectors?cwd=/tmp" });
+    const skills = await app.inject({ method: "GET", url: "/skills?cwd=/tmp" });
+
+    expect(connectors.statusCode).toBe(200);
+    expect(skills.statusCode).toBe(200);
+    expect(connectors.json()).toHaveProperty("connectors");
+    expect(skills.json()).toHaveProperty("skills");
+    await app.close();
   });
 });
 
-describe("config — no hard-coded Rails host; RAILS_INTERNAL_URL distinct from SIDECAR_URL", () => {
-  it("reads RAILS_INTERNAL_URL from env and defaults sensibly", () => {
-    expect(loadConfig({}).railsInternalUrl).toBe("http://rails:3000");
-    expect(loadConfig({ RAILS_INTERNAL_URL: "http://other:3000" }).railsInternalUrl).toBe(
-      "http://other:3000",
-    );
+describe("config", () => {
+  it("reads RAILS_INTERNAL_URL and defaults the store OUTSIDE any project tree", () => {
+    const config = loadConfig({ RAILS_INTERNAL_URL: "http://elsewhere:3000" });
+
+    expect(config.railsInternalUrl).toBe("http://elsewhere:3000");
+    // A store under a worktree would be committed, reverted by a reject, or
+    // deleted with the worktree.
+    expect(config.storeDir).toMatch(/\.local\/state\/clawdparty\/sessions$/);
+  });
+
+  it("honours HARNESS_STORE_DIR", () => {
+    expect(loadConfig({ HARNESS_STORE_DIR: "/custom/store" }).storeDir).toBe("/custom/store");
   });
 });
 
 describe("heartbeat", () => {
+  const stub = {
+    activeRunIds: () => ["1"],
+    storeSeqHighWater: () => ({ "1": 42 }),
+    heartbeat: () => {},
+  };
+
+  it("POSTs to /internal/harness/heartbeat with store_seq_high_water", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response("{}", { status: 200 });
+    });
+
+    const beat = startHeartbeat(CONFIG, silentLogger(), stub, fetchImpl as unknown as typeof fetch);
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    beat.stop();
+
+    // Renamed path (B4) and the new field Rails uses to detect projection lag.
+    expect(calls[0]?.url).toBe("http://rails:3000/internal/harness/heartbeat");
+    expect(calls[0]?.body).toEqual({
+      active_run_ids: ["1"],
+      store_seq_high_water: { "1": 42 },
+    });
+  });
+
   it("treats a 401 as fatal and stops beating", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
-    const logger = {
-      error: vi.fn(),
-      warn: vi.fn(),
-      info: vi.fn(),
-    } as unknown as FastifyInstance["log"];
-    const config = loadConfig({ HEARTBEAT_INTERVAL_MS: "10000" });
-    const hb = startHeartbeat(config, logger, () => [], fetchImpl as unknown as typeof fetch);
-    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
-    hb.stop();
-    expect(logger.error).toHaveBeenCalled();
+    let count = 0;
+    const fetchImpl = vi.fn(async () => {
+      count += 1;
+      return new Response("{}", { status: 401 });
+    });
+
+    const beat = startHeartbeat(CONFIG, silentLogger(), stub, fetchImpl as unknown as typeof fetch);
+    await vi.waitFor(() => expect(count).toBe(1));
+    await new Promise((r) => setTimeout(r, CONFIG.heartbeatIntervalMs * 3));
+    beat.stop();
+
+    // Retrying a misroute forever is indistinguishable from an outage.
+    expect(count).toBe(1);
   });
 
   it("does not crash when Rails is unreachable (transient)", async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error("down"));
-    const logger = {
-      error: vi.fn(),
-      warn: vi.fn(),
-      info: vi.fn(),
-    } as unknown as FastifyInstance["log"];
-    const config = loadConfig({ HEARTBEAT_INTERVAL_MS: "10000" });
-    const hb = startHeartbeat(config, logger, () => [], fetchImpl as unknown as typeof fetch);
-    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
-    hb.stop();
-    expect(logger.warn).toHaveBeenCalled();
+    let count = 0;
+    const fetchImpl = vi.fn(async () => {
+      count += 1;
+      throw new Error("ECONNREFUSED");
+    });
+
+    const beat = startHeartbeat(CONFIG, silentLogger(), stub, fetchImpl as unknown as typeof fetch);
+    await vi.waitFor(() => expect(count).toBeGreaterThan(1));
+    beat.stop();
   });
 });
 
 describe("SIGTERM flush is bounded", () => {
   it("returns within the timeout even if the flush hangs", async () => {
-    const hanging = vi.fn().mockReturnValue(new Promise<Response>(() => {})); // never resolves
-    const transport = new Transport({
-      railsInternalUrl: "http://rails:3000",
-      sharedSecret: "s",
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      fetchImpl: hanging as unknown as typeof fetch,
-    });
-    // Buffer one event so flush attempts a (hanging) POST.
-    void transport.deliverDurable([
-      {
-        id: null,
-        session_id: "s",
-        ai_run_id: "r",
-        seq: 1,
-        type: "ai_text",
-        actor: { kind: "claude" },
-        ts: "2026-06-28T20:11:05.123Z",
-        payload: {},
-      },
-    ]);
-    const start = Date.now();
-    await flushWithTimeout(transport, 50);
-    expect(Date.now() - start).toBeLessThan(2000);
+    const transport = {
+      flush: () => new Promise<never>(() => {}),
+    } as unknown as Transport;
+
+    const started = Date.now();
+    await flushWithTimeout(transport, 20);
+
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });
+
+function silentLogger() {
+  return {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    // biome-ignore lint/suspicious/noExplicitAny: Fastify's logger type is broad
+  } as any;
+}

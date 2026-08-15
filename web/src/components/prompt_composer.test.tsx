@@ -33,7 +33,7 @@ function planRunFinished() {
     type: "run_started",
     actor: { kind: "user", id: "1" },
     ts: "2026-07-17T00:00:00.000Z",
-    payload: { model: "m", cwd: "/r", permission_mode: "plan", claude_session_id: "x" },
+    payload: { model: "m", cwd: "/r" },
   };
   const finished: EventEnvelope = {
     ...started,
@@ -62,47 +62,30 @@ describe("PromptComposer permission modes", () => {
     expect(screen.queryByTestId("prompt-composer")).not.toBeInTheDocument();
   });
 
-  it("sends the selected permission_mode on run start", async () => {
-    const cap = captureRunStart();
-    setRole("owner");
-    renderComposer(<PromptComposer sessionId="s" />);
-
-    fireEvent.change(screen.getByTestId("permission-mode"), { target: { value: "plan" } });
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() => expect(cap.last()).not.toBeNull());
-    expect(cap.last()).toMatchObject({ prompt: "do the thing", permission_mode: "plan" });
-  });
-
-  it("hides the Bypass option from a non-owner (editor)", () => {
-    setRole("editor");
-    renderComposer(<PromptComposer sessionId="s" />);
-    const options = Array.from(
-      screen.getByTestId("permission-mode").querySelectorAll("option"),
-    ).map((o) => o.textContent);
-    expect(options).toEqual(["Plan", "Auto-accept"]);
-  });
-
-  it("offers Bypass to an owner", () => {
-    setRole("owner");
-    renderComposer(<PromptComposer sessionId="s" />);
-    const options = Array.from(
-      screen.getByTestId("permission-mode").querySelectorAll("option"),
-    ).map((o) => o.textContent);
-    expect(options).toContain("Bypass");
-  });
-
-  it("shows 'Execute plan' after a finished plan run and starts an auto-accept run", async () => {
-    const cap = captureRunStart();
+  // The four permission-mode tests went with the parameter (CHANGELOG B2). These
+  // two replace them by asserting the ABSENCE, because a removed control that
+  // nothing tests is a control that quietly comes back.
+  it("renders no permission-mode selector and no Execute-plan shortcut", () => {
     setRole("owner");
     planRunFinished();
     renderComposer(<PromptComposer sessionId="s" />);
 
-    fireEvent.click(await screen.findByTestId("execute-plan"));
+    expect(screen.queryByTestId("permission-mode")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("execute-plan")).not.toBeInTheDocument();
+  });
+
+  it("does not send permission_mode on run start", async () => {
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(cap.last()).not.toBeNull());
-    expect(cap.last()).toMatchObject({ permission_mode: "acceptEdits" });
+    expect(cap.last()).toMatchObject({ prompt: "do the thing" });
+    // Rails no longer accepts it; sending it would be a 422 in production.
+    expect(cap.last()).not.toHaveProperty("permission_mode");
   });
 
   it("populates the model dropdown from GET /api/models and sends the chosen model", async () => {
@@ -242,7 +225,7 @@ describe("PromptComposer context bar", () => {
       type: "run_started",
       actor: { kind: "user", id: "1" },
       ts: "2026-07-20T00:00:00.000Z",
-      payload: { model, cwd: "/r", permission_mode: "acceptEdits", claude_session_id: "x" },
+      payload: { model, cwd: "/r" },
     };
     const finished: EventEnvelope = {
       ...started,

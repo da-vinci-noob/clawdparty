@@ -16,24 +16,14 @@ function evt(type: EventEnvelope["type"], payload: unknown): EventEnvelope {
   };
 }
 
-describe("RunBanner permission mode", () => {
-  it("shows the mode chip for a run_started event", () => {
+describe("RunBanner renders no permission mode", () => {
+  it("has no mode chip, because the concept is gone (CHANGELOG B2)", () => {
     render(
       <RunBanner
-        event={evt("run_started", {
-          model: "m",
-          cwd: "/r",
-          permission_mode: "plan",
-          claude_session_id: "x",
-        })}
+        event={evt("run_started", { model: "m", cwd: "/r" })}
         names={new Map([["p1", "Alice"]])}
       />,
     );
-    expect(screen.getByTestId("run-mode")).toHaveTextContent("plan mode");
-  });
-
-  it("shows no mode chip for non-run_started events", () => {
-    render(<RunBanner event={evt("run_finished", {})} names={new Map()} />);
     expect(screen.queryByTestId("run-mode")).not.toBeInTheDocument();
   });
 });
@@ -45,8 +35,6 @@ describe("RunBanner has no capability echo", () => {
         event={evt("run_started", {
           model: "m",
           cwd: "/r",
-          permission_mode: "acceptEdits",
-          claude_session_id: "x",
           connectors: ["github"],
           skills: ["pdf"],
         })}

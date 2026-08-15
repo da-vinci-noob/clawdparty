@@ -6,7 +6,6 @@
 # message. Start is async: respond after the sidecar accepts, do not block on
 # completion.
 class RunsController < ApplicationController
-  include RunPermissionModes
   include RunCapabilities
   include RunErrorResponses
 
@@ -91,7 +90,9 @@ class RunsController < ApplicationController
       prompt: params.require(:prompt),
       model: params[:model].presence || default_model,
       mode: params[:mode].presence || 'fresh',
-      permission_mode: permission_mode_param(session),
+      provider: params[:provider].presence || Runs::Start::DEFAULT_PROVIDER,
+      lane: params[:lane].presence || Runs::Start::DEFAULT_LANE,
+      effort: params[:effort].presence,
       **capability_params(session)
     )
   end

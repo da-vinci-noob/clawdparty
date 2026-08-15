@@ -6,20 +6,10 @@ import { useSkills } from "../hooks/use_skills";
 import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
-  selectExecutablePlanRunId,
   selectLatestUsage,
   useEventStore,
 } from "../stores/event_store";
 import { SkillsPopover } from "./session/skills_popover";
-
-// The Claude permission modes a user may pick (CLI Shift+Tab). Bypass is owner-only
-// (it ignores the tool whitelist); the server re-enforces every choice.
-type PermissionMode = "plan" | "acceptEdits" | "bypassPermissions";
-const MODE_OPTIONS: { value: PermissionMode; label: string; ownerOnly?: boolean }[] = [
-  { value: "plan", label: "Plan" },
-  { value: "acceptEdits", label: "Auto-accept" },
-  { value: "bypassPermissions", label: "Bypass", ownerOnly: true },
-];
 
 // Denominator when no discovered model matches (empty "Default" selection with no
 // completed run). Real windows come from model discovery (context_window).
@@ -29,9 +19,13 @@ const tokensToK = (n: number): string =>
 
 // Prompt composer: starts a run when none is active, sends a follow-up when one is,
 // and submits a `revise` follow-up while awaiting review. When starting a run the
-// user picks Claude's permission mode + model; after a finished Plan run an "Execute
-// plan" shortcut starts an auto-accept run that resumes the session. Rendered only
-// for owner/editor (client gating is presentation only — the server SessionPolicy gates).
+// user picks a model, tools, connectors and skills.
+//
+// The permission-mode selector and the "Execute plan" shortcut are GONE with the
+// parameter itself (CHANGELOG B2): permission modes were an Agent SDK concept, and
+// policy now lives at the `tool:before` extension point plus the per-run tool set.
+// Rendered only for owner/editor (client gating is presentation only — the server
+// SessionPolicy gates).
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const models = useModels();
@@ -42,12 +36,10 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const skills = useSkills(sessionId);
   const activeRunId = useEventStore(selectActiveRunId);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
-  const planRunId = useEventStore(selectExecutablePlanRunId);
   // Select PRIMITIVES (not the object) so a new reference each render can't loop Zustand.
   const contextTokens = useEventStore((s) => selectLatestUsage(s)?.contextTokens ?? 0);
   const usageModel = useEventStore((s) => selectLatestUsage(s)?.model ?? null);
   const [text, setText] = useState("");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("acceptEdits");
   // Empty = let the server pick its default (ANTHROPIC_MODEL). Set once the user
   // chooses; the option list itself comes from runtime discovery (useModels).
   const [model, setModel] = useState("");
@@ -61,14 +53,13 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   const revising = !activeRunId && reviewRunId !== null;
 
-  const startRun = (prompt: string, mode: PermissionMode): Promise<Response> =>
+  const startRun = (prompt: string): Promise<Response> =>
     fetch(`/api/sessions/${sessionId}/runs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       credentials: "include",
       body: JSON.stringify({
         prompt,
-        permission_mode: mode,
         ...(model ? { model } : {}),
         ...(revising ? { mode: "revise" } : {}),
         // No per-item toggles: every discovered connector + skill is enabled (all
@@ -103,7 +94,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             credentials: "include",
             body: JSON.stringify({ message: text }),
           })
-        : await startRun(text, permissionMode);
+        : await startRun(text);
       if (await surfaceError(res)) {
         setText("");
       }
@@ -114,22 +105,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
     }
   };
 
-  // A finished Plan run made no edits; a fresh auto-accept run resumes its session
-  // and executes the plan (edits then flow through changeset review).
-  const executePlan = async (): Promise<void> => {
-    setError(null);
-    setBusy(true);
-    try {
-      await surfaceError(await startRun("Execute the plan you just proposed.", "acceptEdits"));
-    } catch {
-      setError("Network error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const showModeControl = !activeRunId; // a new run is created (start or revise)
-  const modeOptions = MODE_OPTIONS.filter((m) => !m.ownerOnly || can("bypass_permissions"));
 
   // Real context usage from the latest completed run (0 until the first run finishes).
   // Window follows that run's model (falling back to the currently-selected model),
@@ -176,20 +152,6 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             {tokensToK(contextTokens)} / {tokensToK(contextWindow)} · {contextPct}%
           </span>
         </div>
-
-        {planRunId && !activeRunId && (
-          <div className="px-[15px] pt-[10px]">
-            <button
-              type="button"
-              data-testid="execute-plan"
-              onClick={() => void executePlan()}
-              disabled={busy}
-              className="rounded-[8px] border border-[#1c2a20] bg-[#0a1826] px-3 py-1 font-mono text-[12px] text-[#3b9dff] disabled:opacity-50"
-            >
-              ▶ Execute plan
-            </button>
-          </div>
-        )}
 
         {/* prompt input row */}
         <div className="flex items-center gap-[10px] px-[15px] py-[10px] font-mono text-[14px]">
@@ -261,23 +223,6 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 {skills.length}
               </span>
             </button>
-          )}
-
-          {/* permission mode — kept as the existing select (restyled) */}
-          {showModeControl && (
-            <select
-              aria-label="Permission mode"
-              data-testid="permission-mode"
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
-              className="rounded-[9px] border border-[#17231b] bg-[#0e140f] px-[11px] py-[7px] font-mono text-[12px] text-[#cdd2cd] hover:border-[#2c5580] focus:outline-none"
-            >
-              {modeOptions.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
           )}
 
           <div className="flex-1" />

@@ -52,6 +52,11 @@ export interface RunSpec {
   model: string;
   cwd: string;
   systemPrompt: string;
+  /**
+   * Where the model-visible surface starts. 0 folds the whole session; a later
+   * value severs the prior conversation without deleting it.
+   */
+  surfaceFrom?: number;
   effort?: import("../providers/contract.js").EffortLevel;
   disallowedTools?: string[];
   signal: AbortSignal;
@@ -72,6 +77,17 @@ export class RunLoop {
   private readonly newId: () => string;
   /** Fingerprint of the last emitted request snapshot; drives emit-on-change. */
   private lastSnapshot: string | null = null;
+  /**
+   * Mid-run follow-ups waiting to be appended.
+   *
+   * Replaces the deleted runner's pushable input iterable. The difference is where
+   * the message lands: the old path fed it into the SDK's stream and hoped, while
+   * this appends it to the RECORD, so a follow-up that arrives just before a crash
+   * is still there after recovery. Drained at `end_turn` rather than mid-turn —
+   * injecting into a turn already in flight would make the request unreconstructable
+   * from the record.
+   */
+  private readonly inbox: string[] = [];
 
   constructor(deps: RunLoopDeps) {
     this.deps = deps;
@@ -137,7 +153,7 @@ export class RunLoop {
         capabilities,
         systemPrompt: spec.systemPrompt,
         tools: this.deps.tools.schemasFor(capabilities, spec.disallowedTools ?? []),
-        surface: store.surfaceFrom(0),
+        surface: store.surfaceFrom(spec.surfaceFrom ?? 0),
         effort: spec.effort,
         signal: spec.signal,
       });
@@ -242,10 +258,45 @@ export class RunLoop {
       if (action.kind === "settle_failed") {
         return this.fail(spec, normalizer, action.stopReason, totalUsage, action.message);
       }
+
+      // The turn is done. A follow-up that arrived while it was running extends the
+      // run instead of starting a new one, which is what keeps the conversation —
+      // and its prompt cache prefix — intact.
+      if (this.inbox.length > 0) {
+        this.appendFollowUps(spec, normalizer);
+        resumeAttempt = 0;
+        continue;
+      }
       return this.finish(spec, normalizer, stopReason, totalUsage, turns);
     }
 
     return this.fail(spec, normalizer, "max_tokens", totalUsage, `exceeded ${MAX_TURNS} turns`);
+  }
+
+  /** Queue a mid-run follow-up. Applied at the next turn boundary. */
+  pushMessage(text: string): void {
+    this.inbox.push(text);
+  }
+
+  hasPendingMessages(): boolean {
+    return this.inbox.length > 0;
+  }
+
+  /**
+   * Drain the inbox into the record: one `user_prompt` event per message, each
+   * carrying its text as an on-surface block so the next request includes it.
+   */
+  private appendFollowUps(spec: RunSpec, normalizer: LoopNormalizer): void {
+    const messages = this.inbox.splice(0);
+    const events = messages.map((text) => normalizer.userPrompt(text, this.now()));
+
+    this.deps.store.commit({
+      writes: [
+        ...events.map((event, i) => this.entryFor(event, [userBlock(messages[i] as string)])),
+        checkpoint.positionWrite(spec.runId, { phase: "checkpoint" }),
+      ],
+    });
+    this.deps.emit(events);
   }
 
   /**

@@ -16,8 +16,6 @@ RSpec.describe('Run control') do
       .and_return(Sidecar::Client::Result.new(status: 200, body: {})))
     allow_any_instance_of(Sidecar::Client).to(receive(:interrupt)
       .and_return(Sidecar::Client::Result.new(status: 200, body: {})))
-    allow_any_instance_of(Sidecar::Client).to(receive(:set_permission_mode)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: {})))
   end
 
   def start_run
@@ -87,75 +85,19 @@ RSpec.describe('Run control') do
     end
   end
 
-  describe 'permission_mode selection at run start' do
-    def start_mode(role:, mode:)
-      join_as(session, role: role)
-      post("/api/sessions/#{session.id}/runs", params: { prompt: 'p', model: 'm', permission_mode: mode })
-    end
-
-    it 'forwards an allowlisted mode (plan) for owner' do
-      start_mode(role: 'owner', mode: 'plan')
-      expect(response).to(have_http_status(:accepted))
-    end
-
-    it 'rejects an unsupported mode with 422 and starts no run' do
+  # The permission_mode blocks are GONE with the parameter itself (CHANGELOG B2):
+  # a mode allowlist, its 422, and the owner-gated bypassPermissions all described
+  # an Agent SDK concept. Policy now lives at the `tool:before` extension point and
+  # in the per-run tool set, which other specs test directly. What survives here is
+  # the assertion that the removed route is actually gone.
+  describe 'POST /api/runs/:id/permission_mode is removed' do
+    it 'no longer routes (404), so the surface cannot quietly come back' do
+      run = create(:ai_run, session: session, status: 'running')
       join_as(session, role: 'owner')
-      expect do
-        post("/api/sessions/#{session.id}/runs", params: { prompt: 'p', model: 'm', permission_mode: 'default' })
-      end.not_to(change(AiRun, :count))
-      expect(response).to(have_http_status(:unprocessable_content))
-    end
 
-    it 'lets an editor use plan but denies bypassPermissions (owner-only) with 403' do
-      start_mode(role: 'editor', mode: 'plan')
-      expect(response).to(have_http_status(:accepted))
-      runs = "/api/sessions/#{session.id}/runs"
-      expect do
-        post(runs, params: { prompt: 'p', model: 'm', permission_mode: 'bypassPermissions' })
-      end.not_to(change { AiRun.where(status: 'queued').count })
-      expect(response).to(have_http_status(:forbidden))
-    end
-
-    it 'lets an owner use bypassPermissions' do
-      start_mode(role: 'owner', mode: 'bypassPermissions')
-      expect(response).to(have_http_status(:accepted))
-    end
-  end
-
-  describe 'POST /api/runs/:id/permission_mode (switch mode mid-run)' do
-    let!(:run) { create(:ai_run, session: session, status: 'running') }
-
-    it 'lets an owner switch to acceptEdits (200)' do
-      join_as(session, role: 'owner')
       post("/api/runs/#{run.id}/permission_mode", params: { permission_mode: 'acceptEdits' })
-      expect(response).to(have_http_status(:ok))
-      expect(response.parsed_body['permission_mode']).to(eq('acceptEdits'))
-    end
 
-    it 'rejects an unsupported mode with 422' do
-      join_as(session, role: 'owner')
-      post("/api/runs/#{run.id}/permission_mode", params: { permission_mode: 'nope' })
-      expect(response).to(have_http_status(:unprocessable_content))
-    end
-
-    it 'denies a reviewer with 403' do
-      join_as(session, role: 'reviewer')
-      post("/api/runs/#{run.id}/permission_mode", params: { permission_mode: 'acceptEdits' })
-      expect(response).to(have_http_status(:forbidden))
-    end
-
-    it 'denies an editor bypassPermissions with 403 (owner-only)' do
-      join_as(session, role: 'editor')
-      post("/api/runs/#{run.id}/permission_mode", params: { permission_mode: 'bypassPermissions' })
-      expect(response).to(have_http_status(:forbidden))
-    end
-
-    it 'surfaces a no-longer-active run as 409 (client falls back to a fresh run)' do
-      join_as(session, role: 'owner')
-      allow_any_instance_of(Sidecar::Client).to(receive(:set_permission_mode)
-        .and_raise(Sidecar::Client::RunNotActive, 'not active'))
-      post("/api/runs/#{run.id}/permission_mode", params: { permission_mode: 'acceptEdits' })
-      expect(response).to(have_http_status(:conflict))
+      expect(response).to(have_http_status(:not_found))
     end
   end
 

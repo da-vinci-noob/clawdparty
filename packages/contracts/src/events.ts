@@ -160,6 +160,21 @@ export interface EventEnvelope<P = unknown> {
   actor: Actor;
   ts: string;
   payload: P;
+  /**
+   * The harness store's session-wide cursor for this event (v1.5, additive and
+   * OPTIONAL — the envelope's frozen fields are untouched).
+   *
+   * Present on durable events shipped by the harness; absent on ephemeral ones,
+   * which were never persisted and so have no cursor. It exists so Rails can
+   * re-derive the projection from `entriesFrom(store_seq)` after an outage
+   * — which is what makes a ring-buffer overflow degrade the live stream
+   * without losing the record.
+   *
+   * Clients still page on `id`. This is a projection-repair cursor, not a second
+   * client cursor, and treating it as one would reintroduce the dual-cursor
+   * confusion `id`/`seq` already resolves.
+   */
+  store_seq?: number;
 }
 
 /**

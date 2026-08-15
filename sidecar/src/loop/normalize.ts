@@ -1,7 +1,7 @@
 import type { Actor, EnvelopeType, EventEnvelope } from "@clawdparty/contracts";
 import { EPHEMERAL_EVENT_TYPES } from "@clawdparty/contracts";
-import { boundRawPayload, summarizeToolInput } from "../normalizer.js";
 import type { ProviderEvent, Usage } from "../providers/contract.js";
+import { boundRawPayload, isoMs, summarizeToolInput } from "../redaction.js";
 
 /**
  * Maps `ProviderEvent` — the harness's own provider-neutral stream — to Contract-1
@@ -435,9 +435,4 @@ function filePathFrom(name: string, input: unknown): string | null {
   if (!["create", "str_replace", "insert"].includes(command)) return null;
   const path = args.path ?? args.file_path;
   return typeof path === "string" && path.length > 0 ? path : null;
-}
-
-/** ISO-8601 UTC, millisecond precision, Z suffix. Display-only. */
-function isoMs(ms: number): string {
-  return `${new Date(ms).toISOString().slice(0, 23)}Z`;
 }

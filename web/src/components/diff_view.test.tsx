@@ -274,7 +274,6 @@ describe("PromptComposer — revise while awaiting review", () => {
       expect(body).toEqual({
         prompt: "tweak it",
         mode: "revise",
-        permission_mode: "acceptEdits",
       }),
     );
   });
@@ -296,7 +295,6 @@ describe("PromptComposer — revise while awaiting review", () => {
     await waitFor(() =>
       expect(body).toEqual({
         prompt: "do it",
-        permission_mode: "acceptEdits",
       }),
     );
   });

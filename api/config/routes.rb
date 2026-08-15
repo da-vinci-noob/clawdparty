@@ -58,7 +58,6 @@ Rails.application.routes.draw do
         post :messages
         post :interrupt
         # Switch Claude's permission mode mid-run (plan → execute).
-        post :permission_mode
         # Review loop (owner-gated): keep or revert the run's changeset.
         post :approve
         post :reject
