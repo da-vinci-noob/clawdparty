@@ -38,6 +38,32 @@ npm run lint       # biome check .
 npm run test       # vitest run
 ```
 
+The five gate suites mandated by the project rules run individually
+so a single gate can be exercised without the whole suite:
+
+```sh
+npm run test:crash               # crash-injection (recovery from every phase)
+npm run test:reconstruction      # request-reconstruction (byte-identical replay)
+npm run test:adapters            # provider adapter conformance
+npm run test:extensions          # extension-point contract
+npm run test:plugin-adversarial  # third-party plugin isolation
+```
+
+## Dependencies — what each one is for
+
+The harness migration adds provider
+SDKs ahead of the adapters that use them, so the install is settled once rather
+than per-milestone. Each is scoped:
+
+| package | scope |
+|---|---|
+| `@anthropic-ai/sdk` | The Messages API client. The loop we own is built on this. |
+| `@anthropic-ai/bedrock-sdk` | Bedrock only, via the **Mantle** client (`AnthropicBedrockMantle`) — not a `base_url` override of the direct client. |
+| `@aws-sdk/client-bedrock` | Bedrock **model discovery** only (already present, reused). Not an inference path. |
+| `better-sqlite3` | The harness-owned durable store (`src/store/`). Synchronous by design — the store's commit is on the critical path and must not interleave. |
+| `openai` | **M3 /  Codex adapter ONLY.** Nothing outside `src/providers/codex*.ts` may import it. |
+| `@anthropic-ai/claude-agent-sdk` | **Being removed.** Pinned until the loop takes over; deleted when it does. Any new import of it is a regression. |
+
 ## Week-1 scope
 
 Skeleton: run-control routes are `501` stubs (wired to the runner in W2); the
