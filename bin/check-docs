@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# bin/check-docs — the doc-truth gate.
+#
+# Project guidance must describe only components that exist. This feature exists
+# partly because guidance drifted from the tree and nothing noticed; a gate that
+# runs on every PR is what stops that recurring.
+#
+# Three checks:
+#   1. Every repo-anchored path named in guidance exists.
+#   2. Every app-level Ruby constant named in guidance resolves to a file.
+#   3. Every exported interception point has at least one real importer — a seam
+#      that cannot intercept must not remain in the tree presented as one
+#.
+#
+# EXPECTED TO FAIL until the harness migration closes it out. The failures are a
+# worklist, not noise: a release gate verifies this script green.
+set -uo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+GUIDANCE=(CLAUDE.md docs/PLAN.md)
+
+# Constants whose home is a gem, not this tree.
+FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|Rails|RSpec|SolidQueue|SolidCable|Faraday|Net|JSON|Time|Struct|StandardError)::'
+
+# Files presented as interception points. Every exported symbol in one of these
+# must be imported somewhere outside itself and outside tests. Add a row when a
+# new extension point ships; never remove a row to make this pass.
+INTERCEPTION_POINTS=(
+  sidecar/src/permissions.ts
+)
+
+failures=0
+note() { printf '  %s\n' "$1"; }
+fail() { printf '\033[31mFAIL\033[0m %s\n' "$1"; failures=$((failures + 1)); }
+
+# A documented path is checkable only if it is anchored at the repo root. This
+# is what separates a real path claim from prose that merely contains a slash
+# ("app/services", "run_finished/run_failed", a path relative to some package).
+anchored() {
+  local first="${1%%/*}"
+  [[ -e "$first" ]]
+}
+
+echo "== 1. Paths named in guidance exist =============================="
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || { fail "guidance file itself is missing: $doc"; continue; }
+  while read -r path; do
+    [[ -n "$path" ]] || continue
+    case "$path" in http*|*'*'*|~*|*'`'*) continue ;; esac
+    path="${path%/}"
+    anchored "$path" || continue
+    [[ -e "$path" ]] || fail "$doc names a path that does not exist: $path"
+  done < <(grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+`' "$doc" | tr -d '`' | sort -u)
+done
+
+echo "== 2. Ruby constants named in guidance resolve =================="
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || continue
+  while read -r const; do
+    [[ -n "$const" ]] || continue
+    [[ "$const" =~ $FRAMEWORK_NAMESPACES ]] && continue
+    # Foo::BarBaz -> foo/bar_baz.rb
+    rel="$(printf '%s' "$const" \
+      | sed 's/::/\//g; s/\([a-z0-9]\)\([A-Z]\)/\1_\2/g' \
+      | tr '[:upper:]' '[:lower:]')"
+    if ! find api -type f -path "*/${rel}.rb" 2>/dev/null | grep -q .; then
+      fail "$doc names ${const}, but no */${rel}.rb exists under api/"
+      # Point at the likely real name rather than only saying "absent".
+      base="${rel##*/}"; dir="${rel%/*}"
+      neighbours="$(find api -type d -path "*/${dir}" 2>/dev/null -exec ls -1 {} \; | sort -u | tr '\n' ' ')"
+      [[ -n "$neighbours" ]] && note "api/**/${dir}/ contains: ${neighbours}(looked for ${base}.rb)"
+    fi
+  done < <(for d in "$doc"; do grep -oE '`[A-Z][A-Za-z0-9]*(::[A-Z][A-Za-z0-9]*)+`' "$d"; done | tr -d '`' | sort -u)
+done
+
+echo "== 3. Interception points can actually intercept ================="
+for point in "${INTERCEPTION_POINTS[@]}"; do
+  if [[ ! -f "$point" ]]; then
+    fail "declared interception point is missing from the tree: $point"
+    continue
+  fi
+  module="$(basename "$point" .ts)"
+  # Anything importing this module by path, outside the file itself and outside tests.
+  importers="$(grep -rl --include='*.ts' --include='*.tsx' \
+    -E "from \"[^\"]*/${module}(\.js)?\"|from \"\./${module}(\.js)?\"" . 2>/dev/null \
+    | grep -v node_modules | grep -v -E '(\.test\.|/test/)' | grep -v "^\./${point}$" || true)"
+  if [[ -z "$importers" ]]; then
+    fail "$point exports an interception point with NO importer — it cannot intercept "
+    while read -r sym; do
+      [[ -n "$sym" ]] && note "unreachable export: ${sym}"
+    done < <(grep -oE '^export (function|const|class) [A-Za-z0-9_]+' "$point" | awk '{print $3}')
+    note "resolve by wiring it into the loop, or delete it — do not leave it presented as a seam"
+  fi
+done
+
+echo
+if (( failures > 0 )); then
+  printf '\033[31m%d doc-truth failure(s).\033[0m Guidance must describe only what exists .\n' "$failures"
+  echo "Each line above is a worklist item, not a lint nit: either the tree is wrong or the doc is."
+  exit 1
+fi
+
+printf '\033[32mdoc-truth OK\033[0m — guidance matches the tree, every interception point has an importer.\n'

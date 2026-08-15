@@ -1,0 +1,21 @@
+name: docs
+
+# No `paths` filter, deliberately. The other three workflows scope to their
+# stream, but doc-truth breaks from ANY direction — deleting a file, renaming a
+# service class, or editing guidance all break it. Scoping this to docs/** would
+# miss the common case: the tree moved and guidance did not.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Expected RED until the harness migration closes it out (a follow-up verifies it
+      # green). The failure list is the worklist — see bin/check-docs.
+      - name: Doc-truth gate
+        run: bin/check-docs
