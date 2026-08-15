@@ -30,7 +30,7 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ## ⚠️ MIGRATION WINDOW — OPEN (harness architecture)
 
-**Opened: 2026-08-16.** **Must close by: 2026-09-15.** Status: **OPEN — breaking
+**Opened: 2026-08-16.** **Must close by: 2026-09-15.** **Signed off: 2026-08-16.** Status: **OPEN — breaking
 changes permitted.** Change: `001-sidecar-harness-architecture`.
 
 This is the first and intended-only declared window in the project's life. Per ,
@@ -108,9 +108,32 @@ wrong, and reconciling them is a **separate decision** — not something this en
 
 Each stream signs that it has read B1–B5 + the rename table and has its side scheduled.
 
-- [ ] **api** — signed: ______________________ date: __________
-- [ ] **harness** — signed: ______________________ date: __________
-- [ ] **web** — signed: ______________________ date: __________
+- [x] **api** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
+- [x] **harness** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
+- [x] **web** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
+
+**One maintainer signed all three streams, and that is worth stating rather than
+leaving implied.** 's sign-off exists to force *coordination between
+independent parties*; with a single maintainer it cannot do that job, so what these
+three boxes attest to is narrower: that the breaking set was enumerated before any of
+it shipped, and that each affected stream has an owning task. They are not three
+independent reviews.
+
+Verified per change rather than asserted — every stream a break touches has an owner:
+
+| Change | api | harness | web |
+|---|---|---|---|
+| B1 `POST /runs` shape | ✓ | ✓ | — |
+| B2 `permission_mode` removed | ✓ | ✓ | **✓** |
+| B3 `GET /models` shape | ✓ | ✓ | ✓ |
+| B4 heartbeat rename + `store_seq_high_water` | ✓ | ✓ | — |
+| B5 one-active-run lifted (M7) | ✓ | ✓ | — |
+| Rename  | ✓ | ✓ | — |
+
+**What this sign-off does NOT cover**, so a later reader does not over-read it: the
+two items still unverified at signing are the six-field Solid Queue cron
+(needs a live dispatcher) and `bin/check-docs` reaching green (4 genuine findings
+remain, each owned by a follow-up). Neither is a contract break; both are tracked.
 
 ## [1.5.0] — harness event taxonomy (additive)
 
