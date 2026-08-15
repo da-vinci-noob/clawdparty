@@ -408,6 +408,23 @@ describe("behaviour parity — the executable contract still holds", () => {
     expect(body).toContain('"display":"summarized"');
   });
 
+  it("emits request_header when ESTABLISHED OR CHANGED, not once per request", async () => {
+    // The design record's "Request snapshot": a reader folds the LATEST snapshot at or
+    // before any point, so re-stating an unchanged one adds no information. Per
+    // request, a 20-turn run would put 20 identical events in the feed.
+    await runScripted(
+      [
+        turn([toolUse(0, "toolu_1", "always_fails", {})], "tool_use"),
+        turn([toolUse(0, "toolu_2", "always_fails", {})], "tool_use"),
+        turn([block(0, "text", "done")], "end_turn"),
+      ],
+      worktree,
+    );
+
+    const headers = emitted.filter((e) => e.type === "request_header");
+    expect(headers, "three requests, one unchanged snapshot").toHaveLength(1);
+  });
+
   it("emits the additive v1.5 types the fixture predates", async () => {
     await runScripted([turn([block(0, "text", "hi")], "end_turn")], worktree);
     const types = new Set(emitted.map((e) => e.type));

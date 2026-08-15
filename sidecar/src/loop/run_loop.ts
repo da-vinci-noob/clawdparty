@@ -70,6 +70,8 @@ export class RunLoop {
   private readonly deps: RunLoopDeps;
   private readonly now: () => number;
   private readonly newId: () => string;
+  /** Fingerprint of the last emitted request snapshot; drives emit-on-change. */
+  private lastSnapshot: string | null = null;
 
   constructor(deps: RunLoopDeps) {
     this.deps = deps;
@@ -141,18 +143,24 @@ export class RunLoop {
       });
 
       const snapshotId = `${spec.runId}:${turnId}`;
-      const header = normalizer.requestHeader(
-        {
-          provider: adapter.id,
-          credential_source: await this.credentialSource(),
-          model: spec.model,
-          effort: spec.effort ?? null,
-          system_prompt_digest: digest(spec.systemPrompt),
-          tool_schemas_digest: digest(JSON.stringify(built.tools)),
-          plugins: [],
-        },
-        this.now(),
-      );
+      const snapshot = {
+        provider: adapter.id,
+        credential_source: await this.credentialSource(),
+        model: spec.model,
+        effort: spec.effort ?? null,
+        system_prompt_digest: digest(spec.systemPrompt),
+        tool_schemas_digest: digest(JSON.stringify(built.tools)),
+        plugins: [] as string[],
+      };
+
+      // Emitted when ESTABLISHED OR CHANGED, not per request (the design record's
+      // "Request snapshot"). A reader folds the latest snapshot at or before any
+      // point, so re-stating an unchanged one adds no information — it would just
+      // put 20 identical events in a 20-turn run's feed.
+      const fingerprint = JSON.stringify(snapshot);
+      const headerChanged = fingerprint !== this.lastSnapshot;
+      const header = headerChanged ? normalizer.requestHeader(snapshot, this.now()) : null;
+      this.lastSnapshot = fingerprint;
 
       // ── intent ──────────────────────────────────────────────────────────────
       const reserved = checkpoint.reserveForRequest(store, spec.runId);
@@ -160,9 +168,9 @@ export class RunLoop {
         store,
         spec.runId,
         { ...reserved, requestSnapshotId: snapshotId, attempt: resumeAttempt, maxAttempts: 3 },
-        [this.entryFor(header, null)],
+        header ? [this.entryFor(header, null)] : [],
       );
-      emit([header]);
+      if (header) emit([header]);
 
       // ── the uncertainty window ──────────────────────────────────────────────
       const turn = await this.streamTurn(built, normalizer, capabilities);
