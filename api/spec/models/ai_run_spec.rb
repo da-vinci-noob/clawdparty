@@ -10,6 +10,7 @@ require 'rails_helper'
 #  id                :bigint           not null, primary key
 #  base_sha          :string
 #  diff_stats        :jsonb
+#  last_heartbeat_at :datetime
 #  model             :string           not null
 #  prompt            :text             not null
 #  status            :enum             default("queued"), not null
@@ -24,10 +25,11 @@ require 'rails_helper'
 #
 # Indexes
 #
-#  index_ai_runs_on_requested_by_id      (requested_by_id)
-#  index_ai_runs_on_reviewed_by_id       (reviewed_by_id)
-#  index_ai_runs_on_session_id           (session_id)
-#  index_ai_runs_one_active_per_session  (session_id) UNIQUE WHERE (status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))
+#  index_ai_runs_on_requested_by_id               (requested_by_id)
+#  index_ai_runs_on_reviewed_by_id                (reviewed_by_id)
+#  index_ai_runs_on_session_id                    (session_id)
+#  index_ai_runs_on_status_and_last_heartbeat_at  (status,last_heartbeat_at)
+#  index_ai_runs_one_active_per_session           (session_id) UNIQUE WHERE (status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))
 #
 # Foreign Keys
 #
