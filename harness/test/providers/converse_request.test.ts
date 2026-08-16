@@ -79,6 +79,60 @@ describe("tools", () => {
     ]);
   });
 
+  it("gives a CANONICAL schema-less tool an explicit object schema", () => {
+    // `bash` and the editor are declared the Anthropic way — a `type` and no `input_schema`,
+    // because Anthropic models know the shape. Converse models do not, and Converse rejects a
+    // toolSpec whose `inputSchema.json.type` is not "object" (the ValidationException that
+    // brought this here). So the harness's own schema for each is supplied.
+    const bash = toConverseInput(req({ tools: [{ type: "bash_20250124", name: "bash" }] }));
+    const spec = bash.toolConfig?.tools?.[0] as {
+      toolSpec: { name: string; inputSchema: { json: { type?: string; properties?: object } } };
+    };
+
+    expect(spec.toolSpec.name).toBe("bash");
+    expect(spec.toolSpec.inputSchema.json.type).toBe("object");
+    expect(spec.toolSpec.inputSchema.json.properties).toHaveProperty("command");
+  });
+
+  it("gives the editor its command/path schema so the model produces input the executor accepts", () => {
+    const input = toConverseInput(
+      req({ tools: [{ type: "text_editor_20250728", name: "str_replace_based_edit_tool" }] }),
+    );
+    const json = (
+      input.toolConfig?.tools?.[0] as {
+        toolSpec: { inputSchema: { json: Record<string, unknown> } };
+      }
+    ).toolSpec.inputSchema.json;
+
+    // The schema MUST match `TextEditorInput`, or the model emits fields the executor ignores.
+    expect(json.type).toBe("object");
+    expect(json.properties).toHaveProperty("command");
+    expect(json.properties).toHaveProperty("path");
+    expect(json.required).toEqual(["command", "path"]);
+  });
+
+  it("forces type:object onto a client schema that omits it", () => {
+    // Defensive: a JSON Schema object without an explicit `type` is still an object, but
+    // Converse demands the field literally. Never send one it will reject.
+    const input = toConverseInput(
+      req({ tools: [{ name: "x", input_schema: { properties: { a: { type: "string" } } } }] }),
+    );
+    const json = (
+      input.toolConfig?.tools?.[0] as { toolSpec: { inputSchema: { json: { type?: string } } } }
+    ).toolSpec.inputSchema.json;
+    expect(json.type).toBe("object");
+  });
+
+  it("DROPS a server tool it cannot express (web_search), rather than sending an invalid spec", () => {
+    // web_search/web_fetch are Anthropic server tools with no client executor and no JSON
+    // schema. They are already withheld on Converse (serverSideTools all false), but if one
+    // arrived it must be dropped, not sent as `{}` — which is the exact crash.
+    const input = toConverseInput(
+      req({ tools: [{ type: "web_search_20250305", name: "web_search" }] }),
+    );
+    expect(input.toolConfig).toBeUndefined();
+  });
+
   it("omits toolConfig entirely when there are no tools", () => {
     // Converse rejects an empty tools array; absent is the correct shape, and it is also the
     // shape a chat-only turn on a streaming-limited model must send.

@@ -183,7 +183,9 @@ describe("stream — real translation and mapping over a replayed capture", () =
       (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
     );
 
-    expect((stop?.block as { toolUse?: { name?: string } }).toolUse?.name).toBe("read_file");
+    // Canonical shape the loop extracts tool calls from — see converse_stream.verbatim.
+    expect((stop?.block as { type?: string; name?: string }).type).toBe("tool_use");
+    expect((stop?.block as { name?: string }).name).toBe("read_file");
     const delta = events.find(
       (e): e is Extract<ProviderEvent, { t: "message_delta" }> => e.t === "message_delta",
     );

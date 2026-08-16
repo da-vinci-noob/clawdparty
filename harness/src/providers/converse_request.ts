@@ -1,5 +1,6 @@
 import type { ConverseStreamCommandInput } from "@aws-sdk/client-bedrock-runtime";
-import type { ProviderRequest } from "./contract.js";
+import { converseSchemaFor } from "../tools/converse_schemas.js";
+import type { ProviderRequest, ToolSchema } from "./contract.js";
 
 /**
  * `ProviderRequest` → `ConverseStreamCommand` input.
@@ -36,16 +37,23 @@ export function toConverseInput(req: ProviderRequest): ConverseStreamCommandInpu
   }
 
   type Tool = NonNullable<NonNullable<ConverseStreamCommandInput["toolConfig"]>["tools"]>[number];
-  const tools = req.tools.map(
-    (tool) =>
-      ({
-        toolSpec: {
-          name: tool.name,
-          ...(tool.description ? { description: tool.description } : {}),
-          inputSchema: { json: (tool.input_schema ?? {}) as Record<string, unknown> },
-        },
-      }) as Tool,
-  );
+  const tools: Tool[] = [];
+  for (const tool of req.tools) {
+    const json = converseToolJson(tool);
+    // A tool with no expressible object schema is DROPPED, not sent as `{}`. Converse rejects
+    // a toolSpec whose `inputSchema.json.type` is not "object" with a run-killing
+    // ValidationException — the exact failure that surfaced `bedrock-converse`. web_search /
+    // web_fetch are the case: Anthropic server tools with no client executor, already withheld
+    // from Converse (serverSideTools false) but dropped here too as a backstop.
+    if (json === null) continue;
+    tools.push({
+      toolSpec: {
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        inputSchema: { json },
+      },
+    } as Tool);
+  }
 
   const input: ConverseStreamCommandInput = {
     modelId: req.model,
@@ -114,6 +122,24 @@ function translateBlock(block: unknown): ContentBlock | null {
   // Unknown shape: dropping it is safer than forwarding something Bedrock rejects, and the
   // durable record still holds the original verbatim.
   return null;
+}
+
+/**
+ * The Converse JSON schema for a tool, or null when it has none this provider can use.
+ *
+ * Three cases: a client tool carries its own `input_schema` (read/glob/grep); a canonical
+ * schema-less tool (bash, the editor) gets its explicit schema from `converse_schemas.ts`,
+ * co-located with the executor; anything else (web_search/web_fetch) has no expressible schema
+ * and is dropped. `type: "object"` is forced even on a client schema that omits it — a JSON
+ * Schema object is still an object without it, but Converse demands the field literally.
+ */
+function converseToolJson(tool: ToolSchema): Record<string, unknown> | null {
+  if (tool.input_schema && typeof tool.input_schema === "object") {
+    // `type: "object"` LAST so it always wins — a tool input schema is an object schema, and
+    // Converse requires the field even when JSON Schema would infer it.
+    return { ...(tool.input_schema as Record<string, unknown>), type: "object" };
+  }
+  return converseSchemaFor(tool.name);
 }
 
 function anthropicToolResultContent(content: unknown): Array<{ text: string }> {

@@ -197,20 +197,28 @@ export async function* mapConverseStream(
 }
 
 /**
- * The verbatim block for the surface.
+ * The block that reaches the surface at `block_stop`.
  *
- * Shaped as Converse's own `ContentBlock`, because that is what has to go back in the next
- * request's `messages` — reconstructing it in some other shape is what R6 forbids. Tool input
- * is parsed here and only here: the fragments only form valid JSON once concatenated.
+ * A tool_use block is normalized to the CANONICAL shape `{type:"tool_use", id, name, input}` —
+ * NOT Converse's `{toolUse:{…}}`. That is the one shape `run_loop.streamTurn` reads a tool call
+ * out of (it checks `block.type === "tool_use"` and reads `id`/`name`/`input`), and the loop is
+ * provider-neutral by design, so normalizing Converse's shape to it belongs HERE, in the
+ * provider's own mapper. A `{toolUse:{…}}` block left the loop with an empty tool id and the
+ * follow-up turn's tool_result matched no call — "No tool output found for function call …".
+ * `converse_request.ts` translates this canonical shape back to Converse `{toolUse}` on echo,
+ * and the id round-trips so the pairing holds.
+ *
+ * text and reasoning blocks stay in Converse's own shape — the loop reads nothing structural
+ * from them, and `converse_request` passes them straight through. Tool input is parsed here and
+ * only here: the delta fragments form valid JSON only once concatenated.
  */
 function verbatim(block: OpenBlock): unknown {
   if (block.kind === "tool_use") {
     return {
-      toolUse: {
-        toolUseId: block.toolUseId,
-        name: block.name,
-        input: parseOrRaw(block.partialJson),
-      },
+      type: "tool_use",
+      id: block.toolUseId,
+      name: block.name,
+      input: parseOrRaw(block.partialJson),
     };
   }
   if (block.kind === "thinking") {

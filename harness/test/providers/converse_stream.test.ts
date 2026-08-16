@@ -80,14 +80,20 @@ describe("a tool-calling turn", () => {
     expect(() => JSON.parse(fragments[0]?.partialJson ?? "")).toThrow();
   });
 
-  it("parses the accumulated input ONCE, into the verbatim block", async () => {
+  it("parses the accumulated input ONCE, into a block the LOOP can read", async () => {
     const events = await collect("openai-tool-use");
     const stop = events.find(
       (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
     );
 
+    // The block MUST be canonical `{type:"tool_use", id, name, input}` — that is the ONE shape
+    // `run_loop.streamTurn` extracts a tool call from. A Converse-shaped `{toolUse:{…}}` block
+    // left the loop with an empty tool id, and the follow-up turn's tool_result then matched no
+    // call: "No tool output found for function call call_…", a run-killing ValidationException.
     expect(stop?.block).toMatchObject({
-      toolUse: { name: "read_file", input: { path: "/tmp/notes.txt" } },
+      type: "tool_use",
+      name: "read_file",
+      input: { path: "/tmp/notes.txt" },
     });
   });
 
@@ -96,7 +102,8 @@ describe("a tool-calling turn", () => {
     const stop = events.find(
       (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
     );
-    expect((stop?.block as { toolUse: { toolUseId?: string } }).toolUse.toolUseId).toBeTruthy();
+    // `id`, the field the loop reads for the tool_result's tool_use_id.
+    expect((stop?.block as { id?: string }).id).toBeTruthy();
   });
 
   it("reports the tool_use stop reason", async () => {
@@ -243,6 +250,6 @@ describe("shapes the mapper has never seen", () => {
     );
 
     // The tool then fails with a readable error, which beats killing the run.
-    expect(stop?.block).toMatchObject({ toolUse: { input: { __unparsed: "{not json" } } });
+    expect(stop?.block).toMatchObject({ type: "tool_use", input: { __unparsed: "{not json" } });
   });
 });
