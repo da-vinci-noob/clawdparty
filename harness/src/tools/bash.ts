@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { type ToolContext, type ToolDefinition, type ToolResult, textResult } from "./registry.js";
+import { toolchainEnv } from "./toolchain.js";
 
 /**
  * The `bash` tool.
@@ -66,7 +67,7 @@ export class BashTool {
         // stdin is closed, not inherited: a command that reads stdin gets EOF
         // rather than blocking forever on a stream nobody can write to.
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CLAWDPARTY_SESSION: "1" },
+        env: toolchainEnv(process.env),
       });
       this.current = child;
 

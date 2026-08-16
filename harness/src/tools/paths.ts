@@ -97,14 +97,45 @@ function splitAtExisting(absolutePath: string): { existingAncestor: string; miss
 }
 
 /**
- * The full read pipeline, in the same order as `RepoBrowser#content`:
- * containment FIRST, then denylist, then the size cap, then binary detection.
- * Order matters — checking the denylist before containment would leak whether an
- * out-of-tree path exists.
+ * The READ pipeline: denylist, then the size cap, then file-ness. Binary detection is
+ * the caller's (it needs the bytes).
+ *
+ * Reads deliberately FOLLOW a symlink out of the worktree, which  requires
+ * outright: "100% of symlinks that leave the project directory resolve correctly".
+ * Real projects depend on it — a pnpm workspace links `node_modules/<pkg>` to a store
+ * outside the repo, and `npm link` does the same. In a container those mostly failed to
+ * resolve at all and the mount set was the boundary; on the host they resolve, and
+ * refusing them would break ordinary repos while protecting nothing, because
+ * model-directed `bash` can already read anything the developer can. The DENYLIST
+ * is the real protection for reads, and it still applies to every path.
+ *
+ * WRITES are a different question — see `assertWritable`.
  */
 export function assertReadable(root: string, requestedPath: string): string {
-  const resolved = containExisting(root, requestedPath);
   if (isDenylisted(requestedPath)) throw new Escape("denylisted");
+  // Still RESOLVED against the root — only the containment CHECK is dropped. A
+  // relative path is relative to the session cwd; resolving it against
+  // `process.cwd()` instead would make every relative read an ENOENT.
+  const resolved = realpathOrThrow(resolveAgainst(realpathOrThrow(root), requestedPath));
+  const stat = statSync(resolved);
+  if (!stat.isFile()) throw new Escape("not a file");
+  if (stat.size > MAX_BYTES) throw new Oversized(`exceeds ${MAX_BYTES} bytes`);
+  return resolved;
+}
+
+/**
+ * The WRITE pipeline for a file that must already exist. Unlike a read, this is
+ * CONTAINED to the session worktree.
+ *
+ * The reason is review, not filesystem hygiene: approve commits the worktree and reject
+ * runs `git reset --hard && git clean -fd` in it. A write that lands outside is invisible
+ * to the diff and survives a reject, so the room would approve or reject a change set
+ * that does not describe what happened. `bash` can still write anywhere — that is what
+ * `tool:before` gates — but the file tools keep the reviewable surface honest.
+ */
+export function assertWritable(root: string, requestedPath: string): string {
+  if (isDenylisted(requestedPath)) throw new Escape("denylisted");
+  const resolved = containExisting(root, requestedPath);
   const stat = statSync(resolved);
   if (!stat.isFile()) throw new Escape("not a file");
   if (stat.size > MAX_BYTES) throw new Oversized(`exceeds ${MAX_BYTES} bytes`);

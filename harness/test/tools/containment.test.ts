@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { assertWritable } from "../../src/tools/paths.js";
 import * as read from "../../src/tools/read.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 import * as textEditor from "../../src/tools/text_editor.js";
@@ -49,42 +50,43 @@ describe("read — containment", () => {
     expect(result.content[0]?.text).toContain("export const ok = 1;");
   });
 
-  it("refuses parent traversal", () => {
+  // READS ARE NO LONGER CONTAINED.  requires that "100% of symlinks that leave
+  // the project directory resolve correctly", which a pnpm store and `npm link` both
+  // depend on, and model-directed `bash` can already read anything the developer can
+  // (an accepted complexity tradeoff) — so refusing these protected nothing while
+  // breaking ordinary repos. The DENYLIST is what protects reads, and the containment
+  // rule these examples used to assert now lives on the WRITE path. See
+  // test/tools/symlink_escape.test.ts for the read/write split in full.
+  it("reads through a traversal, because reads follow the filesystem", () => {
     const result = read.run({ path: "../outside/loot.txt" }, ctx());
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).not.toContain("SECRET-OUTSIDE-THE-WORKTREE");
+    expect(result.isError).toBe(false);
   });
 
-  it("refuses traversal buried mid-path", () => {
-    // `src/../../outside` looks contained until it is resolved, which is exactly
-    // why containment is checked on the RESOLVED path.
-    const result = read.run({ path: "src/../../outside/loot.txt" }, ctx());
-
-    expect(result.isError).toBe(true);
-  });
-
-  it("refuses an absolute path outside the root", () => {
+  it("reads an absolute path outside the root", () => {
     const result = read.run({ path: join(outside, "loot.txt") }, ctx());
 
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBe(false);
   });
 
-  it("refuses a symlink escaping the root", () => {
+  it("reads through a symlink leaving the root (the pnpm/npm-link case)", () => {
     symlinkSync(join(outside, "loot.txt"), join(root, "escape.txt"));
 
     const result = read.run({ path: "escape.txt" }, ctx());
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).not.toContain("SECRET-OUTSIDE-THE-WORKTREE");
+    expect(result.isError).toBe(false);
   });
 
-  it("refuses a symlinked DIRECTORY escaping the root", () => {
-    symlinkSync(outside, join(root, "linkdir"));
+  it("still refuses a WRITE through a symlink leaving the root", () => {
+    symlinkSync(join(outside, "loot.txt"), join(root, "escape.txt"));
 
-    const result = read.run({ path: "linkdir/loot.txt" }, ctx());
+    // The property the read examples used to carry, on the path where it matters:
+    // reject reverts the worktree, so an edit outside it survives review.
+    expect(() => assertWritable(root, join(root, "escape.txt"))).toThrow();
+  });
 
-    expect(result.isError).toBe(true);
+  it("still refuses a WRITE via traversal out of the root", () => {
+    expect(() => assertWritable(root, join(root, "..", "outside", "loot.txt"))).toThrow();
   });
 
   it("does not decode URL-encoded traversal into a real escape", () => {
@@ -133,8 +135,28 @@ describe("text_editor — containment", () => {
     expect(result.content[0]?.text).toContain("export const ok = 1;");
   });
 
-  it("refuses to view outside the root", async () => {
+  it("views outside the root, since view is a read", async () => {
     const result = await textEditor.run({ command: "view", path: "../outside/loot.txt" }, ctx());
+
+    expect(result.isError).toBe(false);
+  });
+
+  it("refuses str_replace on a file outside the root, because that is a write", async () => {
+    const result = await textEditor.run(
+      { command: "str_replace", path: "../outside/loot.txt", old_str: "SECRET", new_str: "x" },
+      ctx(),
+    );
+
+    // view and str_replace differ on the SAME path: one reads, one edits. That
+    // asymmetry is deliberate and is the thing worth pinning.
+    expect(result.isError).toBe(true);
+  });
+
+  it("refuses insert on a file outside the root", async () => {
+    const result = await textEditor.run(
+      { command: "insert", path: "../outside/loot.txt", insert_line: 0, new_str: "x" },
+      ctx(),
+    );
 
     expect(result.isError).toBe(true);
   });

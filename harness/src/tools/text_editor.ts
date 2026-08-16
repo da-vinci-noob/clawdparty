@@ -8,6 +8,7 @@ import {
   Oversized,
   assertNotBinary,
   assertReadable,
+  assertWritable,
   containForCreate,
   isDenylisted,
 } from "./paths.js";
@@ -110,7 +111,9 @@ function create(input: TextEditorInput, ctx: ToolContext): ToolResult {
 
 function strReplace(input: TextEditorInput, ctx: ToolContext): ToolResult {
   if (input.old_str === undefined) return textResult("str_replace requires `old_str`", true);
-  const resolved = assertReadable(ctx.cwd, input.path);
+  // assertWritable, not assertReadable: this READS then WRITES, and a write outside the
+  // worktree is invisible to the diff and survives a reject.
+  const resolved = assertWritable(ctx.cwd, input.path);
   const bytes = readFileSync(resolved);
   assertNotBinary(bytes);
   const content = bytes.toString("utf8");
@@ -135,7 +138,7 @@ function insert(input: TextEditorInput, ctx: ToolContext): ToolResult {
   if (input.insert_line === undefined) return textResult("insert requires `insert_line`", true);
   if (input.new_str === undefined) return textResult("insert requires `new_str`", true);
 
-  const resolved = assertReadable(ctx.cwd, input.path);
+  const resolved = assertWritable(ctx.cwd, input.path);
   const bytes = readFileSync(resolved);
   assertNotBinary(bytes);
 
