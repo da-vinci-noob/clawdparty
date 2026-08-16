@@ -233,6 +233,29 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [endpoint] — `POST /api/providers/verify` and harness `POST /verify` (additive)
+
+**No `CONTRACT_VERSION` bump** — per the governance table, endpoint changes are recorded here and do
+not move the event contract's version. Two new routes, both additive: nothing that existed changed.
+
+**Why.** `GET /api/models` answers "was a credential found", and the settings surface
+needs "would a run be accepted". They are different claims, and the gap is measured, not theoretical:
+`us.amazon.nova-premier-v1:0` refuses an entitled-looking credential, and the `linear` MCP server
+answered `invalid_token` while being correctly configured. An auth test built on `probe()` would
+report both as healthy.
+
+So the harness gains `POST /verify`, which sends **one 1-token real request per provider** through
+the adapter's own `stream()` — the same path a run takes, so a pass means a run would be accepted —
+and Rails proxies it at `POST /api/providers/verify`.
+
+**A POST, deliberately.** It is not a read: it spends tokens and touches the provider. It is also
+**not cached**, because the reason anyone opens it is that something just changed.
+
+**Withheld by construction:** `credentialSource` is a name (`env:AWS_PROFILE`), never a value
+; `error` is the provider's own message, which is the diagnostic; `usage` states the cost.
+Readable by any participant, like `/api/models` — the route is not session-nested, and a viewer who
+cannot diagnose a provider failure has to ask someone else to look.
+
 ## [1.9.0] — the harness is an MCP client; `run_started` reports failed connectors (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 9 }`.** Additive `minor` bump: one new OPTIONAL field on

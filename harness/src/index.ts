@@ -14,6 +14,7 @@ import { bearerToken, tokenMatches } from "./auth.js";
 import { listAwsProfiles, listConnectors, listSkills } from "./capabilities.js";
 import { type HarnessConfig, loadConfig } from "./config.js";
 import { listProviders } from "./providers/discovery.js";
+import { verifyProviders } from "./providers/verify.js";
 import { RunConflict, type StartRunInput, Supervisor, UnknownRun } from "./supervisor.js";
 import { Transport } from "./transport.js";
 
@@ -55,6 +56,17 @@ export function buildServer(
    * picker is just empty" with no way to learn why.
    */
   app.get("/models", async () => listProviders());
+
+  /**
+   * POST /verify — does a provider ACTUALLY work?
+   *
+   * A POST, not a GET, because it is not a read: it sends a real (tiny) request to each provider,
+   * which is the only thing that distinguishes "a credential is present" from "the credential is
+   * accepted". `/models` answers the first — measured cases where that was not enough: an
+   * entitlement refusal on nova-premier with a valid credential, and a configured MCP server
+   * answering `invalid_token`.
+   */
+  app.post("/verify", async () => verifyProviders());
 
   // GET /connectors?cwd= / GET /skills?cwd= — read-only, cwd-scoped discovery.
   app.get<{ Querystring: { cwd?: string } }>("/connectors", async (req) =>

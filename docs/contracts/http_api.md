@@ -38,6 +38,7 @@ implement this convention; it is pinned here as the single source.
 | run | start `POST /api/sessions/:id/runs` |
 | run input | follow-up · interrupt |
 | **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
+| **auth test** | `POST /api/providers/verify` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
 | **projection repair** | `GET /api/sessions/:id/projection/check` · `POST /api/sessions/:id/projection/rederive` (owner) |
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
@@ -121,6 +122,29 @@ when the harness is unreachable. Any participant may read them; a non-participan
 request is **`404`** `{ errors }`. Connector responses never contain a server's
 command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
 an endpoint.
+
+### Auth test — `POST /api/providers/verify`
+
+Does each provider ACTUALLY work, right now? Returns **`200`**
+`{ providers: [{ id, displayName, ok, model?, credentialSource?, reason?, remedy?, error?, usage?,
+durationMs? }] }`, proxied from the harness's `POST /verify`.
+
+**A POST, because it is not a read**: the harness sends one minimal (1-token) real request per
+provider through the same adapter path a run uses. That is the point — `GET /api/models` reports
+PRESENCE (a credential and a region were found), which is not the claim "a run would be accepted".
+Two measured counter-examples: `us.amazon.nova-premier-v1:0` is refused on entitlement with a
+perfectly valid credential, and a correctly-configured MCP server answered `invalid_token`. A
+settings tab built on presence alone reports both as fine.
+
+`credentialSource` is a NAME (`env:AWS_PROFILE`, `profile:active`) and never a value .
+`error` is the provider's OWN message, because "AccessDeniedException" or "expired" is the entire
+diagnostic and paraphrasing discards the actionable part. `usage` reports what the check spent, so
+the cost is stated rather than implied.
+
+Readable by **any participant**, like `GET /api/models`: the route is not session-nested (providers
+are host-wide, so there is no session to view-gate against) and a viewer who cannot diagnose a
+provider failure has to ask someone else to look. **Never cached** — the reason to run it is that
+something just changed. **`502`** `{ errors }` when the harness is unreachable.
 
 ## 3. Cable — `/~cable`, one envelope shape
 

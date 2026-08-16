@@ -28,7 +28,8 @@ type Tab = (typeof TABS)[number];
 const CAPTION: Record<Tab, string> = {
   Tools: "All built-in tools are available to every run.",
   Connectors: "Off by default — each one you enable adds its tools to every turn of the run.",
-  Skills: "All installed skills are indexed by name + description (~4k tokens); Claude loads the full instructions of one only when it applies.",
+  Skills:
+    "All installed skills are indexed by name + description (~4k tokens); Claude loads the full instructions of one only when it applies.",
 };
 
 interface Props {

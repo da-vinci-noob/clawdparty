@@ -1,4 +1,5 @@
 import type { FC } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../hooks/use_session";
 
 // What this session IS: its mode and the directory it works in. Visible to every role,
@@ -40,6 +41,15 @@ export const SessionInfo: FC<{ sessionId: string }> = ({ sessionId }) => {
       >
         {session.repository_path ?? "—"}
       </div>
+      {/* Every role, because the settings page is readable by every role — the auth test is how a
+          participant finds out WHY a provider is missing instead of asking someone else to look. */}
+      <Link
+        to={`/sessions/${sessionId}/settings`}
+        data-testid="session-settings-link"
+        className="inline-block text-[11px] text-[#3b9dff] hover:underline"
+      >
+        settings
+      </Link>
     </div>
   );
 };

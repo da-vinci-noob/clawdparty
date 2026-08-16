@@ -45,6 +45,13 @@ module Harness
       get('/models')
     end
 
+    # POST /verify — does each provider ACTUALLY work? Sends one tiny real request per
+    # provider, which is the only thing that separates "a credential is present" (what
+    # /models reports) from "the credential is accepted". A POST because it is not a read.
+    def verify_providers
+      post('/verify', {})
+    end
+
     # GET /connectors?cwd= — MCP servers the host has configured for the given
     # repo path (name + transport only). Missing/unparseable config yields an
     # empty list with an unavailable source (never a 500), like list_models.

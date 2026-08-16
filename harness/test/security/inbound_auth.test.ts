@@ -49,6 +49,7 @@ const ROUTES: Array<{ method: "GET" | "POST"; url: string; pattern: string }> = 
   { method: "GET", url: "/skills", pattern: "/skills" },
   { method: "GET", url: "/aws-profiles", pattern: "/aws-profiles" },
   { method: "GET", url: "/sessions/45/entries", pattern: "/sessions/:id/entries" },
+  { method: "POST", url: "/verify", pattern: "/verify" },
   { method: "POST", url: "/runs", pattern: "/runs" },
   { method: "POST", url: "/runs/1/messages", pattern: "/runs/:id/messages" },
   { method: "POST", url: "/runs/1/interrupt", pattern: "/runs/:id/interrupt" },

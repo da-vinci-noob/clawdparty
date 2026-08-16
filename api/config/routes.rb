@@ -21,6 +21,8 @@ Rails.application.routes.draw do
     # Runtime model discovery (any participant): the models available to the host's
     # provider login, proxied from the harness. GET /api/models
     get 'models', to: 'models#index'
+    # The auth test: sends a real request per provider, so it is a POST, not a read.
+    post 'providers/verify', to: 'providers#verify'
 
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
     # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id.
