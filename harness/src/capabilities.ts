@@ -88,26 +88,18 @@ function deriveTransport(serverConfig: unknown): string {
   return "unknown";
 }
 
-// Merge the host's MCP server configs from the session repo (`<cwd>/.mcp.json`)
-// and host-wide user config. Note `~/.claude.json` (where Claude Code actually
-// stores user MCP servers) is a FILE beside the `~/.claude/` dir; the harness
-// container mounts only that dir, so the real file is bind-mounted read-only at
-// `~/.claude-host.json` (absent when the harness runs on the host, where the real
-// `~/.claude.json` is read directly instead). De-dup by name with the REPO
-// (project) source winning over user config — the project file is the more
-// specific, per-repo intent. `hadSource` distinguishes "no config anywhere"
-// (→ unavailable) from "config present but empty".
+// Merge the host's MCP server configs from the session repo (`<cwd>/.mcp.json`) and
+// host-wide user config. Note `~/.claude.json` (where Claude Code actually stores user
+// MCP servers) is a FILE beside the `~/.claude/` dir, and the harness reads it
+// directly. De-dup by name with the REPO (project) source winning over user config —
+// the project file is the more specific, per-repo intent. `hadSource` distinguishes
+// "no config anywhere" (→ unavailable) from "config present but empty".
 function collectServerConfigs(
   cwd: string,
   home: string,
 ): { configs: Map<string, unknown>; hadSource: boolean } {
   const files = [
     join(cwd, MCP_JSON),
-    // Startup snapshot of the real ~/.claude.json (see docker/entrypoints/harness.sh)
-    // — a live single-file mount of that path breaks when the app atomically
-    // rewrites it, so discovery reads the stable copy.
-    join(home, ".claude-host-cache.json"),
-    // Direct read for a harness running on the host (no container / no snapshot).
     join(home, ".claude.json"),
     join(home, ".claude", "settings.json"),
   ];

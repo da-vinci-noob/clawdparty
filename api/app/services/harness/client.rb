@@ -6,8 +6,9 @@ require 'uri'
 
 module Harness
   # The sole Rails→harness caller for the frozen harness-protocol control surface.
-  # Targets HARNESS_URL (default http://harness:8787 over the compose network) —
-  # no hard-coded host, so a remote/Tailscale rebind is a config change only.
+  # Targets HARNESS_URL — no hard-coded host, so a remote/Tailscale rebind is a config
+  # change only. The harness is a HOST process on loopback, so from this container that
+  # is `host.docker.internal` (compose sets it); the default below is only a fallback.
   class Client
     class ActiveRunConflict < StandardError; end
     class UnknownRun < StandardError; end
@@ -16,12 +17,20 @@ module Harness
     Result = Struct.new(:status, :body, keyword_init: true)
 
     def self.base_url
-      ENV.fetch('HARNESS_URL', 'http://harness:8787')
+      ENV.fetch('HARNESS_URL', 'http://host.docker.internal:8787')
     end
 
-    def initialize(base_url: self.class.base_url, http: nil)
+    # The SAME secret the harness authenticates its callbacks into Rails with — one
+    # value, both directions. Every outbound request carries it because the harness now
+    # authenticates EVERY inbound route ; without it each call is a 401.
+    def self.shared_secret
+      ENV.fetch('HARNESS_SHARED_SECRET', '')
+    end
+
+    def initialize(base_url: self.class.base_url, http: nil, shared_secret: self.class.shared_secret)
       @base_url = base_url
       @http = http # injectable for tests; defaults to Net::HTTP
+      @shared_secret = shared_secret
     end
 
     # GET /models — the models available to the host's Claude/Bedrock login,
@@ -77,7 +86,7 @@ module Harness
 
     private
 
-    attr_reader :base_url
+    attr_reader :base_url, :shared_secret
 
     def post(path, body)
       uri = URI.join(base_url, path)
@@ -105,22 +114,24 @@ module Harness
     def perform(uri, json)
       return @http.call(uri, json) if @http # test seam
 
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.open_timeout = 5
-      http.read_timeout = 15
       request = Net::HTTP::Post.new(uri)
       request['content-type'] = 'application/json'
       request.body = json
-      http.request(request)
+      dispatch(uri, request)
     end
 
     def perform_get(uri)
       return @http.call(uri, nil) if @http # test seam
 
+      dispatch(uri, Net::HTTP::Get.new(uri))
+    end
+
+    def dispatch(uri, request)
+      request['authorization'] = "Bearer #{shared_secret}"
       http = Net::HTTP.new(uri.host, uri.port)
       http.open_timeout = 5
       http.read_timeout = 15
-      http.request(Net::HTTP::Get.new(uri))
+      http.request(request)
     end
   end
 end

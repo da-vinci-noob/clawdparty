@@ -43,3 +43,11 @@ jobs:
       # here should be legible in the CI output instead of one line among 167.
       - name: Extension points gate (test:extensions)
         run: npm run test:extensions
+
+      # The host-topology gate, also its own REQUIRED step. With the harness on the
+      # host, two properties stop being enforced by placement and start being enforced
+      # only by code: that every control route authenticates  and that there is
+      # no input path to a shell. A container made both partly structural; a
+      # host process does not, so they need to fail loudly on their own line.
+      - name: Host-topology gate (test:security)
+        run: npm run test:security

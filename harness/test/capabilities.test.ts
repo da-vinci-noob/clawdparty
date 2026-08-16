@@ -90,12 +90,14 @@ describe("listConnectors", () => {
     expect(res.source).toBe("host");
   });
 
-  it("reads the startup snapshot of ~/.claude.json (~/.claude-host-cache.json) for user servers", () => {
-    // The entrypoint snapshots the real ~/.claude.json here at startup, because a
-    // live single-file mount of it breaks when the app atomically rewrites it.
+  it("reads ~/.claude.json directly for user servers", () => {
+    // Read live, not from a snapshot. The container needed one because a single-file
+    // bind mount of ~/.claude.json breaks the moment the app atomically rewrites it
+    // (write-temp + rename swaps the inode, and the container sees the file vanish).
+    // On the host there is no mount and no snapshot to go stale.
     writeFile(
       home,
-      ".claude-host-cache.json",
+      ".claude.json",
       JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://mcp.linear.app" } } }),
     );
     expect(listConnectors(cwd, home).connectors).toEqual([{ name: "linear", transport: "http" }]);

@@ -23,6 +23,19 @@
 # Node deps (live in named volumes; ignore defensively if installed host-side)
 node_modules/
 
+# Vite build output (web/). Rails serves this in production; it is never committed.
+/web/dist/
+
+# Rails runtime dirs. `/tmp/` above is root-anchored and does NOT cover these — the
+# rails container bind-mounts ./api as /app, so tmp/pids/server.pid lands here in
+# the working tree on every `bin/start`. Contents ignored, `.keep` kept.
+/api/tmp/*
+!/api/tmp/.keep
+/api/log/*
+!/api/log/.keep
+
+.DS_Store
+
 # Local env files holding generated secrets (e.g. HARNESS_SHARED_SECRET).
 # Committed template is .env.example; per-developer secrets live in .env.local.
 .env

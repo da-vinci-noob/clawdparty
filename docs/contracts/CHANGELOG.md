@@ -71,6 +71,33 @@ break a contract *outside* this window is a defect, not an amendment (Principle 
   *role* changes from the record to a projection channel — invisible to clients, which is
   what keeps M0 behaviour-neutral.
 
+### Breaking — deployment topology (B6)
+
+| # | Change | Streams |
+|---|---|---|
+| B6 | **The harness is no longer a container.** It runs as a host process on loopback ; `docker-compose.yml` drops the `harness` service and Rails reaches it at `HARNESS_URL=http://host.docker.internal:8787`. **Every harness control route now requires a bearer `HARNESS_SHARED_SECRET`, `/healthz` included** — previously the private compose network was the only thing standing between a caller and the control surface, and on the host that is no longer true . An unauthenticated caller gets `401`. | api, harness |
+
+Listed as breaking rather than additive because a caller that reached the harness
+without a bearer stops working — even though no *payload* shape changed. Two knock-on
+decisions worth stating rather than leaving to be inferred:
+
+- **`~/.claude` and `~/.aws` bind mounts are gone**, and with them the macOS caveat that
+  subscription/enterprise OAuth needed `claude setup-token` +
+  `CLAUDE_CODE_OAUTH_TOKEN`: the Keychain is now readable directly. The env var stays
+  supported as an explicit override and still wins its precedence slot. `aws sso login`
+  freshness is unchanged — nothing can refresh that token on the developer's behalf.
+- **`docker/harness.Dockerfile` and its entrypoint are DELETED.** Not kept for CI: the `harness` CI
+  job already runs on a bare ubuntu runner with `actions/setup-node`, so the image was used by
+  nothing once the compose service went. Keeping it would also have been actively misleading,
+  because the harness now *refuses to start* inside a container . The entrypoint's
+  `~/.claude.json` startup snapshot went with it — that existed only because a
+  single-file bind mount breaks when the app atomically rewrites the file, and discovery
+  now reads the real path.
+
+`CONTRACT_VERSION` is unchanged by B6, consistent with the precedent recorded in the
+governance question below: it versions the *event* contract, and B6 changes neither the
+envelope nor the taxonomy.
+
 ### ⚠️ Unreconciled governance question (raised, not decided)
 
 The table at the top of this file says a frozen **endpoint signature** change is breaking

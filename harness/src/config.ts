@@ -8,6 +8,13 @@ import { join } from "node:path";
 
 export interface HarnessConfig {
   port: number;
+  /**
+   * The interface to listen on. Defaults to loopback and MUST NOT be `0.0.0.0`
+   *. Configurable only because Linux's docker bridge does not proxy host
+   * loopback, so a Linux developer needs to bind the bridge gateway instead — which
+   * is still not the LAN. `bin/harness` refuses `0.0.0.0`.
+   */
+  bindHost: string;
   // harness -> Rails callback base URL. DISTINCT from HARNESS_URL (the
   // Rails -> harness address); the two directions are never conflated.
   railsInternalUrl: string;
@@ -26,7 +33,8 @@ export interface HarnessConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HarnessConfig {
   return {
     port: Number.parseInt(env.HARNESS_PORT ?? "8787", 10),
-    railsInternalUrl: env.RAILS_INTERNAL_URL ?? "http://rails:3000",
+    bindHost: env.HARNESS_BIND_HOST ?? "127.0.0.1",
+    railsInternalUrl: env.RAILS_INTERNAL_URL ?? "http://localhost:3000",
     sharedSecret: env.HARNESS_SHARED_SECRET ?? "",
     heartbeatIntervalMs: Number.parseInt(env.HEARTBEAT_INTERVAL_MS ?? "5000", 10),
     sigtermFlushTimeoutMs: Number.parseInt(env.SIGTERM_FLUSH_TIMEOUT_MS ?? "3000", 10),

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd user agent for the host harness .
+
+  Install:
+    sed "s|REPO_ROOT_PLACEHOLDER|$PWD|g" docker/launchd/com.clawdparty.harness.plist \
+      > ~/Library/LaunchAgents/com.clawdparty.harness.plist
+    launchctl load -w ~/Library/LaunchAgents/com.clawdparty.harness.plist
+
+  A USER agent (~/Library/LaunchAgents), never a system daemon in
+  /Library/LaunchDaemons. The harness must run as the developer with the developer's
+  own login, so it inherits their Keychain, SSH agent and toolchain — a root daemon
+  would have none of those and would write root-owned files into their repos.
+
+  KeepAlive restarts it on crash; RunAtLoad starts it at login. Together those are
+  , without depending on the container runtime being up.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.clawdparty.harness</string>
+
+  <!-- `bin/harness foreground` and not `start`: launchd supervises a process that
+       must stay in the foreground. `start` daemonizes and returns, which launchd
+       would read as an immediate exit and restart forever. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPO_ROOT_PLACEHOLDER/bin/harness</string>
+    <string>foreground</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPO_ROOT_PLACEHOLDER</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <!-- Restart on crash, but NOT after a clean `bin/harness stop`: SuccessfulExit
+         false means "only revive it when it exited nonzero". Without this, stopping
+         the harness by hand would race launchd bringing it straight back. -->
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- Back off between restarts so a config error (an empty HARNESS_SHARED_SECRET,
+       say) produces a readable log rather than thousands of spawns per minute. -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>REPO_ROOT_PLACEHOLDER/../.local/state/clawdparty/harness.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPO_ROOT_PLACEHOLDER/../.local/state/clawdparty/harness.launchd.log</string>
+
+  <!-- launchd gives an agent a near-empty PATH, so `node`, `mise` and `git` are all
+       missing unless named here. This is the single most common reason a unit that
+       works interactively fails under supervision. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

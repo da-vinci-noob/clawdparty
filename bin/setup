@@ -3,11 +3,17 @@
 #
 # Idempotent. Run once on a fresh checkout (and safe to re-run):
 #   1. generate HARNESS_SHARED_SECRET into .env.local ONLY if absent (never clobber),
-#   2. ensure host ~/.claude and ~/.aws exist so Docker does not silently create
-#      them root-owned on first bind-mount.
+#   2. install the harness's own dependencies — it runs on the host, so nothing
+#      installs them for it,
+#   3. create the store directory the harness records into.
 #
 # It does NOT create databases — that happens in the rails container entrypoint,
 # because no postgres container exists yet when this runs on the host.
+#
+# It also no longer pre-creates ~/.claude and ~/.aws. That existed so Docker would not
+# auto-create them root-owned when the harness container bind-mounted them; the harness
+# is a host process now, there is no such mount, and credential discovery reports an
+# absent location with a remedy  rather than needing an empty directory.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,21 +51,27 @@ ensure_secret() {
   echo "✓ Generated HARNESS_SHARED_SECRET into .env.local"
 }
 
-# --- 2. Host credential directories (create empty if absent) ---------------
-ensure_credential_dirs() {
-  local d
-  for d in "${HOME}/.claude" "${HOME}/.aws"; do
-    if [[ -d "${d}" ]]; then
-      echo "✓ ${d} exists"
-    else
-      mkdir -p "${d}"
-      echo "✓ Created empty host-owned ${d} (bind-mount source; avoids root-owned auto-create)"
-    fi
-  done
+# --- 2. Harness dependencies (it runs on the host; nothing else installs them) ---
+ensure_harness_deps() {
+  if [[ -d "${repo_root}/harness/node_modules/tsx" ]]; then
+    echo "✓ harness dependencies present"
+    return
+  fi
+  echo "→ installing harness dependencies (host process; no container does this)"
+  (cd "${repo_root}/harness" && { npm ci || npm install; }) >/dev/null
+  echo "✓ harness dependencies installed"
+}
+
+# --- 3. Store directory  -----------------
+ensure_store_dir() {
+  local dir="${HARNESS_STORE_DIR:-${HOME}/.local/state/clawdparty/sessions}"
+  mkdir -p "${dir}"
+  echo "✓ store directory ${dir}"
 }
 
 ensure_secret
-ensure_credential_dirs
+ensure_harness_deps
+ensure_store_dir
 
 echo
-echo "Setup complete. Next: bin/start"
+echo "Setup complete. Next: bin/start (brings up the containers AND the host harness)"

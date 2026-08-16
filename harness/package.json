@@ -18,6 +18,7 @@
     "test:reconstruction": "vitest run test/reconstruction",
     "test:adapters": "vitest run test/adapters",
     "test:extensions": "vitest run test/extensions",
+    "test:security": "vitest run test/security",
     "test:plugin-adversarial": "vitest run test/plugins/adversarial"
   },
   "dependencies": {

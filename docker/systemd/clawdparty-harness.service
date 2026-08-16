@@ -1,0 +1,56 @@
+# systemd USER unit for the host harness.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   sed "s|REPO_ROOT_PLACEHOLDER|$PWD|g" docker/systemd/clawdparty-harness.service \
+#     > ~/.config/systemd/user/clawdparty-harness.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now clawdparty-harness
+#   loginctl enable-linger "$USER"   # so it survives logout, matching RunAtLoad
+#
+# A USER unit (`systemctl --user`), never a system unit. The harness runs as the
+# developer with the developer's own login so it inherits their SSH agent, toolchain
+# and credential files; a root unit would have none of those and would write
+# root-owned files into their repos.
+#
+# LINUX NOTE: the docker bridge does not proxy host loopback, so a 127.0.0.1-bound
+# harness is unreachable from the containers here. Set HARNESS_BIND_HOST to the bridge
+# gateway (check `ip addr show docker0`, commonly 172.17.0.1) in .env.local. That is
+# still not the LAN.
+
+[Unit]
+Description=clawdparty harness (agent loop, host process)
+Documentation=https://github.com/da-vinci-noob/clawdparty
+# Wants, not Requires: the harness must start even when docker is down. It buffers
+# events and retries, and a hard dependency would make a docker restart take the
+# harness -- and any live run -- with it.
+Wants=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=REPO_ROOT_PLACEHOLDER
+# `foreground`, not `start`: Type=simple supervises a process that stays in the
+# foreground. `start` daemonizes and returns, which systemd reads as an exit.
+ExecStart=REPO_ROOT_PLACEHOLDER/bin/harness foreground
+
+# SIGTERM lets the harness drain its transport buffer and close the stores. The
+# RECORD is already durable, so the grace period only protects the projection --
+# hence a short one.
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+Restart=on-failure
+# Not `always`: a clean `bin/harness stop` must stay stopped rather than race
+# systemd bringing it back.
+RestartSec=10
+# Back off rather than spin: a config error (an empty HARNESS_SHARED_SECRET, say)
+# should leave a readable journal, not thousands of spawns.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+# systemd gives a unit a minimal PATH, so node/mise/git are missing unless named.
+# This is the most common reason a unit that works interactively fails supervised.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+
+[Install]
+WantedBy=default.target

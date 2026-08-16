@@ -17,12 +17,17 @@ import { Transport } from "../src/transport.js";
 
 const CONFIG = {
   port: 8787,
+  bindHost: "127.0.0.1",
   railsInternalUrl: "http://rails:3000",
   sharedSecret: "s3cret",
   heartbeatIntervalMs: 50,
   sigtermFlushTimeoutMs: 20,
   storeDir: "/tmp/unused",
 };
+
+// Every route authenticates , so every request here carries the bearer.
+// inbound_auth.test.ts is what covers the rejection side.
+const AUTH = { authorization: `Bearer ${CONFIG.sharedSecret}` };
 
 let dir: string;
 let supervisor: Supervisor;
@@ -129,8 +134,8 @@ function startBody(over: Record<string, unknown> = {}) {
 
 describe("Fastify server (supervisor-backed)", () => {
   it("GET /healthz reports active_run_ids", async () => {
-    const app = buildServer(supervisor);
-    const res = await app.inject({ method: "GET", url: "/healthz" });
+    const app = buildServer(supervisor, CONFIG);
+    const res = await app.inject({ method: "GET", url: "/healthz", headers: AUTH });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ active_run_ids: [] });
@@ -138,8 +143,13 @@ describe("Fastify server (supervisor-backed)", () => {
   });
 
   it("POST /runs accepts lane + provider and returns 202", async () => {
-    const app = buildServer(supervisor);
-    const res = await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs",
+      payload: startBody(),
+      headers: AUTH,
+    });
 
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ run_id: "1", status: "running" });
@@ -147,23 +157,24 @@ describe("Fastify server (supervisor-backed)", () => {
   });
 
   it("GET /runs is the authoritative active-run list", async () => {
-    const app = buildServer(supervisor);
-    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
 
-    const res = await app.inject({ method: "GET", url: "/runs" });
+    const res = await app.inject({ method: "GET", url: "/runs", headers: AUTH });
     expect(res.statusCode).toBe(200);
     expect(res.json().runs).toMatchObject([{ run_id: "1", session_id: "45", lane: "main" }]);
     await app.close();
   });
 
   it("refuses a second run on the SAME lane with 409", async () => {
-    const app = buildServer(supervisor);
-    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
 
     const res = await app.inject({
       method: "POST",
       url: "/runs",
       payload: startBody({ run_id: "2" }),
+      headers: AUTH,
     });
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: "run_active" });
@@ -173,26 +184,28 @@ describe("Fastify server (supervisor-backed)", () => {
   it("allows a concurrent run on a DIFFERENT lane", async () => {
     // One-active-run is per LANE now, not per session (B5). Until M7 everything is
     // on "main", so this asserts the constraint moved rather than vanished.
-    const app = buildServer(supervisor);
-    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
 
     const res = await app.inject({
       method: "POST",
       url: "/runs",
       payload: startBody({ run_id: "2", lane: "review" }),
+      headers: AUTH,
     });
     expect(res.statusCode).toBe(202);
     await app.close();
   });
 
   it("POST /runs/:id/messages queues a follow-up on a live run", async () => {
-    const app = buildServer(supervisor);
-    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
 
     const res = await app.inject({
       method: "POST",
       url: "/runs/1/messages",
       payload: { message: "also do this" },
+      headers: AUTH,
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ run_id: "1", accepted: true });
@@ -200,14 +213,19 @@ describe("Fastify server (supervisor-backed)", () => {
   });
 
   it("messages and interrupt to an unknown run are 404", async () => {
-    const app = buildServer(supervisor);
+    const app = buildServer(supervisor, CONFIG);
 
     const messages = await app.inject({
       method: "POST",
       url: "/runs/nope/messages",
       payload: { message: "x" },
+      headers: AUTH,
     });
-    const interrupt = await app.inject({ method: "POST", url: "/runs/nope/interrupt" });
+    const interrupt = await app.inject({
+      method: "POST",
+      url: "/runs/nope/interrupt",
+      headers: AUTH,
+    });
 
     expect([messages.statusCode, interrupt.statusCode]).toEqual([404, 404]);
     expect(messages.json()).toEqual({ error: "unknown_run" });
@@ -217,21 +235,22 @@ describe("Fastify server (supervisor-backed)", () => {
   it("POST /runs/:id/permission_mode is GONE (404, not 200)", async () => {
     // B2. Asserted because a removal nothing tests quietly comes back — and the
     // web client stops sending it in the same change.
-    const app = buildServer(supervisor);
-    await app.inject({ method: "POST", url: "/runs", payload: startBody() });
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
 
     const res = await app.inject({
       method: "POST",
       url: "/runs/1/permission_mode",
       payload: { permission_mode: "acceptEdits" },
+      headers: AUTH,
     });
     expect(res.statusCode).toBe(404);
     await app.close();
   });
 
   it("GET /models returns the per-provider shape, never a bare array", async () => {
-    const app = buildServer(supervisor);
-    const res = await app.inject({ method: "GET", url: "/models" });
+    const app = buildServer(supervisor, CONFIG);
+    const res = await app.inject({ method: "GET", url: "/models", headers: AUTH });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -244,9 +263,13 @@ describe("Fastify server (supervisor-backed)", () => {
   });
 
   it("GET /connectors and /skills keep their pinned shapes", async () => {
-    const app = buildServer(supervisor);
-    const connectors = await app.inject({ method: "GET", url: "/connectors?cwd=/tmp" });
-    const skills = await app.inject({ method: "GET", url: "/skills?cwd=/tmp" });
+    const app = buildServer(supervisor, CONFIG);
+    const connectors = await app.inject({
+      method: "GET",
+      url: "/connectors?cwd=/tmp",
+      headers: AUTH,
+    });
+    const skills = await app.inject({ method: "GET", url: "/skills?cwd=/tmp", headers: AUTH });
 
     expect(connectors.statusCode).toBe(200);
     expect(skills.statusCode).toBe(200);

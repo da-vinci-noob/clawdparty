@@ -10,11 +10,21 @@ module Git
   class WorktreeManager
     class GitError < StandardError; end
 
-    # The IN-CONTAINER repo root — always /repo (the frozen convention: the host
-    # dir is bind-mounted to /repo). This is deliberately NOT `TARGET_REPO_PATH`:
-    # that env var is the HOST mount SOURCE (used only for compose substitution)
-    # and would be a path that does not exist inside the container. `REPO_ROOT`
-    # is an in-container override knob, defaulting to /repo.
+    # `REPO_ROOT` must be the SAME ABSOLUTE STRING on the host and in this container.
+    # Compose sets it from `TARGET_REPO_PATH`, which is also the mount target, so the
+    # two match by construction.
+    #
+    # Identical paths survived the harness's move to the host, for a NEW reason. They
+    # used to matter so a container-created worktree stayed openable by host git; now
+    # the host harness runs Claude in these worktrees while Rails does the git work in
+    # a container, and `git worktree` records ABSOLUTE gitdir paths in
+    # `.git/worktrees/<name>/gitdir`. If the two disagree, every worktree one side
+    # writes is unusable by the other.
+    #
+    # There is no path TRANSLATION anywhere and there must not be: a translation layer
+    # would have to be applied in every direction the path travels (run payload, diff,
+    # commit, revert, the browser) and missing one produces a path that resolves to
+    # nothing rather than an error.
     def self.repo_root
       ENV.fetch('REPO_ROOT', '/repo')
     end

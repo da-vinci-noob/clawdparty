@@ -8,15 +8,35 @@
 //   POST /runs/:id/permission_mode REMOVED — an Agent SDK concept
 //   GET  /models                  per-provider shape
 
+import { existsSync, readFileSync } from "node:fs";
 import Fastify, { type FastifyInstance } from "fastify";
+import { bearerToken, tokenMatches } from "./auth.js";
 import { listConnectors, listSkills } from "./capabilities.js";
 import { type HarnessConfig, loadConfig } from "./config.js";
 import { listProviders } from "./providers/discovery.js";
 import { RunConflict, type StartRunInput, Supervisor, UnknownRun } from "./supervisor.js";
 import { Transport } from "./transport.js";
 
-export function buildServer(supervisor: Supervisor): FastifyInstance {
+export function buildServer(
+  supervisor: Supervisor,
+  config: Pick<HarnessConfig, "sharedSecret">,
+): FastifyInstance {
   const app = Fastify({ logger: true });
+
+  /**
+   * EVERY route authenticates, `/healthz` included  — there is no exempt
+   * probe, because nothing needs one: supervision is process-level (launchd
+   * KeepAlive / systemd Restart), not an HTTP poll, and `bin/harness status` reads
+   * the same `.env.local` the secret is generated into. Exempting `/healthz` would
+   * hand `active_run_ids` to any local process for no consumer's benefit.
+   */
+  app.addHook("onRequest", async (req, reply) => {
+    if (tokenMatches(bearerToken(req.headers.authorization) ?? "", config.sharedSecret)) return;
+
+    // No detail about which part failed: absent, malformed, and wrong all look
+    // identical to a caller.
+    await reply.code(401).send({ error: "unauthorized" });
+  });
 
   // Liveness probe — reports the supervisor's real active runs.
   app.get("/healthz", async () => ({ active_run_ids: supervisor.activeRunIds() }));
@@ -165,11 +185,69 @@ export function buildSupervisor(
   return { supervisor, transport };
 }
 
+/**
+ * The harness runs on the HOST. Starting inside a container is a
+ * misconfiguration whose symptoms are confusing rather than obvious: credential
+ * discovery reads paths that only exist on the host , the store lands in a
+ * layer that vanishes on restart, and `cwd` from a run-start payload is a host path
+ * that may not resolve. Each of those fails later and elsewhere, so it is refused
+ * here instead.
+ */
+export function containerMarkers(fs: {
+  exists: (p: string) => boolean;
+  read: (p: string) => string;
+}): string[] {
+  const found: string[] = [];
+  if (fs.exists("/.dockerenv")) found.push("/.dockerenv exists");
+  // A containerized PID 1 shows its runtime in its own cgroup path. Read cgroup
+  // rather than /proc/1/cgroup alone so cgroup v2 (a single `0::/` line) still
+  // reports via the marker file above rather than a false negative here.
+  const cgroup = fs.read("/proc/self/cgroup");
+  if (/docker|containerd|kubepods|libpod/.test(cgroup))
+    found.push("container runtime in /proc/self/cgroup");
+  return found;
+}
+
+function hostFsProbe(): { exists: (p: string) => boolean; read: (p: string) => string } {
+  return {
+    exists: (p) => existsSync(p),
+    read: (p) => {
+      try {
+        return readFileSync(p, "utf8");
+      } catch {
+        return "";
+      }
+    },
+  };
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
+
+  const markers = containerMarkers(hostFsProbe());
+  if (markers.length > 0) {
+    process.stderr.write(
+      `harness refuses to start inside a container (${markers.join("; ")}).
+Supported topology: the harness runs as a HOST process (bin/harness); rails, jobs and
+postgres stay containerized. See docs/contracts/harness_protocol.md.
+`,
+    );
+    process.exit(1);
+  }
+
+  // A missing secret would leave the control surface open were it not for the
+  // fail-closed compare in auth.ts — which turns it into "every request 401s", a
+  // symptom that reads like a bug. Fail here, where the message can name the fix.
+  if (config.sharedSecret.length === 0) {
+    process.stderr.write(
+      "HARNESS_SHARED_SECRET is unset or empty — run bin/setup to generate it.\n",
+    );
+    process.exit(1);
+  }
+
   const app0 = Fastify({ logger: true });
   const { supervisor, transport } = buildSupervisor(config, app0.log);
-  const app = buildServer(supervisor);
+  const app = buildServer(supervisor, config);
 
   const heartbeat = startHeartbeat(config, app.log, supervisor);
 
@@ -183,9 +261,12 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 
-  // Still 0.0.0.0 while the harness is a compose service; a follow-up moves it to
-  // 127.0.0.1 as part of the host move, which is when loopback-only matters.
-  await app.listen({ port: config.port, host: "0.0.0.0" });
+  // LOOPBACK ONLY, never 0.0.0.0. The containerized services reach
+  // this through the Docker bridge, which on Docker Desktop proxies to host
+  // loopback; on Linux the bridge does NOT, which is why HARNESS_BIND_HOST exists
+  // (see docker-compose.yml `extra_hosts`). Nothing on the LAN can reach it either
+  // way — `rails:3000` stays the single published surface.
+  await app.listen({ port: config.port, host: config.bindHost });
 }
 
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {

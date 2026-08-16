@@ -22,5 +22,10 @@ if docker compose ps --status running --services 2>/dev/null | grep -qx rails; t
   exec docker compose exec ${tty_flags[@]+"${tty_flags[@]}"} rails bundle exec rubocop "$@"
 fi
 
-exec docker compose run --rm --no-deps ${tty_flags[@]+"${tty_flags[@]}"} \
-  rails bundle exec rubocop "$@"
+# --entrypoint bash is load-bearing alongside --no-deps: the image entrypoint blocks
+# in a `until nc -z postgres 5432` loop and then runs db:prepare, so --no-deps alone
+# hangs forever whenever postgres happens to be down. Overriding it skips both — a
+# lint run needs neither. Keep the bundle check, which is the one entrypoint step
+# that matters here (a fresh machine has an empty gem volume).
+exec docker compose run --rm --no-deps --entrypoint bash ${tty_flags[@]+"${tty_flags[@]}"} \
+  rails -lc 'bundle check >/dev/null 2>&1 || bundle install; exec bundle exec rubocop "$@"' _ "$@"
