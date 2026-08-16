@@ -99,7 +99,12 @@ module Git
 
       name, email = author_identity(author)
       run_git!('add', '-A', dir: worktree_path)
-      run_git!('-c', "user.name=#{name}", '-c', "user.email=#{email}",
+      # `commit.gpgsign=false` for the same reason as `--no-verify`: signing needs a key
+      # and agent this container does not have, and a repo (or host) with signing on
+      # would abort the commit — stranding an APPROVED changeset in a dirty worktree and
+      # blocking the next run. Found when a harness bash command's `git commit` died on
+      # the host's global commit.gpgsign with "1Password: failed to fill whole buffer".
+      run_git!('-c', "user.name=#{name}", '-c', "user.email=#{email}", '-c', 'commit.gpgsign=false',
                'commit', '--no-verify', '-m', message, dir: worktree_path)
       base_sha
     end

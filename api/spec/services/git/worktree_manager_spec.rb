@@ -123,6 +123,23 @@ RSpec.describe(Git::WorktreeManager) do
       expect(name.strip).to(eq('clawdparty'))
     end
 
+    it 'commits even when the repo has commit signing enabled' do
+      # Found by accident: a `git commit` run from a harness bash command failed with
+      # "1Password: failed to fill whole buffer" because the host had
+      # commit.gpgsign=true. If that setting reaches the approve path, approve dies on a
+      # credential the container does not have and STRANDS an approved changeset in a
+      # dirty worktree, blocking the next run. Same reasoning as --no-verify: this is
+      # clawdparty's internal bookkeeping commit on an isolated session branch.
+      path = manager.ensure_worktree!
+      Open3.capture3('git', '-C', path, 'config', 'commit.gpgsign', 'true')
+      Open3.capture3('git', '-C', path, 'config', 'user.signingkey', 'DOES-NOT-EXIST')
+      Open3.capture3('git', '-C', path, 'config', 'gpg.format', 'ssh')
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+      expect(manager.dirty?).to(be(false))
+    end
+
     it 'does not read the host git config for identity' do
       # Passed with `-c` so a host with no user.name configured still commits. Without
       # it, approve fails with "Please tell me who you are" on a fresh machine.
