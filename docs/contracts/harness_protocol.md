@@ -220,9 +220,16 @@ behavior when omitted:
   built-ins. The client **never** supplies a server's command/url/headers — only names; an unknown
   name is rejected by Rails (`422`) and, if it reaches the harness, reported as `not_configured`.
   A server that fails or hangs (bounded at 10s) does **not** fail the run.
-- **`skills`** — `"all"` or discovered skill names. **Currently accepted and NOT applied** — see
-  below. The SDK's `settingSources` mechanism is gone with the SDK, and the harness does not yet
-  compose skill content into the system prompt.
+- **`skills`** — `"all"` or discovered skill names. The harness composes them itself now that the
+  SDK's `settingSources` is gone, by PROGRESSIVE DISCLOSURE rather than inlining: the system
+  prompt gains a one-line INDEX (name + description, each clipped to 200 chars) and the run gains a
+  `skill` tool whose `name` enum is exactly the resolved skills, so a body is loaded only when the
+  model decides one applies. Measured on a host with 57 skills: the index + tool schema cost **~4,000
+  input tokens per turn** (5,864 vs 1,867 for the identical run with `skills: []`), against roughly
+  140,000 to inline every body. A selected name the host does not have is dropped, never indexed —
+  the model is never told about a skill it cannot load. The `skill` tool takes a NAME and looks it up
+  in a map built by the harness's own scan, and the body read is realpath-contained to that skill's
+  root, so a symlinked `SKILL.md` cannot turn the skills directory into a reader for arbitrary files.
 
 The `run_started` event echoes the **resolved** `disallowed_tools` / `connectors` / `skills`
 (additive optional payload fields, `CONTRACT_VERSION` 1.4) so the UI reflects a run's real scope,

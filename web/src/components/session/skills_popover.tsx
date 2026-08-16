@@ -5,8 +5,10 @@ import { useSkills } from "../../hooks/use_skills";
 
 // The capabilities panel — Tools, Connectors, Skills.
 //
-// Tools and skills have no per-item toggle: every built-in tool and every installed skill is
-// available to the run, matching how Claude Code normally works.
+// Tools and skills have no per-item toggle: every built-in tool is available, and every installed
+// skill is INDEXED — name + description in the system prompt, with the body loaded on demand
+// through the `skill` tool. Measured on this host: 57 skills cost ~4,000 input tokens per turn to
+// index, against roughly 140,000 to inline every body, which is why the index is the unit.
 //
 // CONNECTORS DO, and they default to OFF. Enabling one is not free: the harness connects to the
 // MCP server before the first request and declares every tool it advertises, and on this host
@@ -26,7 +28,7 @@ type Tab = (typeof TABS)[number];
 const CAPTION: Record<Tab, string> = {
   Tools: "All built-in tools are available to every run.",
   Connectors: "Off by default — each one you enable adds its tools to every turn of the run.",
-  Skills: "All installed skills are available — Claude uses them as needed.",
+  Skills: "All installed skills are indexed by name + description (~4k tokens); Claude loads the full instructions of one only when it applies.",
 };
 
 interface Props {

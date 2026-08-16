@@ -60,6 +60,8 @@ export interface RunSpec {
   connectors?: string[];
   /** Selected servers that did not load, CLASSIFIED (never the transport's own message). */
   connectorsFailed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
+  /** Skills indexed in the system prompt and loadable via the `skill` tool. */
+  skills?: string[];
   signal: AbortSignal;
 }
 
@@ -122,6 +124,7 @@ export class RunLoop {
           ...(spec.disallowedTools?.length ? { disallowed_tools: spec.disallowedTools } : {}),
           ...(spec.connectors?.length ? { connectors: spec.connectors } : {}),
           ...(spec.connectorsFailed?.length ? { connectors_failed: spec.connectorsFailed } : {}),
+          ...(spec.skills?.length ? { skills: spec.skills } : {}),
         },
         this.now(),
       ),

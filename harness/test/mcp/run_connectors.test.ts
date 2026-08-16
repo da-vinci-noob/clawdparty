@@ -224,8 +224,6 @@ describe("a connector that cannot load", () => {
 
   it("classifies a name the host never configured", async () => {
     await run("4", ["ghost"]);
-    expect(startedFor("4")?.connectors_failed).toEqual([
-      { name: "ghost", kind: "not_configured" },
-    ]);
+    expect(startedFor("4")?.connectors_failed).toEqual([{ name: "ghost", kind: "not_configured" }]);
   });
 });

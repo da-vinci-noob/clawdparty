@@ -23,6 +23,7 @@ import { dirname } from "node:path";
 import { loadConfig } from "../src/config.js";
 import * as request from "../src/loop/request_builder.js";
 import { AnthropicDirectAdapter } from "../src/providers/anthropic_direct.js";
+import { composeSystemPrompt, resolveSkills } from "../src/skills.js";
 import { openStore } from "../src/store/store.js";
 import type { Entry } from "../src/store/types.js";
 import { DEFAULT_SYSTEM_PROMPT, buildRegistry } from "../src/supervisor.js";
@@ -95,7 +96,18 @@ async function main(): Promise<void> {
     ?.model;
   const capabilities = adapter.capabilities(model ?? "");
   const tools = buildRegistry().schemasFor(capabilities, []);
-  const systemPrompt = parsed.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+
+  // The system prompt is COMPOSED when a run enabled skills, so rebuild the same
+  // composition from what the run recorded: `run_started` echoes the cwd and the resolved names,
+  // and `resolveSkills` is a pure function of those. Without this every skill-enabled run reports a
+  // digest mismatch — the check working correctly, and useless. An explicit --system-prompt still
+  // wins, for a host whose skills have changed since the run.
+  const started = entries.find((e) => e.type === "run_started")?.payload as
+    | { cwd?: string; skills?: string[] }
+    | undefined;
+  const skills =
+    started?.cwd && started.skills?.length ? resolveSkills(started.cwd, started.skills).index : "";
+  const systemPrompt = parsed.systemPrompt ?? composeSystemPrompt(DEFAULT_SYSTEM_PROMPT, skills);
 
   const lines: string[] = [];
   const skipped: string[] = [];

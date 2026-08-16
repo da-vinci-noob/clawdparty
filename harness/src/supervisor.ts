@@ -3,10 +3,11 @@ import type { EventEnvelope } from "@clawdparty/contracts";
 import { ExtensionRegistry } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
-import { attachConnectors } from "./mcp/connectors.js";
 import type { McpConnect } from "./mcp/client.js";
+import { attachConnectors } from "./mcp/connectors.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
 import { ADAPTER_IDS, adapterById, buildAdapters } from "./providers/index.js";
+import { composeSystemPrompt, resolveSkills } from "./skills.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
 import { afterCursorToFrom, openStore } from "./store/store.js";
 import type { Entry, HarnessStoreApi } from "./store/types.js";
@@ -58,7 +59,12 @@ export interface StartRunInput {
   allowed_tools?: string[];
   disallowed_tools?: string[];
   connectors?: string[];
-  skills?: string[];
+  /**
+   * `"all"` or specific names. The type used to be `string[]`, which could not express what Rails
+   * actually sends — `harness_protocol.md` has said `"all" | string[]` all along, and the literal
+   * arrived as a string the type denied was possible.
+   */
+  skills?: "all" | string[];
   /**
    * The AWS named profile a Bedrock run authenticates with, e.g. `claude-code-sso`.
    *
@@ -211,7 +217,12 @@ export class Supervisor {
       // command/url/headers.
       process.stderr.write(`connector ${failure.server} not loaded: ${failure.reason}\n`);
     }
-    const tools = mcp.tools.length === 0 ? this.tools : registryWith(mcp.tools);
+    // Skills the run selected: an INDEX in the system prompt plus a `skill` tool to load a body on
+    // demand. Inlining every SKILL.md was never viable — 79 skills on this host — and the
+    // index keeps the cost proportional to what the model actually opens.
+    const skills = resolveSkills(input.repo_path, input.skills ?? [], undefined);
+    const extraTools = [...mcp.tools, ...(skills.tool ? [skills.tool] : [])];
+    const tools = extraTools.length === 0 ? this.tools : registryWith(extraTools);
 
     const loop = this.opts.buildLoop
       ? this.opts.buildLoop({ store, adapter, emit })
@@ -229,12 +240,19 @@ export class Supervisor {
       requestedBy: input.requested_by,
       model: input.model,
       cwd: input.repo_path,
-      systemPrompt: this.opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+      // Composed, and RECOMPOSABLE: `reconstruct` verifies the recorded digest against a prompt it
+      // rebuilds from `run_started`'s cwd + resolved skill names, so a skill run does not read as a
+      // digest mismatch forever.
+      systemPrompt: composeSystemPrompt(
+        this.opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        skills.index,
+      ),
       effort: input.effort,
       disallowedTools: input.disallowed_tools,
       // Only the servers whose tools actually LOADED. A connector that failed to start is absent
       // from the echo, which is the honest record: the run does not have it.
       connectors: mcp.loaded,
+      skills: skills.names,
       connectorsFailed: mcp.failed.map((failure) => ({
         name: failure.server,
         kind: classifyConnectorFailure(failure.reason),

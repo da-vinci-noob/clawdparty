@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ConnectorInfo, SkillInfo } from "@clawdparty/contracts";
+import { parseFrontmatter } from "./frontmatter.js";
 
 export interface ConnectorList {
   connectors: ConnectorInfo[];
@@ -154,34 +155,6 @@ export function resolveConnectors(
     allowedToolPatterns.push(`mcp__${name}__*`);
   }
   return { mcpServers, allowedToolPatterns };
-}
-
-// Parse the leading `---`…`---` YAML frontmatter for simple `key: value` pairs.
-// Minimal by design (no YAML dep) — we only need `name` + `description`.
-function parseFrontmatter(content: string): Record<string, string> {
-  if (!content.startsWith("---")) {
-    return {};
-  }
-  const end = content.indexOf("\n---", 3);
-  if (end === -1) {
-    return {};
-  }
-  const out: Record<string, string> = {};
-  for (const line of content.slice(3, end).split(/\r?\n/)) {
-    const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (!match?.[1]) {
-      continue;
-    }
-    let value = (match[2] ?? "").trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[match[1]] = value;
-  }
-  return out;
 }
 
 // Scan one `.claude/skills` dir for `<skill>/SKILL.md`, parsing frontmatter.

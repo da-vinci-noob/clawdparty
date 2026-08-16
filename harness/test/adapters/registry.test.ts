@@ -135,7 +135,9 @@ describe("no adapter id appears outside providers/", () => {
     // MCP types out of `tools/` and `loop/`, which must not know that a tool came from a
     // subprocess. Matched as an IMPORT so a comment naming the rule is not a breach of it.
     const importers = sourceFiles(SRC)
-      .filter((path) => /from "@modelcontextprotocol\/sdk|import\(\s*"@modelcontextprotocol\/sdk/.test(read(path)))
+      .filter((path) =>
+        /from "@modelcontextprotocol\/sdk|import\(\s*"@modelcontextprotocol\/sdk/.test(read(path)),
+      )
       .map((path) => path.slice(SRC.length))
       .sort();
 
