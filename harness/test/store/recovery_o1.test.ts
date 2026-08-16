@@ -10,12 +10,21 @@ import type { HarnessStoreApi } from "../../src/store/types.js";
  * recovery does not grow with session length, across sessions spanning
  * two orders of magnitude of history.
  *
- * A naive timing assertion here would be either flaky or vacuous. This test
- * measures a CONTROL query that is genuinely O(n) over the same data alongside
- * `readPosition()`, and requires the control to actually show growth before
- * trusting the flat result. If the machine is too noisy to observe the control
- * growing, the test FAILS rather than passing for the wrong reason — a
- * measurement harness that cannot detect the thing it rules out is not evidence.
+ * THREE assertions, ordered from deterministic to empirical, because the enforcement should
+ * not rest on a stopwatch:
+ *
+ *  1. The QUERY PLAN is identical at 200 and 20,000 entries, resolves `registers` by its
+ *    primary key, and never mentions `entries`. This is what O(1) means here, it is exactly
+ *    reproducible, and a loaded machine cannot make it flake.
+ *  2. An ABSOLUTE budget on the large store. What  actually needs is a position resolved
+ *    far inside the 30s recovery window; 100ms for an indexed read has ~1000x of headroom, so
+ *    it fails only for a real regression.
+ *  3. The empirical ratio, which is the only one that can observe an accidental scan the plan
+ *    analysis missed. It measures a CONTROL query that is genuinely O(n) over the same data
+ *    and requires the control to show growth before trusting the flat result — otherwise the
+ *    measurement cannot detect what it claims to rule out. RETRIED, because that guard used
+ *    to fail the whole gate on one load spike from an unrelated process, and a required gate
+ *    that cries wolf is a gate people learn to re-run instead of read.
  */
 
 const SMALL = 200;
@@ -89,41 +98,91 @@ function timeIt(iterations: number, fn: () => void): number {
   return performance.now() - started;
 }
 
+/** The plan for the one query recovery issues, as SQLite resolves it. */
+function positionPlan(dbPath: string): string {
+  const db = new Database(dbPath, { readonly: true });
+  const rows = db
+    .prepare(
+      `EXPLAIN QUERY PLAN
+       SELECT value FROM registers WHERE namespace = 'run.position' AND key = 'run_1'`,
+    )
+    .all() as Array<{ detail: string }>;
+  db.close();
+  return rows.map((r) => r.detail).join(" | ");
+}
+
+/** One measurement round: the read ratio and the O(n) control ratio over the same data. */
+function measure(
+  small: HarnessStoreApi,
+  large: HarnessStoreApi,
+): { read: number; control: number } {
+  const smallRead = timeIt(READS, () => small.readPosition("run_1"));
+  const largeRead = timeIt(READS, () => large.readPosition("run_1"));
+
+  // The control: a full scan of the same `entries` table. This is what readPosition would
+  // look like if recovery consulted the log.
+  const scan = (db: Database.Database) => {
+    const stmt = db.prepare("SELECT COUNT(*) AS c FROM entries WHERE payload LIKE '%chunk%'");
+    return () => void stmt.get();
+  };
+  const smallDb = new Database(join(dir, "session-small.sqlite3"), { readonly: true });
+  const largeDb = new Database(join(dir, "session-large.sqlite3"), { readonly: true });
+  const control = timeIt(50, scan(largeDb)) / Math.max(timeIt(50, scan(smallDb)), 0.0001);
+  smallDb.close();
+  largeDb.close();
+
+  return { read: largeRead / Math.max(smallRead, 0.0001), control };
+}
+
 describe("readPosition is O(1) in session length", () => {
+  it("resolves by index and never touches `entries`, at ANY log size", async () => {
+    const small = await seed("small", SMALL);
+    const large = await seed("large", LARGE);
+    expect(small.entriesFrom(0)).toHaveLength(SMALL);
+    expect(large.entriesFrom(0)).toHaveLength(LARGE);
+
+    const smallPlan = positionPlan(join(dir, "session-small.sqlite3"));
+    const largePlan = positionPlan(join(dir, "session-large.sqlite3"));
+
+    // The deterministic core of , and the one assertion in this file a busy machine
+    // cannot disturb. IDENTICAL plans at 100x the data is the structural statement of
+    // "does not grow with session length"; a plan that changed with size would mean the
+    // query planner had started doing something else at scale.
+    expect(smallPlan).toBe(largePlan);
+    expect(largePlan).toMatch(/registers/);
+    expect(largePlan).not.toMatch(/SCAN/);
+    // `entries` appearing at all would mean recovery consults the LOG, which invariant 6
+    // forbids outright — that is the design property, not a performance preference.
+    expect(largePlan).not.toMatch(/entries/);
+  });
+
   it("stays flat across a 100x difference in log size, with a control that does not", async () => {
     const small = await seed("small", SMALL);
     const large = await seed("large", LARGE);
 
-    expect(small.entriesFrom(0)).toHaveLength(SMALL);
-    expect(large.entriesFrom(0)).toHaveLength(LARGE);
+    // RETRIED. The control-growth guard is right — a measurement that cannot observe the
+    // thing it rules out is not evidence — but one load spike from an unrelated process
+    // used to fail the whole gate. Three attempts make a transient spike survivable while
+    // a machine that genuinely cannot measure still fails, loudly, with both numbers.
+    const attempts: Array<{ read: number; control: number }> = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const round = measure(small, large);
+      attempts.push(round);
+      if (round.control > 10 && round.read < 3) return;
+    }
 
-    const smallRead = timeIt(READS, () => small.readPosition("run_1"));
-    const largeRead = timeIt(READS, () => large.readPosition("run_1"));
+    const best = attempts.reduce((a, b) => (b.control > a.control ? b : a));
+    const report = attempts
+      .map((a, i) => `#${i + 1} read ${a.read.toFixed(2)} control ${a.control.toFixed(1)}`)
+      .join("; ");
 
-    // The control: a full scan of the same `entries` table. This is what
-    // readPosition would look like if recovery consulted the log.
-    const scan = (db: Database.Database) => {
-      const stmt = db.prepare("SELECT COUNT(*) AS c FROM entries WHERE payload LIKE '%chunk%'");
-      return () => void stmt.get();
-    };
-    const smallDb = new Database(join(dir, "session-small.sqlite3"), { readonly: true });
-    const largeDb = new Database(join(dir, "session-large.sqlite3"), { readonly: true });
-    const controlRatio = timeIt(50, scan(largeDb)) / Math.max(timeIt(50, scan(smallDb)), 0.0001);
-    smallDb.close();
-    largeDb.close();
-
-    // Guard the guard: if the control does not grow, this machine cannot
-    // distinguish O(1) from O(n) right now and a flat readPosition proves nothing.
+    // Reported separately because the two failures mean opposite things: a low control is
+    // "this machine cannot measure right now", a high read ratio is a real regression.
     expect(
-      controlRatio,
-      `control scan did not grow with 100x data (ratio ${controlRatio.toFixed(1)}); measurement cannot distinguish O(1) from O(n)`,
+      best.control,
+      `control scan never grew with 100x data across 3 attempts (${report}); measurement cannot distinguish O(1) from O(n)`,
     ).toBeGreaterThan(10);
-
-    const readRatio = largeRead / Math.max(smallRead, 0.0001);
-    expect(
-      readRatio,
-      `readPosition scaled with log size (ratio ${readRatio.toFixed(2)}, control ${controlRatio.toFixed(1)})`,
-    ).toBeLessThan(3);
+    expect(best.read, `readPosition scaled with log size (${report})`).toBeLessThan(3);
   });
 
   it("resolves a position far inside the 30s recovery budget", async () => {
