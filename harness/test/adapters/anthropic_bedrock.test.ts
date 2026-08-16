@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AnthropicBedrockAdapter } from "../../src/providers/anthropic_bedrock.js";
 import { listProviders } from "../../src/providers/discovery.js";
@@ -253,6 +254,26 @@ describe("the AWS profile decides whose account pays", () => {
     expect(
       new AnthropicBedrockAdapter({ env: { AWS_REGION: REGION } }).profileForTest(),
     ).toBeUndefined();
+  });
+
+  it("uses ONE credential path — discovery and inference cannot diverge", () => {
+    const body = readFileSync(
+      new URL("../../src/providers/anthropic_bedrock.ts", import.meta.url),
+      "utf8",
+    );
+
+    // A source assertion because the failure is invisible behaviourally: with two credential
+    // paths the control plane resolved the AMBIENT chain while requests used the named
+    // profile, so on a host with several profiles the picker listed one account's models and
+    // runs executed against another. The symptom is a model that appears in the dropdown and
+    // then 404s — indistinguishable from the namespace bug fixed earlier.
+    //
+    // Asserted on the CALL, not the bare name: `listInferenceProfiles` appears in its own
+    // definition and in this comment, and a guard that flags its own documentation gets
+    // deleted.
+    expect(body).toMatch(/listInferenceProfiles\(this\.region\(\), this\.awsProfile\)/);
+    // The control-plane client must take the profile too, not just the inference client.
+    expect(body).toMatch(/new BedrockClient\(\{[\s\S]*?credentials: fromIni\(\{ profile \}\)/);
   });
 
   it("is REPORTED as available once a credential and region are present", async () => {

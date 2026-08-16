@@ -264,7 +264,8 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
    * a path production never takes.
    */
   private async profiles(): Promise<Array<{ id: string; displayName: string }>> {
-    const source = this.injectedListProfiles ?? (() => listInferenceProfiles(this.region()));
+    const source =
+      this.injectedListProfiles ?? (() => listInferenceProfiles(this.region(), this.awsProfile));
     let found: Array<{ id: string; displayName: string }>;
     try {
       found = await source();
@@ -297,9 +298,18 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
  */
 async function listInferenceProfiles(
   region: string | undefined,
+  profile: string | undefined,
 ): Promise<Array<{ id: string; displayName: string }>> {
   const { BedrockClient, ListInferenceProfilesCommand } = await import("@aws-sdk/client-bedrock");
-  const client = new BedrockClient({ region });
+  // The SAME profile the inference client uses. Without this the control plane resolved the
+  // AMBIENT chain while requests resolved the named profile, so on a host with several
+  // profiles the picker listed one account's models and runs executed against another — a
+  // model that appears in the dropdown and then 404s at dispatch, which is the exact symptom the
+  // partner-operated/Claude-Platform mix-up produced, reproduced by a different cause.
+  const client = new BedrockClient({
+    region,
+    ...(profile ? { credentials: fromIni({ profile }) } : {}),
+  });
   const out: Array<{ id: string; displayName: string }> = [];
   let nextToken: string | undefined;
 
