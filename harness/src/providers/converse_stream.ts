@@ -224,7 +224,12 @@ function verbatim(block: OpenBlock): unknown {
   if (block.kind === "thinking") {
     return {
       reasoningContent: block.redacted
-        ? { redactedContent: block.redacted }
+        ? // Tagged base64, NOT the raw Uint8Array. The surface is stored as JSON, and
+          // `JSON.stringify` turns a Uint8Array into `{"0":114,…}` — 8KB per turn for a 900-byte
+          // block, and a shape nothing can decode, so the bytes were silently unusable. These
+          // bytes ARE echoed back (measured: Bedrock accepts them, and the turn then reuses the
+          // reasoning instead of re-deriving it), which requires them to survive storage.
+          { redactedContent: { __bytes_b64: Buffer.from(block.redacted).toString("base64") } }
         : { reasoningText: { text: block.text } },
     };
   }

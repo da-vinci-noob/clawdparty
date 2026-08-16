@@ -326,7 +326,9 @@ describe("PromptComposer permission modes", () => {
       http.get("/api/models", () => {
         const body = providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]);
         for (const m of body.providers[0]?.models ?? []) {
-          delete (m.capabilities as { toolUseWhileStreaming?: boolean }).toolUseWhileStreaming;
+          // `undefined` rather than `delete`: JSON.stringify omits the key, so the response body
+          // on the wire is the pre-1.6 shape this asserts against.
+          (m.capabilities as { toolUseWhileStreaming?: boolean }).toolUseWhileStreaming = undefined;
         }
         return HttpResponse.json(body);
       }),

@@ -134,20 +134,21 @@ describe("encrypted reasoning", () => {
     expect(events.some((e) => e.t === "thinking_delta")).toBe(false);
   });
 
-  it("still opens and closes the block, carrying the bytes verbatim", async () => {
+  it("still opens and closes the block, carrying the bytes as storable base64", async () => {
     const events = await collect("openai-text");
     const thinking = events.find((e) => e.t === "block_start" && e.kind === "thinking");
     const stops = events.filter(
       (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
     );
     const redacted = stops
-      .map((s) => s.block as { reasoningContent?: { redactedContent?: Uint8Array } })
+      .map((s) => s.block as { reasoningContent?: { redactedContent?: { __bytes_b64?: string } } })
       .find((b) => b.reasoningContent?.redactedContent);
 
-    // The bytes are the provider's own carrier for reasoning state across turns, so they have
-    // to survive into the surface unmodified (R6) even though nothing renders them.
+    // The bytes are the provider's own carrier for reasoning state across turns, so they have to
+    // survive into the surface (R6) even though nothing renders them — which means surviving
+    // JSON, where a raw Uint8Array does not.
     expect(thinking).toBeDefined();
-    expect(redacted?.reasoningContent?.redactedContent).toBeInstanceOf(Uint8Array);
+    expect(redacted?.reasoningContent?.redactedContent?.__bytes_b64).toBeTypeOf("string");
   });
 
   it("gives the visible answer its own separate block", async () => {

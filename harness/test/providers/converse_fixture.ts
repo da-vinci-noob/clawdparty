@@ -30,7 +30,8 @@ export type ConverseScenario =
   | "openai-tool-use"
   | "nova-text"
   | "nova-tool-use"
-  | "nova-max-tokens";
+  | "nova-max-tokens"
+  | "deepseek-reasoning";
 
 export const SCENARIOS: ConverseScenario[] = [
   "openai-text",
@@ -38,6 +39,7 @@ export const SCENARIOS: ConverseScenario[] = [
   "nova-text",
   "nova-tool-use",
   "nova-max-tokens",
+  "deepseek-reasoning",
 ];
 
 function rehydrate(value: unknown): unknown {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Capture REAL Bedrock ConverseStream transcripts, so the Converse→ProviderEvent mapper
-// is written against bytes Bedrock actually sent rather than bytes its documentation
-// describes.
+// Capture REAL Bedrock ConverseStream transcripts, so the Converse→ProviderEvent mapper is
+// written against bytes Bedrock actually sent rather than bytes its documentation describes.
 //
-//   node --import tsx scripts/capture_converse.ts            # print a summary
-//   node --import tsx scripts/capture_converse.ts --write     # write the fixtures
+//   node --import tsx scripts/capture_converse.ts                    # print a summary
+//   node --import tsx scripts/capture_converse.ts --write            # write the fixtures
+//   node --import tsx scripts/capture_converse.ts --write --only=x   # just scenario x
 //
 // WHY A LIVE CAPTURE. An earlier version asserted that OpenAI models on Bedrock go
 // through the OpenAI-compatible Chat Completions surface and that each model family
@@ -117,6 +117,20 @@ const SCENARIOS: Scenario[] = [
     toolConfig: TOOL_CONFIG,
     maxTokens: 200,
   },
+  {
+    name: "deepseek-reasoning",
+    // The third reasoning carrier: PLAINTEXT `reasoningContent.text` deltas, which
+    // neither OpenAI (encrypted bytes) nor Nova (inline <thinking> in ordinary text) produce.
+    // No toolConfig — R1 supports no tools on Bedrock at all.
+    modelId: "us.deepseek.r1-v1:0",
+    messages: [
+      { role: "user", content: [{ text: "What is 17 * 3? Answer with just the number." }] },
+    ],
+    // R1 reasons at length and reasoning bills the SAME output budget as the answer, so a
+    // budget tuned for a one-word reply spends it all thinking and returns no answer — 300
+    // produced 947 characters of reasoning and empty text.
+    maxTokens: 800,
+  },
 ];
 
 interface Capture {
@@ -207,7 +221,10 @@ async function main(): Promise<void> {
     mkdirSync(FIXTURE_DIR, { recursive: true });
   }
 
-  for (const scenario of SCENARIOS) {
+  // Re-capturing every scenario to add one rewrites four fixtures with different model text,
+  // which buries the new file in noise. `--only=` narrows it.
+  const only = process.argv.find((a) => a.startsWith("--only="))?.slice("--only=".length);
+  for (const scenario of SCENARIOS.filter((s) => !only || s.name === only)) {
     let result: Capture;
     try {
       result = await capture(client, scenario, region);

@@ -72,3 +72,33 @@ describe("TextBlock (markdown rendering)", () => {
     expect(screen.getByTestId("feed-text")).toHaveTextContent("plain paragraph");
   });
 });
+
+describe("reasoning narrated inside the answer", () => {
+  // Nova's whole visible turn, from the committed Bedrock capture. Rendered as-is it showed the
+  // participant the model's monologue wrapped in XML and called it the answer.
+  const NOVA =
+    "<thinking>The User has asked to read the contents of a file located at /tmp/notes.txt. " +
+    "I will use the `read_file` tool.</thinking>\n";
+
+  it("moves an inline <thinking> span into a reasoning block", () => {
+    render(<TextBlock event={aiText(NOVA)} />);
+
+    expect(screen.getByTestId("feed-thinking")).toHaveTextContent("read the contents of a file");
+    expect(screen.queryByTestId("feed-text")).toBeNull();
+  });
+
+  it("still renders the answer as markdown alongside it", () => {
+    render(<TextBlock event={aiText("<thinking>weighing</thinking>The answer is **4**.")} />);
+
+    expect(screen.getByTestId("feed-thinking")).toHaveTextContent("weighing");
+    const answer = screen.getByTestId("feed-text");
+    expect(answer).toHaveTextContent("The answer is 4.");
+    expect(answer).not.toHaveTextContent("**4**");
+  });
+
+  it("leaves text with no reasoning span on the single-markdown path", () => {
+    render(<TextBlock event={aiText("just **an answer**")} />);
+    expect(screen.queryByTestId("feed-thinking")).toBeNull();
+    expect(screen.getByTestId("feed-text")).toHaveTextContent("just an answer");
+  });
+});

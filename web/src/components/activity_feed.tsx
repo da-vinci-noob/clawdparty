@@ -7,6 +7,7 @@ import { RawFallback } from "./feed/raw_fallback";
 import { RecoveryAppliedRow } from "./feed/recovery_applied_row";
 import { RunBanner } from "./feed/run_banner";
 import { ShimmerLoader } from "./feed/shimmer_loader";
+import { StreamingText } from "./feed/streaming_text";
 import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
 import { ThinkingBlock } from "./feed/thinking_block";
@@ -124,19 +125,8 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
         </div>
       ))}
       {[...textByBlock.entries()].map(([block, text]) => (
-        <div
-          key={`live-${block}`}
-          data-testid="feed-streaming-text"
-          className="pl-[26px] text-[13px] text-[#cdd2cd]"
-        >
-          {text}
-          <span
-            className="ml-[1px] inline-block h-[14px] w-[8px] translate-y-[2px] bg-[#3b9dff]"
-            style={{
-              animation: "cp-blink 1.1s step-end infinite",
-              boxShadow: "0 0 8px rgba(59,157,255,.5)",
-            }}
-          />
+        <div key={`live-${block}`} className="space-y-2">
+          <StreamingText text={text} />
         </div>
       ))}
       {/* Claude is working whenever a run is live OR one has been submitted and has not spoken

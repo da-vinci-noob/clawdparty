@@ -113,19 +113,35 @@ function translateBlock(block: unknown): ContentBlock | null {
     return { toolUse: b.toolUse } as ContentBlock;
   }
   if (b.reasoningContent) {
-    const reasoning = b.reasoningContent as { reasoningText?: unknown; redactedContent?: unknown };
-    // Plain reasoning text can echo back; encrypted bytes cannot — a Uint8Array does not
-    // survive JSON storage as itself, and Bedrock rejects a malformed reasoningContent.
-    // Reasoning is not required for a valid follow-up turn, so a redacted block is dropped.
-    if (reasoning.reasoningText) {
-      return { reasoningContent: { reasoningText: reasoning.reasoningText } } as ContentBlock;
-    }
-    return null;
+    // The echo rules are the OPPOSITE of what the two shapes suggest, and both were measured.
+    // ENCRYPTED bytes are accepted and worth sending: the echoing turn reuses the
+    // reasoning state instead of re-deriving it. PLAINTEXT reasoning is refused outright —
+    // `ValidationException: User messages cannot contain reasoning content` from DeepSeek R1,
+    // against a control turn without it that answered — so echoing it breaks turn two.
+    const reasoning = b.reasoningContent as { redactedContent?: unknown };
+    const bytes = decodeBytes(reasoning.redactedContent);
+    return bytes ? ({ reasoningContent: { redactedContent: bytes } } as ContentBlock) : null;
   }
 
   // Unknown shape: dropping it is safer than forwarding something Bedrock rejects, and the
   // durable record still holds the original verbatim.
   return null;
+}
+
+/**
+ * Encrypted reasoning bytes from the surface, or null when there are none to send.
+ *
+ * `converse_stream` stores them as `{__bytes_b64}` so they survive JSON storage. A surface
+ * written before that carries `{"0":114,…}` — the numeric-key wreckage of a stringified
+ * Uint8Array — and is DROPPED rather than reassembled: Bedrock rejects a malformed
+ * reasoningContent, and a turn without its reasoning still runs.
+ */
+function decodeBytes(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value.length > 0 ? value : null;
+  const tagged = (value ?? {}) as { __bytes_b64?: unknown };
+  if (typeof tagged.__bytes_b64 !== "string" || tagged.__bytes_b64 === "") return null;
+  const bytes = new Uint8Array(Buffer.from(tagged.__bytes_b64, "base64"));
+  return bytes.length > 0 ? bytes : null;
 }
 
 /**

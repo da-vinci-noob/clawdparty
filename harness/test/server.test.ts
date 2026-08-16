@@ -249,6 +249,10 @@ describe("Fastify server (supervisor-backed)", () => {
     await app.close();
   });
 
+  // 20s, not the 5s default: this route runs REAL provider discovery, so on a host with Bedrock
+  // credentials it enumerates the live catalogue and takes seconds. It flaked once the suite grew
+  // enough to contend for CPU — a timeout that depends on how many other tests are running is a
+  // false red. (In CI there are no credentials, so every probe short-circuits.)
   it("GET /models returns the per-provider shape, never a bare array", async () => {
     const app = buildServer(supervisor, CONFIG);
     const res = await app.inject({ method: "GET", url: "/models", headers: AUTH });
@@ -261,7 +265,7 @@ describe("Fastify server (supervisor-backed)", () => {
     expect(body.providers.length).toBeGreaterThan(0);
     expect(body.providers[0]).toHaveProperty("available");
     await app.close();
-  });
+  }, 20_000);
 
   it("GET /sessions/:id/entries serves the PROJECTION, withholding store-only rows", async () => {
     const app = buildServer(supervisor, CONFIG);

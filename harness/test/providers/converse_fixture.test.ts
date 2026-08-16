@@ -25,7 +25,7 @@ describe("every scenario was captured from a real stream", () => {
       const capture = loadCapture(scenario);
 
       expect(capture.events.length).toBeGreaterThan(3);
-      expect(capture.provenance.model_id).toMatch(/^us\.(openai|amazon)\./);
+      expect(capture.provenance.model_id).toMatch(/^us\.(openai|amazon|deepseek)\./);
       expect(capture.provenance.region).toBe("us-west-2");
       // A fixture with no provenance is a fixture nobody can re-derive or date.
       expect(Date.parse(capture.provenance.captured_at)).not.toBeNaN();

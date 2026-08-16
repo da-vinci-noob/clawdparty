@@ -222,11 +222,9 @@ describe("the assistant's own prior turn (Converse-shaped blocks, verbatim)", ()
     expect(messagesOf(input)[0]?.content).toEqual([toolUse]);
   });
 
-  it("drops a redacted-reasoning block rather than sending bytes that will not round-trip", () => {
-    // The encrypted reasoning was stored verbatim, but a Uint8Array does not survive JSON
-    // storage as a Uint8Array, and Bedrock rejects a malformed reasoningContent. Reasoning is
-    // not required to echo for the next turn to be valid, so dropping it is the safe choice —
-    // and it is recorded here so the decision is visible, not accidental.
+  it("echoes redacted reasoning back as bytes, and drops plaintext reasoning", () => {
+    // Both rules are measured, and both invert the shapes' apparent echoability — see
+    // `reasoning_carriers.test.ts` for the matrix and the exact Bedrock responses.
     const input = toConverseInput(
       req({
         messages: [
@@ -234,13 +232,17 @@ describe("the assistant's own prior turn (Converse-shaped blocks, verbatim)", ()
             role: "assistant",
             content: [
               { reasoningContent: { redactedContent: { __bytes_b64: "AAAA" } } },
+              { reasoningContent: { reasoningText: { text: "thought" } } },
               { text: "answer" },
             ],
           },
         ],
       }),
     );
-    expect(messagesOf(input)[0]?.content).toEqual([{ text: "answer" }]);
+    expect(messagesOf(input)[0]?.content).toEqual([
+      { reasoningContent: { redactedContent: new Uint8Array([0, 0, 0]) } },
+      { text: "answer" },
+    ]);
   });
 });
 
@@ -283,14 +285,14 @@ describe("a full multi-turn exchange", () => {
   });
 
   it("never emits an empty content array for a message", () => {
-    // A message whose only block was dropped (e.g. redacted reasoning) would leave empty
-    // content, which Bedrock rejects. Such a message is omitted entirely.
+    // A message whose only block was dropped (plaintext reasoning, or a shape from another
+    // provider) would leave empty content, which Bedrock rejects. Such a message is omitted.
     const input = toConverseInput(
       req({
         messages: [
           {
             role: "assistant",
-            content: [{ reasoningContent: { redactedContent: { __bytes_b64: "AA" } } }],
+            content: [{ reasoningContent: { reasoningText: { text: "only thought" } } }],
           },
           { role: "user", content: [{ type: "text", text: "still here" }] },
         ],
