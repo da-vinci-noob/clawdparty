@@ -85,19 +85,39 @@ module Git
     # Approve path: commit everything in the worktree onto the session branch so
     # the accepted changeset is PRESERVED and the tree returns CLEAN (a fresh run
     # requires a clean tree; without this, approve left the tree dirty and blocked
-    # the next run). No-op on a clean tree. A fixed clawdparty identity so the
-    # commit never fails on missing git config; `--no-verify` skips the TARGET
-    # repo's pre-commit/commit-msg hooks — this is clawdparty's internal approval
-    # commit on an isolated session branch, and the repo's dev hooks (e.g. the
-    # pre-commit framework) are not installed in the container and would abort it.
+    # the next run). No-op on a clean tree. `--no-verify` skips the TARGET repo's
+    # pre-commit/commit-msg hooks — this is clawdparty's internal approval commit on
+    # an isolated session branch, and the repo's dev hooks (e.g. the pre-commit
+    # framework) are not installed in the container and would abort it.
     # Returns the (new) HEAD sha.
-    def commit!(message)
+    #
+    # `author` is the APPROVING participant. Identity is passed with `-c`
+    # rather than read from git config, so the commit never fails on a host with no
+    # user.name configured.
+    def commit!(message, author: nil)
       return base_sha unless dirty?
 
+      name, email = author_identity(author)
       run_git!('add', '-A', dir: worktree_path)
-      run_git!('-c', 'user.name=clawdparty', '-c', 'user.email=clawdparty@local',
+      run_git!('-c', "user.name=#{name}", '-c', "user.email=#{email}",
                'commit', '--no-verify', '-m', message, dir: worktree_path)
       base_sha
+    end
+
+    # Who the commit is attributed to. Both author AND committer get this identity:
+    # a reader should not have to know git's author/committer distinction to answer
+    # "who approved this", and in this product approval is the act that matters.
+    #
+    # The address is derived from the PARTICIPANT ID, not the name: names are neither
+    # unique nor guaranteed to be valid in an address, while the id maps a commit back
+    # to exactly one participant row. `.local` marks it as internal rather than
+    # reachable. Falls back to the generic identity when the approver is unknown —
+    # nothing else in the system requires one, and failing the commit would strand an
+    # approved changeset.
+    def author_identity(participant)
+      return ['clawdparty', 'clawdparty@local'] if participant.nil?
+
+      [participant.user.name, "participant-#{participant.id}@clawdparty.local"]
     end
 
     def worktree_exists?

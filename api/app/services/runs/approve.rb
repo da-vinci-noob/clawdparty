@@ -22,7 +22,10 @@ module Runs
     def call
       raise(NotReviewable) unless @run.status == 'awaiting_review'
 
-      @worktree.commit!("clawdparty: approved changeset for run #{@run.id}")
+      # the commit records WHO approved it. The event stream already names the
+      # approver, but a commit outlives this database — someone reading `git log` in
+      # six months must be able to see who accepted the change without it.
+      @worktree.commit!("clawdparty: approved changeset for run #{@run.id}", author: @reviewed_by)
       Events::Append.call(
         session: @run.session,
         event: {

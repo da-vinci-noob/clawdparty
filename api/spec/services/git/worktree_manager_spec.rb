@@ -80,6 +80,61 @@ RSpec.describe(Git::WorktreeManager) do
     expect(show).to(include('approved.rb'))
   end
 
+  describe 'commit attribution' do
+    it 'attributes the commit to the approving participant' do
+      participant = create(:participant, session: session, role: 'reviewer')
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'approved.rb'), "kept = true\n")
+
+      manager.commit!('approve changeset', author: participant)
+
+      author, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%an|%ae|%cn|%ce')
+      name, email, committer_name, committer_email = author.strip.split('|')
+      expect(name).to(eq(participant.user.name))
+      # Author AND committer: a reader should not need git's author/committer
+      # distinction to answer "who approved this".
+      expect(committer_name).to(eq(participant.user.name))
+      expect(email).to(eq("participant-#{participant.id}@clawdparty.local"))
+      expect(committer_email).to(eq(email))
+    end
+
+    it 'derives the address from the participant ID, not the name' do
+      # Names are neither unique nor guaranteed valid in an address; the id maps the
+      # commit back to exactly one participant row.
+      user = create(:user, name: 'Ada Lovelace <not an email>')
+      participant = create(:participant, session: session, user: user, role: 'reviewer')
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      manager.commit!('approve', author: participant)
+
+      email, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%ae')
+      expect(email.strip).to(eq("participant-#{participant.id}@clawdparty.local"))
+    end
+
+    it 'falls back to the generic identity rather than failing when the approver is unknown' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      # Failing here would strand an APPROVED changeset in a dirty worktree, blocking
+      # the next run — worse than an unattributed commit.
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+      name, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%an')
+      expect(name.strip).to(eq('clawdparty'))
+    end
+
+    it 'does not read the host git config for identity' do
+      # Passed with `-c` so a host with no user.name configured still commits. Without
+      # it, approve fails with "Please tell me who you are" on a fresh machine.
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+      Open3.capture3('git', '-C', path, 'config', '--unset', 'user.name')
+      Open3.capture3('git', '-C', path, 'config', '--unset', 'user.email')
+
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+    end
+  end
+
   it 'commit! is a no-op on a clean worktree (returns HEAD)' do
     manager.ensure_worktree!
     expect { manager.commit!('nothing') }.not_to(raise_error)

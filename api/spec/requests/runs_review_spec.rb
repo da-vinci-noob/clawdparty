@@ -28,6 +28,20 @@ RSpec.describe('Run review (approve / reject)') do
       expect(run.reviewed_by_id).to(eq(participant.id))
     end
 
+    it 'passes the APPROVING participant to the commit, not just the run' do
+      participant = join_as(session, role: 'reviewer')
+      run = awaiting_run
+
+      # The wiring is the gap worth pinning: `commit!` attributing correctly means
+      # nothing if the caller never hands it the approver. A bare
+      # `receive(:commit!)` above passes either way.
+      expect_any_instance_of(Git::WorktreeManager)
+        .to(receive(:commit!).with(anything, author: participant))
+
+      post("/api/runs/#{run.id}/approve")
+      expect(response).to(have_http_status(:ok))
+    end
+
     %w[editor reviewer].each do |role|
       it "lets a #{role} approve an awaiting_review run (200 + approved + event + commit)" do
         participant = join_as(session, role: role)
