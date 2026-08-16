@@ -1,4 +1,5 @@
-import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
+import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
+import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { dedupeByModel, inferContextWindow } from "../models.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
 import type {
@@ -13,40 +14,23 @@ import type {
 import { type Discovery, discoverAwsCredential } from "./credentials/discover.js";
 
 /**
- * QUARANTINED — this adapter cannot complete a run, and offering it violates.
- *
- * It mixes two model-id namespaces. `listModels()` enumerates the AWS control plane, which
- * returns Bedrock INFERENCE-PROFILE ids (`global.anthropic.claude-opus-5`); `stream()` posts
- * to the Mantle endpoint, which is **Claude Platform on AWS** and takes BARE first-party ids
- * (`claude-opus-5`). A run therefore 404s with `not_found_error` on a model the picker just
- * offered.
- *
- * The deeper error is product identity, and the capability table below inherits it: Claude
- * Platform on AWS is Anthropic-operated with same-day API parity, while Amazon Bedrock is
- * partner-operated with a feature subset. They are different products that coexist. So every
- * capability declared false below — web search, web fetch, code execution, automatic prompt
- * caching, the Models API — is actually AVAILABLE on the platform this client talks to.
- * The spike write-up's R3 paired the Mantle client with Bedrock's id form in one row, and R4
- * researched the Bedrock column; both are being corrected.
- *
- * Reported unavailable rather than deleted: the code is nearly right for whichever product
- * the adapter ends up serving, and  wants an unavailable provider REPORTED with a remedy rather
- * than omitted. Set `HARNESS_ENABLE_AWS_PROVIDER=1` to lift the quarantine, which is how the
- * spike verifies a namespace without editing this file.
- *
  * Amazon Bedrock, through the host's own AWS session.
  *
- * Uses the **Mantle** client, not the legacy `AnthropicBedrock` bedrock-runtime InvokeModel
- * path, and not the first-party client with a `baseURL` override — R3 is explicit that the
- * platform client is required. Only this file may import `@anthropic-ai/bedrock-sdk`.
+ * PARTNER-OPERATED Bedrock, not Claude Platform on AWS — those are two different products and
+ * an earlier version of this file conflated them. The distinction is load-bearing in
+ * three places:
  *
- * THE CAPABILITY GAP IS THE POINT (R4). Bedrock has no web search, no web fetch, no code
- * execution, no automatic prompt caching, no Models API, and no server-side refusal
- * fallback. Declaring that here is what lets the loop stay provider-agnostic: it reads
- * `capabilities()` and never special-cases an adapter id. The rejected alternative was a
- * lowest-common-denominator tool set, which would delete web search from first-party
- * sessions to accommodate Bedrock — paying for provider breadth in capability everyone
- * loses.
+ *  - **Client**: `AnthropicBedrock`, which moves `model` into the URL as
+ *    `/model/{id}/invoke`. That is where an inference-profile id belongs. The Mantle client
+ *    (Claude Platform on AWS) leaves `model` in the body and takes BARE first-party ids, so
+ *    sending a profile id there 404s with `not_found_error`.
+ *  - **Model ids**: `anthropic.`-prefixed cross-region inference profiles, enumerated from the
+ *    AWS control plane. This host's account lists them, which is the evidence it is on Bedrock.
+ *  - **Capabilities**: the feature SUBSET below is correct for Bedrock. The SDK says so itself
+ *    — "The Bedrock API does not currently support prompt caching, token counting or the Batch
+ *    API" (`bedrock-sdk/client.d.ts`).
+ *
+ * Only this file may import `@anthropic-ai/bedrock-sdk`.
  */
 
 /**
@@ -103,20 +87,21 @@ const DISCOVERY_FAILED =
   "cannot be guessed. Run `aws sso login`, check the region, and confirm the role has " +
   "Bedrock read access";
 
-/** Lifted by `HARNESS_ENABLE_AWS_PROVIDER=1`, so a test can exercise a namespace in place. */
-const QUARANTINE_REMEDY =
-  "This provider is disabled: its model ids come from the AWS control plane " +
-  "(`global.anthropic.…`) while its endpoint is Claude Platform on AWS, which takes bare ids " +
-  "(`claude-opus-5`) — so a run 404s on the model the picker offered. Use Anthropic (direct) " +
-  "or Anthropic (host login) meanwhile. Set HARNESS_ENABLE_AWS_PROVIDER=1 to try it anyway " +
-  "at your own risk.";
-
 export interface AnthropicBedrockOptions {
-  client?: AnthropicBedrockMantle;
+  client?: AnthropicBedrock;
   discovery?: Discovery;
   /** Injected so model discovery is testable without an AWS account. */
   listProfiles?: () => Promise<Array<{ id: string; displayName: string }>>;
   env?: Record<string, string | undefined>;
+  /**
+   * The AWS named profile this run authenticates with, e.g. `claude-code-sso`.
+   *
+   * A CONSTRUCTOR option rather than `process.env.AWS_PROFILE`, because the harness serves
+   * many sessions from one process: mutating the env to select a profile would race between
+   * concurrent runs and silently bill the wrong account. The legacy client has no
+   * `awsProfile` option (Mantle does), so this is applied through `providerChainResolver`.
+   */
+  awsProfile?: string;
 }
 
 export class AnthropicBedrockAdapter implements ProviderAdapter {
@@ -133,10 +118,11 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
       "the developer keeps `aws sso login` current.",
   };
 
-  private readonly injectedClient?: AnthropicBedrockMantle;
+  private readonly injectedClient?: AnthropicBedrock;
   private readonly injectedDiscovery?: Discovery;
   private readonly injectedListProfiles?: AnthropicBedrockOptions["listProfiles"];
   private readonly env: Record<string, string | undefined>;
+  private readonly awsProfile?: string;
   private capabilityCache = new Map<string, Capabilities>();
 
   constructor(opts: AnthropicBedrockOptions = {}) {
@@ -144,6 +130,8 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
     this.injectedDiscovery = opts.discovery;
     this.injectedListProfiles = opts.listProfiles;
     this.env = opts.env ?? process.env;
+    // Explicit option first, then the host default. Never mutated onto the process.
+    this.awsProfile = opts.awsProfile ?? this.env.HARNESS_AWS_PROFILE ?? this.env.AWS_PROFILE;
   }
 
   /**
@@ -157,13 +145,6 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
    * remedy below names SSO expiry up front for exactly that case.
    */
   async probe(): Promise<ProbeResult> {
-    // a participant must not be offered a model the host cannot serve, and right now
-    // this adapter cannot serve any of the ones it lists. Checked BEFORE the credential, so a
-    // developer with a perfectly good AWS session is told the real reason.
-    if (!this.quarantineLifted()) {
-      return { available: false, reason: "not_entitled", remedy: QUARANTINE_REMEDY };
-    }
-
     const discovery = this.discover();
     if (!discovery.usable) {
       return {
@@ -230,9 +211,15 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
     yield* mapAnthropicStream(stream as unknown as RawStream);
   }
 
-  private quarantineLifted(): boolean {
-    const flag = this.env.HARNESS_ENABLE_AWS_PROVIDER;
-    return flag === "1" || flag === "true";
+  /**
+   * The resolved profile, for tests.
+   *
+   * Exposed because the alternative is asserting on a constructed vendor client, which would
+   * mean reaching into the SDK's internals — and the property under test is the RESOLUTION
+   * order, not the client.
+   */
+  profileForTest(): string | undefined {
+    return this.awsProfile;
   }
 
   private discover(): Discovery {
@@ -244,19 +231,26 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   }
 
   /**
-   * Constructed from the DISCOVERED source. `awsProfile` is passed EXPLICITLY when that is
-   * what won, rather than letting the default credential chain resolve silently — the run
-   * records which source it used, and a client that picked a different one would make that
-   * record false.
+   * Constructed to authenticate as the NAMED PROFILE when there is one, rather than letting
+   * the default credential chain resolve silently — the run records which source it used, and
+   * a client that picked a different one would make that record false.
+   *
+   * `providerChainResolver` is the only per-client seam for this: the legacy Bedrock client
+   * takes static keys or the ambient chain and has no `awsProfile` option. `fromIni` resolves a
+   * named profile including the SSO flow, so an `aws sso login` session works without the
+   * harness handling a token itself.
    */
-  private client(): AnthropicBedrockMantle {
+  private client(): AnthropicBedrock {
     if (this.injectedClient) return this.injectedClient;
-    const discovery = this.discover();
     const awsRegion = this.region();
+    const profile = this.awsProfile;
 
-    return discovery.source === "env:AWS_PROFILE"
-      ? new AnthropicBedrockMantle({ awsRegion, awsProfile: this.env.AWS_PROFILE })
-      : new AnthropicBedrockMantle({ awsRegion });
+    return profile
+      ? new AnthropicBedrock({
+          awsRegion,
+          providerChainResolver: () => Promise.resolve(fromIni({ profile })),
+        })
+      : new AnthropicBedrock({ awsRegion });
   }
 
   /**

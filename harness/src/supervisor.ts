@@ -4,7 +4,7 @@ import { ExtensionRegistry } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
-import { ADAPTER_IDS, adapterById } from "./providers/index.js";
+import { ADAPTER_IDS, adapterById, buildAdapters } from "./providers/index.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
 import { afterCursorToFrom, openStore } from "./store/store.js";
 import type { Entry, HarnessStoreApi } from "./store/types.js";
@@ -57,6 +57,14 @@ export interface StartRunInput {
   disallowed_tools?: string[];
   connectors?: string[];
   skills?: string[];
+  /**
+   * The AWS named profile a Bedrock run authenticates with, e.g. `claude-code-sso`.
+   *
+   * Per-run rather than per-process: which profile is used decides WHOSE ACCOUNT PAYS, so it
+   * belongs with the run that spends it and has to be recorded alongside the provider
+   *. Rails owner-gates the choice; the harness only honours it.
+   */
+  aws_profile?: string;
 }
 
 interface LiveRun {
@@ -179,7 +187,7 @@ export class Supervisor {
     }
 
     const store = await this.storeFor(input.session_id);
-    const adapter = this.adapterFor(input.provider);
+    const adapter = this.adapterFor(input.provider, input.aws_profile);
     const abort = new AbortController();
     const emit = (events: EventEnvelope[]) => this.ship(events, store);
     const loop = this.opts.buildLoop
@@ -320,12 +328,12 @@ export class Supervisor {
    * new arm per adapter — the exact shape  forbids in the loop and there is no reason
    * to tolerate one arm above it.
    */
-  private adapterFor(provider: string | undefined): ProviderAdapter {
+  private adapterFor(provider: string | undefined, awsProfile?: string): ProviderAdapter {
     const id = provider ?? DEFAULT_PROVIDER;
     const configured = this.opts.adapters?.[id];
     if (configured) return configured;
 
-    const adapter = adapterById(id);
+    const adapter = adapterById(id, buildAdapters({ awsProfile }));
     if (adapter) return adapter;
     // Named, never defaulted: running someone's prompt on a provider they did not choose
     // bills an account they did not pick.

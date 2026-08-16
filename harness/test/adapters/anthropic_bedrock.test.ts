@@ -11,7 +11,7 @@ import { TEXT_BLOCK, anthropicHarness, collect, fakeClient, lifecycle } from "./
  * a suite: the differences between providers should live in `capabilities()` and the
  * destination, not in which conformance rules a provider is excused from.
  *
- * `allowedHosts` is the regional Mantle endpoint, NOT api.anthropic.com. Assertion 11 is
+ * `allowedHosts` is the regional bedrock-runtime endpoint, NOT api.anthropic.com. Assertion 11 is
  * about DESTINATION: a credential travelling to the right provider is the job, and the same
  * credential travelling anywhere else is exfiltration — so declaring the wrong host here is
  * the mistake that assertion exists to catch.
@@ -19,7 +19,7 @@ import { TEXT_BLOCK, anthropicHarness, collect, fakeClient, lifecycle } from "./
 
 const REGION = "us-east-1";
 const TRANSPORT = {
-  url: `https://bedrock-mantle.${REGION}.api.aws/anthropic/v1/messages`,
+  url: `https://bedrock-runtime.${REGION}.amazonaws.com/model/anthropic.claude-opus-5/invoke-with-response-stream`,
   headers: () => ({
     // SigV4, not an Anthropic api key. The AWS session signs the request.
     authorization: "AWS4-HMAC-SHA256 Credential=not-a-real-credential",
@@ -43,7 +43,7 @@ const ENV = { AWS_REGION: REGION, HARNESS_ENABLE_AWS_PROVIDER: "1" };
 function harness() {
   return anthropicHarness({
     transport: TRANSPORT,
-    allowedHosts: [`bedrock-mantle.${REGION}.api.aws`],
+    allowedHosts: [`bedrock-runtime.${REGION}.amazonaws.com`],
     build: (client, { withoutCredential }) =>
       new AnthropicBedrockAdapter({
         client: client as never,
@@ -220,69 +220,51 @@ describe("anthropic-bedrock — the request it builds", () => {
   });
 });
 
-describe("the quarantine", () => {
-  it("reports UNAVAILABLE even with a perfectly good AWS session", async () => {
+describe("the AWS profile decides whose account pays", () => {
+  it("takes an explicit profile over the host default", () => {
     const adapter = new AnthropicBedrockAdapter({
-      env: { AWS_REGION: REGION, AWS_PROFILE: "work" },
+      env: { AWS_REGION: REGION, AWS_PROFILE: "personal" },
+      awsProfile: "claude-code-sso",
       discovery: USABLE,
     });
 
-    const probe = await adapter.probe();
-
-    // the ids this adapter lists come from the AWS control plane while its endpoint
-    // takes bare first-party ids, so every model it could offer 404s. Offering them produced
-    // a run that failed on a model the picker had just shown.
-    expect(probe.available).toBe(false);
+    // A CONSTRUCTOR option, never `process.env.AWS_PROFILE`. The harness serves many sessions
+    // from one process, so mutating the env to select a profile would race between concurrent
+    // runs and silently bill the wrong account.
+    expect(adapter.profileForTest()).toBe("claude-code-sso");
   });
 
-  it("explains the NAMESPACE mismatch and names a working alternative", async () => {
-    const adapter = new AnthropicBedrockAdapter({ env: { AWS_REGION: REGION }, discovery: USABLE });
+  it("falls back to HARNESS_AWS_PROFILE, then AWS_PROFILE", () => {
+    expect(
+      new AnthropicBedrockAdapter({
+        env: { AWS_REGION: REGION, HARNESS_AWS_PROFILE: "from-harness", AWS_PROFILE: "ambient" },
+      }).profileForTest(),
+    ).toBe("from-harness");
 
-    const probe = await adapter.probe();
-    if (probe.available) throw new Error("expected the quarantine");
-
-    // A bare "unavailable" would send a developer to check their AWS session, which is fine.
-    expect(probe.remedy).toMatch(/global\.anthropic/);
-    expect(probe.remedy).toMatch(/claude-opus-5/);
-    expect(probe.remedy).toMatch(/Anthropic \(direct\)/);
-    expect(probe.remedy).toMatch(/global\.anthropic\.claude-opus-5/);
+    expect(
+      new AnthropicBedrockAdapter({
+        env: { AWS_REGION: REGION, AWS_PROFILE: "ambient" },
+      }).profileForTest(),
+    ).toBe("ambient");
   });
 
-  it("checks the quarantine BEFORE the credential, so the real reason wins", async () => {
+  it("leaves the profile unset when the host names none", () => {
+    // Then the ambient AWS credential chain applies, which is the ordinary single-profile case.
+    expect(
+      new AnthropicBedrockAdapter({ env: { AWS_REGION: REGION } }).profileForTest(),
+    ).toBeUndefined();
+  });
+
+  it("is REPORTED as available once a credential and region are present", async () => {
     const adapter = new AnthropicBedrockAdapter({
-      env: {},
-      discovery: { source: "none", usable: false, remedy: "Run `aws sso login`." },
-    });
-
-    const probe = await adapter.probe();
-    if (probe.available) throw new Error("expected the quarantine");
-
-    // Reporting a missing credential would send someone to fix a credential that is not the
-    // problem — and then the run would still 404.
-    expect(probe.remedy).not.toMatch(/aws sso login/);
-    expect(probe.remedy).toMatch(/global\.anthropic\.claude-opus-5/);
-  });
-
-  it("is LIFTED by HARNESS_ENABLE_AWS_PROVIDER, so the spike can verify in place", async () => {
-    const adapter = new AnthropicBedrockAdapter({
-      env: { AWS_REGION: REGION, HARNESS_ENABLE_AWS_PROVIDER: "1" },
+      env: { AWS_REGION: REGION },
+      awsProfile: "claude-code-sso",
       discovery: USABLE,
+      listProfiles: async () => [{ id: "anthropic.claude-opus-5", displayName: "Opus 5" }],
     });
 
-    // Without an escape hatch, verifying a namespace means editing source — which is how a
-    // temporary quarantine becomes permanent.
-    expect((await adapter.probe()).available).toBe(true);
-  });
-
-  it("still appears in the provider list, with its reason", async () => {
-    const { providers } = await listProviders([
-      new AnthropicBedrockAdapter({ env: { AWS_REGION: REGION }, discovery: USABLE }),
-    ]);
-
-    // Omission is what produces "the picker is just empty" with nothing to explain it
-    //. Quarantined means reported-and-unpickable, not hidden.
-    expect(providers).toHaveLength(1);
-    expect(providers[0]).toMatchObject({ id: "anthropic-bedrock", available: false });
-    expect(providers[0]?.models).toEqual([]);
+    // The quarantine is gone: the product is resolved (partner-operated Bedrock, legacy
+    // client, inference-profile ids), so this adapter can serve runs again.
+    expect(await adapter.probe()).toEqual({ available: true, credentialSource: "env:AWS_PROFILE" });
   });
 });

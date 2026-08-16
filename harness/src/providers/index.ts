@@ -22,10 +22,24 @@ export const ADAPTER_IDS = ["anthropic-direct", "anthropic-oauth", "anthropic-be
 
 export type AdapterId = (typeof ADAPTER_IDS)[number];
 
+export interface BuildAdapterOptions {
+  /**
+   * The AWS named profile Bedrock should authenticate with for THIS caller.
+   *
+   * Passed through rather than read from the environment inside the adapter, because the
+   * harness serves many sessions from one process and the profile decides whose account pays.
+   */
+  awsProfile?: string;
+}
+
 /** Fresh instances per call: each caches its own model capabilities, and a shared cache
  *  across sessions would serve one session's model list to another. */
-export function buildAdapters(): ProviderAdapter[] {
-  return [new AnthropicDirectAdapter(), new AnthropicOauthAdapter(), new AnthropicBedrockAdapter()];
+export function buildAdapters(opts: BuildAdapterOptions = {}): ProviderAdapter[] {
+  return [
+    new AnthropicDirectAdapter(),
+    new AnthropicOauthAdapter(),
+    new AnthropicBedrockAdapter({ ...(opts.awsProfile ? { awsProfile: opts.awsProfile } : {}) }),
+  ];
 }
 
 /**

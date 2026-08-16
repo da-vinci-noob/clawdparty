@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import Fastify, { type FastifyInstance } from "fastify";
 import { bearerToken, tokenMatches } from "./auth.js";
-import { listConnectors, listSkills } from "./capabilities.js";
+import { listAwsProfiles, listConnectors, listSkills } from "./capabilities.js";
 import { type HarnessConfig, loadConfig } from "./config.js";
 import { listProviders } from "./providers/discovery.js";
 import { RunConflict, type StartRunInput, Supervisor, UnknownRun } from "./supervisor.js";
@@ -63,6 +63,14 @@ export function buildServer(
   app.get<{ Querystring: { cwd?: string } }>("/skills", async (req) =>
     listSkills(req.query.cwd ?? process.cwd()),
   );
+
+  /**
+   * GET /aws-profiles — names the host has in `~/.aws/config`, for the Bedrock profile setting.
+   *
+   * Names only; `~/.aws/credentials` is never opened. Enumerated so the setting is a choice
+   * among what exists rather than free text that fails later as an opaque AWS error.
+   */
+  app.get("/aws-profiles", async () => listAwsProfiles());
 
   /**
    * The re-derivation source. `?after=` is EXCLUSIVE, matching the

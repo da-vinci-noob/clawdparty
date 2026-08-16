@@ -234,3 +234,43 @@ export function listSkills(cwd: string, home: string = homedir()): SkillList {
   }
   return { skills: [...byName.values()], source: "host" };
 }
+
+/**
+ * AWS named profiles the host has configured, for the Bedrock profile picker.
+ *
+ * NAMES ONLY. This parses section headers out of `~/.aws/config` and never opens
+ * `~/.aws/credentials`, so no credential value is read here at all — the same separation
+ * `providers/credentials/sources.ts` keeps between naming a place and reading it.
+ *
+ * Enumerated rather than free-typed so the setting is a CHOICE among what exists. A free-text
+ * profile name fails at run time as an opaque AWS credential error, and the participant has no
+ * way to know which names are valid.
+ */
+export interface AwsProfileList {
+  profiles: string[];
+  /** "host" when ~/.aws/config was readable, "unavailable" when there is none. */
+  source: "host" | "unavailable";
+}
+
+export function listAwsProfiles(home: string = homedir()): AwsProfileList {
+  const path = join(home, ".aws", "config");
+  let body: string;
+  try {
+    body = readFileSync(path, "utf8");
+  } catch {
+    return { profiles: [], source: "unavailable" };
+  }
+
+  const profiles: string[] = [];
+  for (const line of body.split("\n")) {
+    // `[profile name]` in config; a bare `[default]` is the default profile. `[sso-session x]`
+    // is NOT a profile — it is a shared SSO block a profile refers to, and offering it would
+    // produce a credential error that names something the user did select.
+    const match = /^\s*\[\s*(?:profile\s+)?([^\]]+?)\s*\]\s*$/.exec(line);
+    if (!match) continue;
+    const name = match[1] as string;
+    if (name.startsWith("sso-session") || name.startsWith("services")) continue;
+    if (!profiles.includes(name)) profiles.push(name);
+  }
+  return { profiles, source: "host" };
+}
