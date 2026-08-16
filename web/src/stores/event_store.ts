@@ -96,9 +96,19 @@ export interface EventStoreState {
   presenceByParticipant: Map<string, boolean>;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
   maxAppliedId: number;
+  /**
+   * A run was SUBMITTED but has emitted nothing yet.
+   *
+   * UI state, set explicitly rather than derived, because there is no event to derive it from:
+   * between a successful POST and the harness's first `run_started` the event stream is silent,
+   * and the feed showed no activity at all — which read as "it is not even processing".
+   */
+  runPending: boolean;
 
   apply: (event: EventEnvelope) => void;
   applyMany: (events: EventEnvelope[]) => void;
+  markRunPending: () => void;
+  clearRunPending: () => void;
   reset: () => void;
 }
 
@@ -110,6 +120,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   settledBlocks: new Set(),
   presenceByParticipant: new Map(),
   maxAppliedId: 0,
+  runPending: false,
 
   apply: (event) => {
     // Ephemeral: null id. Never deduped by id, never in the durable list.
@@ -147,6 +158,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       const seenIds = new Set(state.seenIds);
       seenIds.add(event.id as number);
       return {
+        // The harness is emitting now, so the optimistic flag is redundant. Clearing it here
+        // rather than only on run_started means a run that fails before starting still settles.
+        runPending: event.ai_run_id === null ? state.runPending : false,
         // New array identity ONLY on a real append (stable across no-op re-applies).
         durableList: [...state.durableList, event],
         seenIds,
@@ -164,6 +178,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     }
   },
 
+  markRunPending: () => set({ runPending: true }),
+  // Explicit, because a REFUSED submit emits no event and nothing else would ever clear it.
+  clearRunPending: () => set({ runPending: false }),
+
   reset: () =>
     set({
       durableList: [],
@@ -173,6 +191,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       settledBlocks: new Set(),
       presenceByParticipant: new Map(),
       maxAppliedId: 0,
+      runPending: false,
     }),
 }));
 

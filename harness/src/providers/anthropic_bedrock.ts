@@ -1,6 +1,10 @@
 import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { dedupeByModel, inferContextWindow } from "../models.js";
+import {
+  isServableAnthropicProfile,
+  supportsAdaptiveThinking,
+} from "./anthropic_bedrock_capabilities.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
 import { toAnthropicMessages } from "./anthropic_request.js";
 import { isAnthropicProfileId } from "./bedrock_routing.js";
@@ -44,14 +48,14 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
  * AWS control plane. The flag is about live CAPABILITY discovery, not about whether ids can
  * be listed.
  */
-const BEDROCK_CAPABILITIES: Omit<Capabilities, "contextWindow"> = {
+const BEDROCK_CAPABILITIES: Omit<
+  Capabilities,
+  "contextWindow" | "adaptiveThinking" | "thinkingDisplaySummarized" | "effortLevels"
+> = {
   streaming: true,
   toolUse: true,
   toolUseWhileStreaming: true,
   maxOutputTokens: 64_000,
-  adaptiveThinking: true,
-  thinkingDisplaySummarized: true,
-  effortLevels: ["low", "medium", "high", "xhigh", "max"],
   // No AUTOMATIC prompt caching. `minCacheablePrefixTokens: null` rather than a number,
   // so `request_builder` spends no breakpoints it cannot cash.
   promptCaching: false,
@@ -68,6 +72,29 @@ const BEDROCK_CAPABILITIES: Omit<Capabilities, "contextWindow"> = {
   midConversationSystemMessages: true,
   midConversationToolChanges: true,
 };
+
+/**
+ * The capability set for ONE model.
+ *
+ * `adaptiveThinking` and `effortLevels` are per-MODEL, measured (see
+ * `anthropic_bedrock_capabilities.ts`). Declaring them provider-wide sent
+ * `thinking: {type:"adaptive"}` to Opus 4.1 and the API refused the whole request. `display` is
+ * only meaningful when thinking is on at all, so it follows the same flag.
+ */
+function capabilitiesFor(model: string): Capabilities {
+  const adaptive = supportsAdaptiveThinking(model);
+  return {
+    ...BEDROCK_CAPABILITIES,
+    adaptiveThinking: adaptive,
+    thinkingDisplaySummarized: adaptive,
+    // Effort tracks adaptive thinking exactly — measured, not assumed: every profile that
+    // accepted one accepted the other, and every profile that refused one refused both.
+    effortLevels: adaptive ? ["low", "medium", "high", "xhigh", "max"] : [],
+    // The control plane's ListInferenceProfiles carries no context window, so it is inferred
+    // from the model family — the one place this adapter has to.
+    contextWindow: inferContextWindow(model),
+  };
+}
 
 /**
  * NO STATIC MODEL LIST, deliberately.
@@ -178,24 +205,14 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   async listModels(): Promise<ModelInfo[]> {
     const profiles = await this.profiles();
     return profiles.map((profile) => {
-      const capabilities: Capabilities = {
-        ...BEDROCK_CAPABILITIES,
-        // The control plane's ListInferenceProfiles carries no context window, so it is
-        // inferred from the model family — the one place this adapter has to.
-        contextWindow: inferContextWindow(profile.id),
-      };
+      const capabilities = capabilitiesFor(profile.id);
       this.capabilityCache.set(profile.id, capabilities);
       return { id: profile.id, displayName: profile.displayName, capabilities };
     });
   }
 
   capabilities(model: string): Capabilities {
-    return (
-      this.capabilityCache.get(model) ?? {
-        ...BEDROCK_CAPABILITIES,
-        contextWindow: inferContextWindow(model),
-      }
-    );
+    return this.capabilityCache.get(model) ?? capabilitiesFor(model);
   }
 
   async *stream(req: ProviderRequest): AsyncIterable<ProviderEvent> {
@@ -325,6 +342,10 @@ async function listInferenceProfiles(
       // This adapter serves ONLY the Anthropic profiles; everything else is bedrock-converse's.
       // The shared predicate is what keeps the two adapters' filters complementary.
       if (!id || !isAnthropicProfileId(id)) continue;
+      // And not the ones the host cannot serve at all — an end-of-life model (404) or one the
+      // account's data-retention posture blocks (400 on a plain request). : a participant
+      // must not be offered a model that cannot answer.
+      if (!isServableAnthropicProfile(id)) continue;
       out.push({ id, displayName: profile.inferenceProfileName ?? id });
     }
     nextToken = res.nextToken;

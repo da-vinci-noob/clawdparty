@@ -62,6 +62,7 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   const textByBlock = useEventStore((s) => s.textByBlock);
   const thinkingByBlock = useEventStore((s) => s.thinkingByBlock);
   const activeRunId = useEventStore(selectActiveRunId);
+  const runPending = useEventStore((s) => s.runPending);
 
   const feedRef = useRef<HTMLDivElement>(null);
   // Whether the user is pinned to the bottom. Starts true (open at newest); flips
@@ -138,8 +139,11 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
           />
         </div>
       ))}
-      {/* While a run is active with no streaming text yet, show the shimmer loader. */}
-      {activeRunId && textByBlock.size === 0 && <ShimmerLoader />}
+      {/* Claude is working whenever a run is live OR one has been submitted and has not spoken
+          yet. Gating on "no streamed text" alone left two blind windows: before `run_started`
+          arrives there is no active run to derive, and a non-streaming turn never streams text
+          at all, so the room looked frozen for the whole turn. */}
+      {(activeRunId !== null || runPending) && <ShimmerLoader />}
     </div>
   );
 };

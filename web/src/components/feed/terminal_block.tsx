@@ -6,7 +6,9 @@ import type { FC } from "react";
 // anser, scroll-capped so large output doesn't blow out the feed.
 export const TerminalBlock: FC<{ event: EventEnvelope }> = ({ event }) => {
   const { text } = event.payload as TerminalOutputPayload;
-  const html = anser.ansiToHtml(anser.escapeForHtml(text));
+  // Defaulted, not asserted: `anser` throws on a non-string, and one malformed payload taking
+  // down the WHOLE feed is the failure the raw fallback exists to prevent.
+  const html = anser.ansiToHtml(anser.escapeForHtml(text ?? ""));
   return (
     <pre
       data-testid="feed-terminal"

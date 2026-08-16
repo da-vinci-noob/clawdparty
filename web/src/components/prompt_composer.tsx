@@ -35,6 +35,8 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const connectors = useConnectors(sessionId);
   const skills = useSkills(sessionId);
   const activeRunId = useEventStore(selectActiveRunId);
+  const markRunPending = useEventStore((s) => s.markRunPending);
+  const clearRunPending = useEventStore((s) => s.clearRunPending);
   const reviewRunId = useEventStore(selectAwaitingReviewRunId);
   // Select PRIMITIVES (not the object) so a new reference each render can't loop Zustand.
   const contextTokens = useEventStore((s) => selectLatestUsage(s)?.contextTokens ?? 0);
@@ -119,9 +121,18 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         : await startRun(text);
       if (await surfaceError(res)) {
         setText("");
+        // The room shows "working" from HERE, not from `run_started`: between a successful POST
+        // and the harness's first event nothing is derivable from the stream, and that silence
+        // read as the app not processing at all.
+        markRunPending();
+      } else {
+        // Refused (4xx). No event will ever arrive, so withdraw the flag explicitly or the
+        // indicator spins forever on an error the participant can already see.
+        clearRunPending();
       }
     } catch {
       setError("Network error");
+      clearRunPending();
     } finally {
       setBusy(false);
     }
