@@ -29,6 +29,30 @@ module RepoPaths
     raise(Escape, 'unresolvable path')
   end
 
+  # Resolve `path` against a SET of roots, returning the resolved absolute path and
+  # the root that contains it. Raises Escape when no root does.
+  #
+  # Each root is checked independently — a path is not permitted to borrow one root's
+  # prefix to reach another, because `contained?` compares against `<root>/` and a
+  # resolved path can only sit under one of a non-nested set.
+  def self.contain_any!(roots, path)
+    given = path.to_s
+    # ABSOLUTE ONLY. With one root a relative path resolved against it; across a SET
+    # there is no unambiguous base, and picking the first root that happens to contain
+    # a matching relative path would silently choose between two real directories.
+    raise(Escape, 'path must be absolute') unless given.start_with?(File::SEPARATOR)
+
+    resolved = File.realpath(given)
+    root = roots.find { |candidate| contained?(resolved, candidate) }
+    raise(Escape, 'escapes every browse root') if root.nil?
+
+    [resolved, root]
+  rescue SystemCallError
+    raise(Escape, 'unresolvable path')
+  end
+
+  # The trailing separator is load-bearing: without it "/Users/me/devtools" would read
+  # as contained by "/Users/me/dev".
   def self.contained?(resolved, root)
     resolved == root || resolved.start_with?("#{root}#{File::SEPARATOR}")
   end

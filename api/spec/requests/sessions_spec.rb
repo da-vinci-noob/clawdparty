@@ -57,7 +57,7 @@ RSpec.describe('POST /api/sessions (create)') do
     proj = File.join(@repo, 'proj')
     FileUtils.mkdir_p(proj)
     init_git_repo!(proj) # git repo required for a review-mode working dir
-    post('/api/sessions', params: { title: 'T', name: 'A', repository_path: 'proj' })
+    post('/api/sessions', params: { title: 'T', name: 'A', repository_path: proj })
     expect(Session.last.repository_path).to(eq(proj))
   end
 
@@ -80,7 +80,8 @@ RSpec.describe('POST /api/sessions (create)') do
       # with a worktree GitError. (Blank defaults to the root, which IS a git repo.)
       FileUtils.mkdir_p(File.join(@repo, 'plain'))
       expect do
-        post('/api/sessions', params: { title: 'T', name: 'A', repository_path: 'plain' }) # defaults to review
+        post('/api/sessions',
+             params: { title: 'T', name: 'A', repository_path: File.join(@repo, 'plain') }) # defaults to review
       end.not_to(change(Session, :count))
       expect(response).to(have_http_status(:unprocessable_content))
     end
@@ -89,7 +90,7 @@ RSpec.describe('POST /api/sessions (create)') do
       repo_sub = File.join(@repo, 'repo_sub')
       FileUtils.mkdir_p(repo_sub)
       init_git_repo!(repo_sub)
-      post('/api/sessions', params: { title: 'T', name: 'A', repository_path: 'repo_sub' })
+      post('/api/sessions', params: { title: 'T', name: 'A', repository_path: repo_sub })
       expect(response).to(have_http_status(:created))
       expect(Session.last.repository_path).to(eq(repo_sub))
     end

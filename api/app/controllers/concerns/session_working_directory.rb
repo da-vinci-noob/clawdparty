@@ -12,7 +12,7 @@ module SessionWorkingDirectory
 
   included do
     rescue_from DirectoryEscape do
-      render(json: { errors: [{ message: 'Working directory must be inside the repo root' }] },
+      render(json: { errors: [{ message: 'Working directory must be inside a configured browse root' }] },
              status: :unprocessable_content)
     end
 
@@ -58,9 +58,12 @@ module SessionWorkingDirectory
     File.exist?(File.join(dir, '.git'))
   end
 
-  # Shared realpath-containment against the repo root; a refusal is a 422.
+  # Shared realpath-containment against the configured browse roots; a refusal is a
+  # 422. Checked against the same set the picker lists, so anything a participant can
+  # navigate to they can also select — a narrower rule here would surface as a folder
+  # that opens but cannot be chosen.
   def contain_in_repo!(path)
-    RepoPaths.contain!(Git::WorktreeManager.repo_root, path)
+    RepoPaths.contain_any!(BrowseRoots.all, path).first
   rescue RepoPaths::Escape
     raise(DirectoryEscape)
   end
