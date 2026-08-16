@@ -1,6 +1,6 @@
 import type { ProviderStatus } from "@clawdparty/contracts";
-import { AnthropicDirectAdapter } from "./anthropic_direct.js";
 import type { ProviderAdapter } from "./contract.js";
+import { buildAdapters } from "./index.js";
 
 /**
  * `GET /models` — every configured provider, with what it can serve on THIS host.
@@ -14,9 +14,10 @@ import type { ProviderAdapter } from "./contract.js";
  */
 
 export function configuredAdapters(): ProviderAdapter[] {
-  // M3 adds anthropic-bedrock, anthropic-oauth and codex here. Each is discovered
-  // and probed identically, so adding one is a registration rather than a branch.
-  return [new AnthropicDirectAdapter()];
+  // One line, from the registry. Adding an adapter is a registration there rather than an
+  // edit here — which was the claim this function's previous comment made about a hardcoded
+  // single-element array.
+  return buildAdapters();
 }
 
 export async function listProviders(

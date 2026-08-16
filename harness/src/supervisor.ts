@@ -3,8 +3,8 @@ import type { EventEnvelope } from "@clawdparty/contracts";
 import { ExtensionRegistry } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
-import { AnthropicDirectAdapter } from "./providers/anthropic_direct.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
+import { ADAPTER_IDS, adapterById } from "./providers/index.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
 import { afterCursorToFrom, openStore } from "./store/store.js";
 import type { Entry, HarnessStoreApi } from "./store/types.js";
@@ -87,6 +87,9 @@ export interface SupervisorOptions {
  * would fail its digest check on every session, which is the check working and the tool
  * being useless.
  */
+/** The provider a run gets when it names none. Explicit so the default is greppable. */
+const DEFAULT_PROVIDER = "anthropic-direct";
+
 export const DEFAULT_SYSTEM_PROMPT =
   "You are Claude, working in a shared clawdparty session. Multiple people are " +
   "watching and may send follow-up messages mid-run.";
@@ -310,12 +313,23 @@ export class Supervisor {
     await entry.store.close();
   }
 
+  /**
+   * Resolve a provider id through the REGISTRY, with no id branching of its own.
+   *
+   * This used to be an `if (id === "anthropic-direct")` chain, which would have needed a
+   * new arm per adapter — the exact shape  forbids in the loop and there is no reason
+   * to tolerate one arm above it.
+   */
   private adapterFor(provider: string | undefined): ProviderAdapter {
-    const id = provider ?? "anthropic-direct";
+    const id = provider ?? DEFAULT_PROVIDER;
     const configured = this.opts.adapters?.[id];
     if (configured) return configured;
-    if (id === "anthropic-direct") return new AnthropicDirectAdapter();
-    throw new Error(`unknown provider: ${id}`);
+
+    const adapter = adapterById(id);
+    if (adapter) return adapter;
+    // Named, never defaulted: running someone's prompt on a provider they did not choose
+    // bills an account they did not pick.
+    throw new Error(`unknown provider: ${id}. Known: ${ADAPTER_IDS.join(", ")}`);
   }
 
   /**

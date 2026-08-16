@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { EffortLevel } from "@clawdparty/contracts";
+import { type RawStream, classifyProbeFailure, mapAnthropicStream } from "./anthropic_family.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -8,9 +9,17 @@ import type {
   ProviderAdapter,
   ProviderEvent,
   ProviderRequest,
-  StopReason,
 } from "./contract.js";
 import { type Discovery, discoverAnthropicCredential } from "./credentials/discover.js";
+
+/** Direct-login wording for a probe failure. The shared classifier supplies the shape. */
+const PROBE_HINTS = {
+  expired:
+    "The Anthropic credential was rejected (401). Re-run `claude setup-token` or refresh the key.",
+  notEntitled:
+    "The credential is valid but not entitled to this API (403). Check the workspace's model access.",
+  unreachable: "Could not reach the Anthropic API. Check network access and try again",
+} as const;
 
 /**
  * The reference adapter: first-party Anthropic, full capability set.
@@ -106,7 +115,7 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
       await this.client().models.list({ limit: 1 });
       return { available: true, credentialSource: discovery.source };
     } catch (err) {
-      return { available: false, ...classifyProbeFailure(err) };
+      return { available: false, ...classifyProbeFailure(err, PROBE_HINTS) };
     }
   }
 
@@ -147,53 +156,9 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
       { signal: req.signal },
     );
 
-    for await (const event of stream) {
-      switch (event.type) {
-        case "message_start":
-          yield { t: "message_start", model: event.message.model };
-          break;
-
-        case "content_block_start":
-          yield { t: "block_start", index: event.index, kind: blockKind(event.content_block.type) };
-          break;
-
-        case "content_block_delta": {
-          const mapped = mapDelta(event.index, event.delta);
-          if (mapped) yield mapped;
-          break;
-        }
-
-        case "content_block_stop": {
-          // The SDK accumulates; we pass the block through UNTOUCHED. Rebuilding
-          // it here would drop the compaction/thinking state the next request
-          // needs and would fail the conformance suite.
-          const block = stream.currentMessage?.content[event.index];
-          yield { t: "block_stop", index: event.index, block };
-          break;
-        }
-
-        case "message_delta":
-          yield {
-            t: "message_delta",
-            stopReason: mapStopReason(event.delta.stop_reason),
-            usage: {
-              input_tokens: event.usage.input_tokens ?? 0,
-              output_tokens: event.usage.output_tokens,
-              cache_read_input_tokens: event.usage.cache_read_input_tokens ?? 0,
-              cache_creation_input_tokens: event.usage.cache_creation_input_tokens ?? 0,
-            },
-          };
-          break;
-
-        case "message_stop":
-          yield { t: "message_stop" };
-          break;
-
-        default:
-          // Never crash on an unmapped shape.
-          yield { t: "raw", value: event };
-      }
-    }
+    // Mapped by the shared family mapper, not inline: the Bedrock and OAuth adapters emit
+    // the same wire events, and three copies of this switch would drift.
+    yield* mapAnthropicStream(stream as unknown as RawStream);
   }
 
   private discover(): Discovery {
@@ -229,37 +194,6 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
   }
 }
 
-function blockKind(type: string): "text" | "thinking" | "tool_use" | "compaction" {
-  if (type === "text") return "text";
-  if (type === "thinking" || type === "redacted_thinking") return "thinking";
-  if (type.startsWith("compaction")) return "compaction";
-  return "tool_use";
-}
-
-function mapDelta(index: number, delta: Anthropic.RawContentBlockDelta): ProviderEvent | null {
-  switch (delta.type) {
-    case "text_delta":
-      return { t: "text_delta", index, text: delta.text };
-    case "thinking_delta":
-      return { t: "thinking_delta", index, text: delta.thinking };
-    case "input_json_delta":
-      return { t: "tool_input_delta", index, partialJson: delta.partial_json };
-    default:
-      // signature_delta and citations_delta carry no harness-visible text; they
-      // ride along inside the verbatim block delivered at block_stop.
-      return null;
-  }
-}
-
-/**
- * `stop_sequence` is the one SDK reason with no harness equivalent — it is a
- * normal end of turn from the loop's point of view. Everything else maps 1:1.
- */
-function mapStopReason(reason: Anthropic.StopReason | null): StopReason {
-  if (reason === null || reason === "stop_sequence") return "end_turn";
-  return reason;
-}
-
 function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
   const caps = model.capabilities;
   const effortLevels = caps
@@ -290,30 +224,5 @@ function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
     serverSideRefusalFallback: DECLARED_FIRST_PARTY.serverSideRefusalFallback,
     midConversationSystemMessages: DECLARED_FIRST_PARTY.midConversationSystemMessages,
     midConversationToolChanges: DECLARED_FIRST_PARTY.midConversationToolChanges,
-  };
-}
-
-function classifyProbeFailure(err: unknown): {
-  reason: "no_credential" | "credential_expired" | "not_entitled" | "unreachable";
-  remedy: string;
-} {
-  const status = (err as { status?: number } | null)?.status;
-  if (status === 401) {
-    return {
-      reason: "credential_expired",
-      remedy:
-        "The Anthropic credential was rejected (401). Re-run `claude setup-token` or refresh the key.",
-    };
-  }
-  if (status === 403) {
-    return {
-      reason: "not_entitled",
-      remedy:
-        "The credential is valid but not entitled to this API (403). Check the workspace's model access.",
-    };
-  }
-  return {
-    reason: "unreachable",
-    remedy: `Could not reach the Anthropic API: ${String(err)}. Check network access and try again.`,
   };
 }
