@@ -97,8 +97,8 @@ export async function applyRecovery(
  * The one permitted uncertainty window.
  *
  * Settled under the RESERVED entry id, which is what makes this safe to attempt more
- * than once: the store's UNIQUE (run_id, seq) rejects a second write under the same id,
- * so a crash DURING recovery cannot double-settle (invariant 7).
+ * than once: the store's UNIQUE (run_id, settlement_key) rejects a second write under the
+ * same key, so a crash DURING recovery cannot double-settle (invariant 7).
  *
  * `uncertain: true` is never collapsed to success or failure. The request may have been
  * billed and may have produced output nobody recorded; claiming either would put a
@@ -131,6 +131,7 @@ function settleUncertain(
         // NOT on the surface: an uncertain turn must not be replayed to the model as
         // though it were an assistant message. The next request folds from before it.
         on_surface: 0,
+        emitted: 0,
       },
     },
     checkpoint.positionWrite(runId, { phase: "terminal", outcome: "interrupted" }),
@@ -170,40 +171,14 @@ async function finishTools(
   let position = plan.position as checkpoint.ToolsPosition;
   const events: EventEnvelope[] = [];
 
+  // A synthetic settlement is an ordinary settled result whose outcome is "interrupted", so
+  // it goes through `resultWrite` like the other two paths. It used to be an inline copy,
+  // which is how it kept allocating an event `seq` after `resultWrite` stopped.
   for (const call of plan.synthesize) {
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
       writes: [
-        {
-          kind: "entry",
-          entry: {
-            run_id: runId,
-            seq: store.allocateSeq(runId),
-            settlement_key: call.settlementKey,
-            type: "tool_failed",
-            actor_kind: "system",
-            actor_id: null,
-            ts_ms: ts,
-            payload: {
-              tool_use_id: call.toolUseId,
-              name: call.name,
-              error: INTERRUPTED,
-              recovered: true,
-            },
-            // ON the surface: the model must see that this call was answered, or the
-            // next request would contain a tool_use with no tool_result and the
-            // provider would reject it.
-            blocks: [
-              {
-                type: "tool_result",
-                tool_use_id: call.toolUseId,
-                content: [{ type: "text", text: INTERRUPTED }],
-                is_error: true,
-              },
-            ],
-            on_surface: 1,
-          },
-        },
+        resultWrite(runId, call, { ok: false, text: INTERRUPTED }, ts),
         checkpoint.positionWrite(runId, position),
       ],
     });
@@ -303,6 +278,7 @@ function resultWrite(
         },
       ],
       on_surface: 1,
+      emitted: 0,
     },
   };
 }

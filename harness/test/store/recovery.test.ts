@@ -185,6 +185,25 @@ describe("tools — replay policy decides per call", () => {
     expect(JSON.stringify(entry?.blocks)).toContain("tu_0");
   });
 
+  it("does not spend an event seq on the synthetic result", async () => {
+    seed(toolsPosition([{ name: "bash", replay: "never", status: "effect_pending" }]));
+
+    const result = await applyRecovery(store, RUN, deps);
+
+    // The synthesized settlement is store-only — surface state for the next request, never
+    // an event. It was a hand-copied `resultWrite` that kept its `allocateSeq` when that
+    // function moved to `seq: null`, so it took an id out of the emitted stream and left a
+    // gap where a client sees a dropped event. The re-executed path never had this because
+    // it calls the shared function.
+    const settlement = entriesFor(RUN).find((e) => e.settlement_key === "tu_0");
+    expect(settlement?.seq).toBeNull();
+    expect(settlement?.emitted).toBe(0);
+
+    // `recovery_applied` IS emitted, so it takes the run's first seq. If the settlement had
+    // consumed one, this would be 2.
+    expect(result.events.map((e) => e.seq)).toEqual([1]);
+  });
+
   it("RE-EXECUTES a `safe` call using args from the record, not memory", async () => {
     const position = toolsPosition([{ name: "read", replay: "safe", status: "effect_pending" }]);
     seed(position);

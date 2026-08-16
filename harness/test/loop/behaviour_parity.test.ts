@@ -431,6 +431,23 @@ describe("behaviour parity — the executable contract still holds", () => {
     expect(headers, "three requests, one unchanged snapshot").toHaveLength(1);
   });
 
+  it("BROADCASTS ephemeral events without persisting them", async () => {
+    await runScripted([turn([block(0, "text", "hi")], "end_turn")], worktree);
+
+    // events.ts: ephemeral events are "broadcast, never persisted". The loop mapped every
+    // envelope from the turn into a store write, so the deltas went in too — carrying the
+    // null seq that made them ephemeral in the first place. Nothing noticed because no test
+    // looked at the store's entry TYPES, only at what was emitted.
+    const stored = new Set(store.entriesFrom(0).map((e) => e.type));
+    for (const type of EPHEMERAL_EVENT_TYPES) {
+      expect(stored.has(type), `${type} was persisted`).toBe(false);
+    }
+
+    // The durable half of the same stream still lands, or this would pass by storing nothing.
+    expect(stored.has("ai_text")).toBe(true);
+    expect(emitted.some((e) => e.type === "ai_text_delta")).toBe(true);
+  });
+
   it("emits the additive v1.5 types the fixture predates", async () => {
     await runScripted([turn([block(0, "text", "hi")], "end_turn")], worktree);
     const types = new Set(emitted.map((e) => e.type));

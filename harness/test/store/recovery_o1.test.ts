@@ -74,6 +74,7 @@ async function seed(sessionId: string, entries: number): Promise<HarnessStoreApi
         payload: { block: `b:${i}`, text: `chunk ${i}` },
         blocks: null,
         on_surface: 0 as const,
+        emitted: 1 as const,
       },
     })),
   });

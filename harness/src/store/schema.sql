@@ -30,10 +30,11 @@ CREATE TABLE IF NOT EXISTS meta (
 -- `store_seq` is session-wide monotonic and is the projection cursor; `seq` is
 -- the per-run value the Contract-1 envelope already carries.
 --
--- UNIQUE (run_id, seq) does double duty: it makes ingest idempotent AND it is
--- what enforces "a reserved id is used at most once" (invariant 7). A synthetic
--- settlement writes under the reserved seq, so a second attempt to use it is
--- rejected by the constraint rather than by remembering to check.
+-- UNIQUE (run_id, seq) makes ingest idempotent: a replayed batch re-inserts the
+-- same pair and is skipped. It does NOT enforce invariant 7 ("a reserved id is
+-- used at most once") — that moved to UNIQUE (run_id, settlement_key) when
+-- reserving a seq turned out to collide with the normalizer's own allocation.
+-- See the settlement_key comment below.
 CREATE TABLE IF NOT EXISTS entries (
   store_seq   INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id      TEXT,
@@ -58,8 +59,30 @@ CREATE TABLE IF NOT EXISTS entries (
   -- For a tool call the key is its `tool_use_id`, already unique and already known
   -- before the effect starts. For a provider request it is the run's turn identity.
   settlement_key TEXT,
+  -- 1 = belongs in the Postgres `events` projection; 0 = the harness wrote it for
+  -- request reconstruction and no client ever sees it (the per-call tool results,
+  -- recovery's settlements).
+  --
+  -- Stated rather than derived, because every derivation is wrong. `seq IS NULL`
+  -- catches session-scoped entries, which have no per-run seq and ARE emitted —
+  -- filtering on it would silently drop every chat message from a re-derived feed.
+  -- `seq IS NULL AND settlement_key IS NOT NULL` is accurate today only because all
+  -- three store-only writes happen to carry a key; nothing made that true.
+  --
+  -- DEFAULT 1 is the safe direction: a write site that forgets it produces a visible
+  -- phantom rather than an invisible omission.
+  emitted INTEGER NOT NULL DEFAULT 1,
   UNIQUE (run_id, seq),
   UNIQUE (run_id, settlement_key),
+  CHECK (emitted IN (0, 1)),
+  -- A withheld entry must not consume a seq: seq is the per-run counter for the
+  -- EMITTED stream, and a hole in it reads to the web reducer as a dropped event.
+  CHECK (emitted = 1 OR seq IS NULL),
+  -- The converse. An emitted run-scoped entry with no seq has no position in its
+  -- run's stream, so no client can order it — the defect the fixture recapture
+  -- found in `recovery_applied`. Session-scoped entries are exempt: `seq` is
+  -- per-run, so they legitimately have none.
+  CHECK (emitted = 0 OR run_id IS NULL OR seq IS NOT NULL),
   -- Validation rule 4: an entry on the model surface must carry verbatim blocks.
   -- Flattening to text loses compaction and thinking state (R6), so an on-surface
   -- entry without blocks is unusable for request reconstruction.

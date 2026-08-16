@@ -99,6 +99,7 @@ describe("durability policy", () => {
             payload: { text: "before the crash" },
             blocks: null,
             on_surface: 0,
+            emitted: 1,
           },
         },
         {

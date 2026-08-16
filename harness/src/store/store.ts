@@ -220,8 +220,8 @@ class HarnessStore implements HarnessStoreApi {
         .prepare(
           `INSERT INTO entries
              (run_id, seq, type, actor_kind, actor_id, ts_ms, payload, blocks, on_surface,
-              settlement_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              emitted, settlement_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           entry.run_id,
@@ -233,6 +233,7 @@ class HarnessStore implements HarnessStoreApi {
           JSON.stringify(entry.payload ?? {}),
           entry.blocks === null || entry.blocks === undefined ? null : JSON.stringify(entry.blocks),
           entry.on_surface,
+          entry.emitted,
           entry.settlement_key ?? null,
         );
       return Number(info.lastInsertRowid);
@@ -322,6 +323,17 @@ class HarnessStore implements HarnessStoreApi {
     return this.hydrate(
       this.db
         .prepare("SELECT * FROM entries WHERE store_seq >= ? ORDER BY store_seq ASC")
+        .all(storeSeq),
+    );
+  }
+
+  projectionFrom(storeSeq: number): Entry[] {
+    this.assertOpen();
+    return this.hydrate(
+      this.db
+        .prepare(
+          "SELECT * FROM entries WHERE emitted = 1 AND store_seq >= ? ORDER BY store_seq ASC",
+        )
         .all(storeSeq),
     );
   }
@@ -436,6 +448,7 @@ class HarnessStore implements HarnessStoreApi {
       payload: JSON.parse(r.payload as string),
       blocks: r.blocks === null ? null : (JSON.parse(r.blocks as string) as unknown[]),
       on_surface: r.on_surface as 0 | 1,
+      emitted: r.emitted as 0 | 1,
       settlement_key: (r.settlement_key as string | null) ?? null,
     }));
   }

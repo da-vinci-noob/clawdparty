@@ -5,7 +5,7 @@ import type { EnvelopeType } from "@clawdparty/contracts";
  * rather than migrating it  — the harness reports the run
  * failed instead of guessing at an older layout.
  */
-export const STORE_SCHEMA_VERSION = 2;
+export const STORE_SCHEMA_VERSION = 3;
 
 /** Staleness threshold, shared with Rails' Harness::HealthcheckJob. */
 export const LOCK_STALE_AFTER_MS = 15_000;
@@ -32,6 +32,15 @@ export interface Entry {
   blocks: unknown[] | null;
   /** 1 = contributes to model history, i.e. is part of the request surface. */
   on_surface: 0 | 1;
+  /**
+   * 1 = belongs in the `events` projection; 0 = store-only, written for request
+   * reconstruction and never sent to a client.
+   *
+   * Required, not optional-with-a-default: the two kinds are not distinguishable
+   * from an entry's other fields (see schema.sql), so every write site has to say
+   * which it is and tsc is what asks.
+   */
+  emitted: 0 | 1;
   /**
    * The settlement identity of an uncertain effect; NULL for an ordinary entry.
    * `UNIQUE (run_id, settlement_key)` is what makes a settlement single-use, so a
@@ -222,6 +231,12 @@ export interface HarnessStoreApi {
   readRegister<N extends Namespace>(ns: N, key: string): RegisterValue<N> | null;
   surfaceFrom(storeSeq: number): Entry[];
   entriesFrom(storeSeq: number): Entry[];
+  /**
+   * Entries that belong in the `events` projection — `entriesFrom` minus the store-only
+   * ones. The single definition of the filter, so re-derivation consumes it instead
+   * of restating the predicate in Ruby.
+   */
+  projectionFrom(storeSeq: number): Entry[];
   activeRunIds(): string[];
   maxStoreSeq(): number;
   reserveUsageId(): number;

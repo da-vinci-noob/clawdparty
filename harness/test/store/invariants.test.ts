@@ -34,6 +34,7 @@ function entry(over: Partial<Omit<Entry, "store_seq">> = {}): Omit<Entry, "store
     payload: { block: "b:0", text: "hi" },
     blocks: null,
     on_surface: 0,
+    emitted: 1,
     ...over,
   };
 }

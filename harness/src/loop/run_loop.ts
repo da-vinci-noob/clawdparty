@@ -229,12 +229,17 @@ export class RunLoop {
 
       // ── settlement ──────────────────────────────────────────────────────────
       const action = decide(stopReason, resumeAttempt);
-      const assistantWrites = turn.events.map((event) =>
-        this.entryFor(
-          event,
-          event.type === "ai_text" || event.type === "ai_thinking" ? turn.blocks : null,
-        ),
-      );
+      // DURABLE events only. `turn.events` interleaves the deltas, which are broadcast and
+      // never persisted (events.md, two-tier streaming) — they carry no seq, so storing one
+      // also puts a row in the log that no client can order.
+      const assistantWrites = turn.events
+        .filter((event) => !normalizer.isEphemeral(event.type))
+        .map((event) =>
+          this.entryFor(
+            event,
+            event.type === "ai_text" || event.type === "ai_thinking" ? turn.blocks : null,
+          ),
+        );
 
       if (action.kind === "dispatch_tools") {
         const planned = checkpoint.planTools(
@@ -551,6 +556,7 @@ export class RunLoop {
         payload: { raw: { tool_results: 1 }, truncated: false },
         blocks: [block],
         on_surface: 1,
+        emitted: 0,
       },
     };
   }
@@ -705,6 +711,9 @@ export class RunLoop {
         payload: event.payload,
         blocks,
         on_surface: blocks === null ? 0 : 1,
+        // Everything reaching here came from the normalizer as an envelope, which is what
+        // being emitted means. Store-only writes bypass this method entirely.
+        emitted: 1,
       },
     };
   }
