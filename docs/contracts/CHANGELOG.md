@@ -233,6 +233,31 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.7.0] — `total_cost_usd` is nullable (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 7 }`.** Additive `minor` bump: `total_cost_usd` on
+`run_finished` and `run_failed` widens from `number` to `number | null`. Consumers that treated it
+as a number keep compiling; one that DISPLAYS it must now handle null.
+
+**Why.** The harness sent a hardcoded `0`. That was inert while nothing read it, and became a
+false statement the moment Rails began copying the figure onto `ai_runs.total_cost_usd`:
+every run would have recorded a cost of exactly zero. No provider in play reports a price —
+Bedrock does not, and the harness computes none — so `0` claims a request that was actually made
+was free. `null` says "unknown", which is the truth.
+
+This is the rule the usage ledger already followed, applied to the one field that was breaking it:
+*no report means unknown, and the honest record of unknown is no row at all* (`usageWrites` writes
+no ledger row when a turn reported nothing, rather than a row of zeros).
+
+**What consumers should do.** Render an unknown cost as unknown — a dash, not `$0.00`. Rails
+stores `nil`, and both `ai_runs.usage` and `ai_runs.total_cost_usd` are nullable for exactly this
+reason: `nil` and `0` are different claims.
+
+**Recovery / migration.** No stored data changes and no re-derivation. Runs recorded before this
+bump have `total_cost_usd` nil (Rails never wrote the column at all until it began copying it), so nothing holds
+a wrongly-zero cost. Real per-model pricing is a separate piece of work — Bedrock exposes no price
+API, so it needs a maintained table.
+
 ## [1.6.0] — `toolUseWhileStreaming` capability (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 6 }`.** Additive `minor` bump: one new REQUIRED field

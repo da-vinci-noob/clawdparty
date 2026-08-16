@@ -630,7 +630,9 @@ export class RunLoop {
   ): Promise<RunOutcome> {
     await this.notifyComplete(spec, { outcome: "finished", uncertain: false, turns });
     const event = normalizer.runFinished(
-      { stop_reason: stopReason, num_turns: turns, duration_ms: 0, total_cost_usd: 0, usage },
+      // NULL, not 0: no provider here reports a price and nothing computes one, so zero
+      // would claim a request that was made was free (contract v1.7).
+      { stop_reason: stopReason, num_turns: turns, duration_ms: 0, total_cost_usd: null, usage },
       this.now(),
     );
     this.terminate(spec, event, { outcome: "finished", uncertain: false, stopReason });
@@ -668,7 +670,7 @@ export class RunLoop {
   ): Promise<RunOutcome> {
     await this.notifyComplete(spec, { outcome: "failed", uncertain: false, turns: 0 });
     const event = normalizer.runFailed(
-      { stop_reason: stopReason, api_error_status: null, total_cost_usd: 0, usage },
+      { stop_reason: stopReason, api_error_status: null, total_cost_usd: null, usage },
       this.now(),
     );
     this.terminate(spec, event, { outcome: "failed", uncertain: false, stopReason });

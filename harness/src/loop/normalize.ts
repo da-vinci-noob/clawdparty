@@ -342,7 +342,7 @@ export class LoopNormalizer {
       stop_reason: string;
       num_turns: number;
       duration_ms: number;
-      total_cost_usd: number;
+      total_cost_usd: number | null;
       usage: unknown;
     },
     nowMs: number = Date.now(),
@@ -354,7 +354,7 @@ export class LoopNormalizer {
     payload: {
       stop_reason: string;
       api_error_status: string | null;
-      total_cost_usd: number;
+      total_cost_usd: number | null;
       usage: unknown;
     },
     nowMs: number = Date.now(),

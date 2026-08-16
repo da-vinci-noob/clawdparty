@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 6 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 7 } as const;
 
 /**
  * The 30 frozen event type names. Adding or removing a name is a CONTRACT
@@ -301,13 +301,23 @@ export interface RunFinishedPayload {
   stop_reason: string;
   num_turns: number;
   duration_ms: number;
-  total_cost_usd: number;
+  /**
+   * `null` when no price was computed — UNKNOWN, which is not the same as free.
+   *
+   * Nullable since v1.7: the harness sent a hardcoded `0`, and once Rails began copying the
+   * figure onto `ai_runs.total_cost_usd` every run would have recorded a cost of exactly zero.
+   * No provider here reports a price (Bedrock does not, and the harness computes none), so `0`
+   * was a false claim about a request that was actually made. Same rule the usage ledger
+   * already follows: no report means no row, never zeros.
+   */
+  total_cost_usd: number | null;
   usage: TokenUsage;
 }
 export interface RunFailedPayload {
   stop_reason: string;
   api_error_status: string | null;
-  total_cost_usd: number;
+  /** `null` when no price was computed — see `RunFinishedPayload.total_cost_usd`. */
+  total_cost_usd: number | null;
   usage: TokenUsage;
 }
 export type RunInterruptedPayload = Record<string, never>;

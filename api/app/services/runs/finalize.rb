@@ -30,6 +30,15 @@ module Runs
       run = @event.ai_run
       return unless run
 
+      # Before the transition: a terminal event carries what the run SPENT, and the columns
+      # exist to hold it. Recording it first means a failed transition cannot lose the figures.
+      record_consumption(run)
+      apply_transition(run)
+    end
+
+    private
+
+    def apply_transition(run)
       case @event.event_type
       when 'run_started'
         finalize_run_started(run)
@@ -44,7 +53,25 @@ module Runs
       end
     end
 
-    private
+    # Copy the terminal event's usage and cost onto the run.
+    #
+    # ABSENT IS PRESERVED, never coerced. `nil` on either column means the provider reported
+    # nothing, which is a different statement from `0` — zero says the turn was free, and a
+    # request that was actually made never is. The harness applies the same rule to its own
+    # ledger (no row rather than zeros), so writing `0.0` here would make Rails contradict it.
+    #
+    # A `run_failed` still spent whatever its earlier turns spent, so failure records usage too.
+    # `run_started` and `changeset_ready` carry none and must not blank what a terminal event
+    # already wrote.
+    def record_consumption(run)
+      payload = @event.payload || {}
+      attrs = {}
+      attrs[:usage] = payload['usage'] if payload['usage'].present?
+      cost = payload['total_cost_usd']
+      attrs[:total_cost_usd] = cost unless cost.nil?
+
+      run.update!(attrs) if attrs.any?
+    end
 
     # Transition queued → running. It used to also capture a `claude_session_id` off the
     # payload so a follow-up could resume that SDK session; resumption is now by harness
