@@ -119,7 +119,7 @@ function settleUncertain(
         run_id: runId,
         // seq allocated NORMALLY. Single-use comes from `settlement_key`, not from a
         // reserved seq — reserving one collided with the turn's own entries.
-        seq: store.nextSeq(runId),
+        seq: store.allocateSeq(runId),
         settlement_key: plan.settlementKey,
         type: "run_interrupted",
         actor_kind: "system",
@@ -177,7 +177,7 @@ async function finishTools(
           kind: "entry",
           entry: {
             run_id: runId,
-            seq: store.nextSeq(runId),
+            seq: store.allocateSeq(runId),
             settlement_key: call.settlementKey,
             type: "tool_failed",
             actor_kind: "system",
@@ -218,7 +218,7 @@ async function finishTools(
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
       writes: [
-        resultWrite(runId, store.nextSeq(runId), call, result, ts),
+        resultWrite(runId, store.allocateSeq(runId), call, result, ts),
         checkpoint.positionWrite(runId, position),
       ],
     });
@@ -231,7 +231,7 @@ async function finishTools(
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
       writes: [
-        resultWrite(runId, store.nextSeq(runId), call, result, ts),
+        resultWrite(runId, store.allocateSeq(runId), call, result, ts),
         checkpoint.positionWrite(runId, position),
       ],
     });

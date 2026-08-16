@@ -41,6 +41,15 @@ export interface Entry {
   settlement_key?: string | null;
 }
 
+/**
+ * The store as the LOOP may use it: everything except `allocateSeq`.
+ *
+ * The omission is the enforcement. While a run is executing, its normalizer is the single
+ * seq allocator; `store.allocateSeq` in loop code is now a compile error rather than a
+ * rule someone has to remember.
+ */
+export type LoopStore = Omit<HarnessStoreApi, "allocateSeq">;
+
 export interface UsageRow {
   id: number;
   run_id: string;
@@ -216,7 +225,22 @@ export interface HarnessStoreApi {
   activeRunIds(): string[];
   maxStoreSeq(): number;
   reserveUsageId(): number;
-  nextSeq(runId: string): number;
+  /**
+   * The highest per-run `seq` already WRITTEN. A read, not an allocation — it exists so a
+   * resumed run can seed its normalizer from where the previous one stopped.
+   */
+  highestSeq(runId: string): number;
+  /**
+   * Allocate the next per-run `seq`.
+   *
+   * ONLY legitimate where no normalizer is live — i.e. recovery, which runs after the loop
+   * that owned the counter is gone. It is deliberately ABSENT from `LoopStore`, so loop
+   * code cannot reach it: while a normalizer is running it is the sole allocator, and a
+   * second one reading MAX(seq) hands out ids the normalizer is about to use. That bug
+   * (UNIQUE (run_id, seq) silently dropping the write) was introduced twice from a rule
+   * written in a comment, which is why it is now a type.
+   */
+  allocateSeq(runId: string): number;
   heartbeat(): void;
   durability(): { journalMode: string; synchronous: number; foreignKeys: number };
   close(): Promise<void>;

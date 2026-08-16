@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import type { ExtensionRegistry } from "../extensions/points.js";
 import type { ProviderAdapter, ProviderRequest, StopReason, Usage } from "../providers/contract.js";
-import type { HarnessStoreApi, Write } from "../store/types.js";
+import type { LoopStore, Write } from "../store/types.js";
 import type { ToolContext, ToolRegistry, ToolResult } from "../tools/registry.js";
 import * as checkpoint from "./checkpoint.js";
 import { LoopNormalizer } from "./normalize.js";
@@ -25,7 +25,7 @@ import { decide } from "./stop_reasons.js";
  */
 
 export interface RunLoopDeps {
-  store: HarnessStoreApi;
+  store: LoopStore;
   adapter: ProviderAdapter;
   tools: ToolRegistry;
   /** Emits envelopes to the transport. */
@@ -96,7 +96,10 @@ export class RunLoop {
     const { store, adapter, emit } = this.deps;
     const normalizer = new LoopNormalizer(
       { sessionId: spec.sessionId, aiRunId: spec.runId, requestedBy: spec.requestedBy },
-      store.nextSeq(spec.runId) - 1,
+      // A READ, not an allocation: seed the normalizer from where a previous run stopped.
+      // `allocateSeq` is not on LoopStore, so the loop cannot mint a seq behind the
+      // normalizer's back even by accident.
+      store.highestSeq(spec.runId),
     );
     const capabilities = adapter.capabilities(spec.model);
 

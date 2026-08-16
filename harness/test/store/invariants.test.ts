@@ -283,7 +283,7 @@ describe("invariant 6 — the position marker is total", () => {
 
 describe("invariant 7 — a reserved id is used at most once", () => {
   it("rejects a second write under a reserved entry seq", () => {
-    const reserved = store.nextSeq("run_1");
+    const reserved = store.allocateSeq("run_1");
     store.commit(tx({ kind: "entry", entry: entry({ seq: reserved, type: "ai_text" }) }));
 
     // A synthetic settlement racing a real one must not double-write.

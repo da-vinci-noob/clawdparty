@@ -358,13 +358,22 @@ class HarnessStore implements HarnessStoreApi {
     return row.m + 1;
   }
 
-  /** The next per-run `seq`. Reserving one means writing under it later. */
-  nextSeq(runId: string): number {
+  /** The highest per-run seq already WRITTEN. A read; `allocateSeq` mints. */
+  highestSeq(runId: string): number {
     this.assertOpen();
     const row = this.db
       .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM entries WHERE run_id = ?")
       .get(runId) as { m: number };
-    return row.m + 1;
+    return row.m;
+  }
+
+  /**
+   * Allocate the next per-run `seq`. Absent from `LoopStore` on purpose — see the
+   * interface. Only recovery may call this, and only because the loop that owned the
+   * counter is gone by then.
+   */
+  allocateSeq(runId: string): number {
+    return this.highestSeq(runId) + 1;
   }
 
   heartbeat(): void {

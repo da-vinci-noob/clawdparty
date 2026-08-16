@@ -1,10 +1,4 @@
-import type {
-  HarnessStoreApi,
-  Position,
-  ReplayPolicy,
-  ToolCallPosition,
-  Write,
-} from "../store/types.js";
+import type { LoopStore, Position, ReplayPolicy, ToolCallPosition, Write } from "../store/types.js";
 
 export type { Position, ToolCallPosition, ReplayPolicy };
 
@@ -26,12 +20,12 @@ export function positionWrite(runId: string, position: Position): Write {
   return { kind: "register", op: "set", namespace: "run.position", key: runId, value: position };
 }
 
-export function read(store: HarnessStoreApi, runId: string): Position | null {
+export function read(store: LoopStore, runId: string): Position | null {
   return store.readPosition(runId);
 }
 
 /** Write a position on its own. Most steps instead bundle it with their entries. */
-export function write(store: HarnessStoreApi, runId: string, position: Position): void {
+export function write(store: LoopStore, runId: string, position: Position): void {
   store.commit({ writes: [positionWrite(runId, position)] });
 }
 
@@ -59,7 +53,7 @@ export interface RequestIntent {
  * uncertainty window.
  */
 export function commitRequestIntent(
-  store: HarnessStoreApi,
+  store: LoopStore,
   runId: string,
   intent: RequestIntent,
   extraWrites: Write[] = [],
@@ -87,7 +81,7 @@ export function commitRequestIntent(
  * ordinary entries do not have one.
  */
 export function reserveForRequest(
-  store: HarnessStoreApi,
+  store: LoopStore,
   settlementKey: string,
 ): {
   settlementKey: string;
@@ -101,12 +95,7 @@ export function reserveForRequest(
  * the entries land before the position that describes what comes next — which is
  * what lets the sandwich be two commits instead of four.
  */
-export function settle(
-  store: HarnessStoreApi,
-  runId: string,
-  writes: Write[],
-  next: Position,
-): void {
+export function settle(store: LoopStore, runId: string, writes: Write[], next: Position): void {
   store.commit({ writes: [...writes, positionWrite(runId, next)] });
 }
 
