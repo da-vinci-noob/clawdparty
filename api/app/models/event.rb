@@ -48,6 +48,7 @@ class Event < ApplicationRecord
     chat_message task_created task_updated participant_joined presence_changed
     request_header context_compacted context_usage tool_refused
     plugin_enabled plugin_disabled provider_error recovery_applied
+    skill_changed
   ].freeze
   AI_RAW = 'ai_raw'
 

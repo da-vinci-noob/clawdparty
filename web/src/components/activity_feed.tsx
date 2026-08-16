@@ -175,6 +175,11 @@ function renderEvent(
       // A social banner ("<name> joined the session"), same framing as the run
       // lifecycle — the name is resolved from actor.id via the names map.
       return <RunBanner event={event} names={names} />;
+    case "skill_changed":
+      // Not a run event, but it belongs in the timeline: a skill is instructions Claude will
+      // follow, so who changed what the room can do is part of its history. Recording it and
+      // rendering nothing would leave an audit trail nobody reads.
+      return <RunBanner event={event} names={names} />;
     case "ai_raw":
       // The normalizer's safety valve for unmapped SDK messages. Still persisted
       // (contract: never dropped) and available via backfill, but not user-facing

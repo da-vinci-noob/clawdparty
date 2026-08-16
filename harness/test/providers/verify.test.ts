@@ -138,7 +138,11 @@ describe("a provider with no usable credential", () => {
     });
     const result = await verifyProvider(a);
 
-    expect(result).toMatchObject({ ok: false, reason: "no_credential", remedy: "Run aws sso login" });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "no_credential",
+      remedy: "Run aws sso login",
+    });
     expect(a.sent).toHaveLength(0);
   });
 });

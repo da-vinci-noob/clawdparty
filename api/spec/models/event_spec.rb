@@ -121,8 +121,10 @@ RSpec.describe(Event) do
       expect(described_class::TAXONOMY).to(eq(ContractVersion.event_types))
     end
 
-    it 'freezes exactly 30 type names' do
-      expect(described_class::TAXONOMY.size).to(eq(30))
+    it 'freezes exactly 31 type names' do
+      # 30 through v1.5–v1.9; `skill_changed` makes 31 at v1.10. The comparison above is the real
+      # drift guard (it reads events.ts); this is the one that has to be edited deliberately.
+      expect(described_class::TAXONOMY.size).to(eq(31))
     end
 
     it 'matches EPHEMERAL_EVENT_TYPES in events.ts' do

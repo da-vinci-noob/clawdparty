@@ -15,8 +15,56 @@ import { listAwsProfiles, listConnectors, listSkills } from "./capabilities.js";
 import { type HarnessConfig, loadConfig } from "./config.js";
 import { listProviders } from "./providers/discovery.js";
 import { verifyProviders } from "./providers/verify.js";
+import { type SkillScope, addSkill, removeSkill } from "./skills_admin.js";
 import { RunConflict, type StartRunInput, Supervisor, UnknownRun } from "./supervisor.js";
 import { Transport } from "./transport.js";
+
+/** The write body both skill routes take. Validated by `skills_admin`, not here. */
+interface SkillWriteBody {
+  cwd?: string;
+  scope?: string;
+  name?: string;
+  description?: string;
+  body?: string;
+  replace?: boolean;
+}
+
+/**
+ * Normalize a write body.
+ *
+ * `scope` defaults to `project`, the SMALLER blast radius: a host skill reaches every session on
+ * the machine (and the developer's own terminal Claude Code), so it has to be asked for explicitly
+ * rather than fallen into.
+ */
+function writeInput(body: SkillWriteBody = {}): {
+  cwd: string;
+  scope: SkillScope;
+  name: string;
+  description: string;
+  body: string;
+  replace?: boolean;
+} {
+  return {
+    cwd: body.cwd ?? process.cwd(),
+    scope: body.scope === "host" ? "host" : "project",
+    name: String(body.name ?? ""),
+    description: String(body.description ?? ""),
+    body: String(body.body ?? ""),
+    ...(body.replace === true ? { replace: true } : {}),
+  };
+}
+
+/** A refused write is a 4xx with its reason, so Rails can pass a real message to the browser. */
+function replyToWrite(
+  reply: { code: (status: number) => { send: (payload: unknown) => unknown } },
+  result: ReturnType<typeof addSkill>,
+): unknown {
+  if (result.ok) {
+    return reply.code(200).send(result);
+  }
+  const status = result.reason === "not_found" ? 404 : result.reason === "failed" ? 500 : 422;
+  return reply.code(status).send({ error: result.reason, detail: result.detail });
+}
 
 export function buildServer(
   supervisor: Supervisor,
@@ -74,6 +122,21 @@ export function buildServer(
   );
   app.get<{ Querystring: { cwd?: string } }>("/skills", async (req) =>
     listSkills(req.query.cwd ?? process.cwd()),
+  );
+
+  /**
+   * POST /skills — add one; POST /skills/remove — move one aside.
+   *
+   * The app's only writes outside a session worktree. Rails owner-gates them; the harness lands
+   * them, validating the name as a strict single segment BEFORE touching the filesystem so a write
+   * cannot land outside the chosen skills root. `remove` is a POST rather than a DELETE because it
+   * does not delete: it renames, so an unwanted removal is recoverable on disk.
+   */
+  app.post<{ Body: SkillWriteBody }>("/skills", async (req, reply) =>
+    replyToWrite(reply, addSkill(writeInput(req.body))),
+  );
+  app.post<{ Body: SkillWriteBody }>("/skills/remove", async (req, reply) =>
+    replyToWrite(reply, removeSkill(writeInput(req.body))),
   );
 
   /**

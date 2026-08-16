@@ -29,7 +29,9 @@ describe("plain values", () => {
 describe("block scalars", () => {
   it("reads a `|` block as its indented content, not as the marker", () => {
     const parsed = parseFrontmatter(
-      wrap("name: migrate\ndescription: |\n  Migrate API tokens to AWS SM.\n  Use when moving off app-level encryption."),
+      wrap(
+        "name: migrate\ndescription: |\n  Migrate API tokens to AWS SM.\n  Use when moving off app-level encryption.",
+      ),
     );
 
     expect(parsed.description).toBe(
@@ -82,6 +84,8 @@ describe("malformed input", () => {
   });
 
   it("ignores lines that are not key: value", () => {
-    expect(parseFrontmatter(wrap("name: x\njust some prose\n- a list item"))).toEqual({ name: "x" });
+    expect(parseFrontmatter(wrap("name: x\njust some prose\n- a list item"))).toEqual({
+      name: "x",
+    });
   });
 });

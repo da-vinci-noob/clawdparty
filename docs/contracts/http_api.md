@@ -39,6 +39,7 @@ implement this convention; it is pinned here as the single source.
 | run input | follow-up · interrupt |
 | **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
 | **auth test** | `POST /api/providers/verify` |
+| **skill management** (owner) | `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
 | **projection repair** | `GET /api/sessions/:id/projection/check` · `POST /api/sessions/:id/projection/rederive` (owner) |
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
@@ -122,6 +123,28 @@ when the harness is unreachable. Any participant may read them; a non-participan
 request is **`404`** `{ errors }`. Connector responses never contain a server's
 command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
 an endpoint.
+
+### Skill management — `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name`
+
+**OWNER only** (`manage_session`). The app's only writes outside a session worktree, and treated as
+such because a skill is *instructions Claude will follow* — adding one is closer to granting a
+capability than to editing a document.
+
+`POST` takes `{ scope: "project" | "host", name, description, body, replace? }` and returns **`201`**.
+`scope` defaults to **`project`**, never `host`: a host skill reaches every session on the machine and
+the developer's own terminal Claude Code, so the larger blast radius is asked for explicitly. An
+existing name is **`422`** unless `replace: true`. The harness validates `name` as a strict single
+lowercase segment BEFORE touching the filesystem, so a write cannot land outside the chosen root;
+a refused name is **`422`** with an actionable message.
+
+`DELETE` takes `?scope=` and **does not delete**: the harness moves the directory to a sibling
+`.claude/skills-removed/`, so an unwanted removal is recoverable on disk — the same reasoning as
+`bin/harness reset-session`. Moving it OUT of `skills/` rather than renaming it in place is
+load-bearing: discovery keys on the frontmatter `name`, so a renamed directory stayed listed, stayed
+in every run's skill index, and stayed loadable. A name absent from that scope is **`404`**.
+
+Both append a **`skill_changed`** event attributed to the acting participant, because who changed
+what the room can do belongs in its timeline rather than only in a file's mtime.
 
 ### Auth test — `POST /api/providers/verify`
 

@@ -45,11 +45,22 @@ module Harness
       get('/models')
     end
 
-    # POST /verify — does each provider ACTUALLY work? Sends one tiny real request per
-    # provider, which is the only thing that separates "a credential is present" (what
-    # /models reports) from "the credential is accepted". A POST because it is not a read.
+    # POST /verify — one tiny REAL request per provider, which is the only thing that separates
+    # "a credential is present" (what /models reports) from "it is accepted". See ProvidersController.
     def verify_providers
       post('/verify', {})
+    end
+
+    # POST /skills — write a SKILL.md into the repo's `.claude/skills` or the host's. The harness
+    # validates the name as a strict single segment, so a write cannot land outside the root.
+    def add_skill(cwd:, scope:, name:, description:, body:, replace: false)
+      post('/skills', { cwd: cwd, scope: scope, name: name, description: description,
+                        body: body, replace: replace })
+    end
+
+    # POST /skills/remove — MOVES the skill aside (rename), never deletes it, so it is a POST.
+    def remove_skill(cwd:, scope:, name:)
+      post('/skills/remove', { cwd: cwd, scope: scope, name: name })
     end
 
     # GET /connectors?cwd= — MCP servers the host has configured for the given

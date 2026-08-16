@@ -2,6 +2,7 @@ import { type FC, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AuthTestTab } from "../components/settings/auth_test_tab";
 import { ConfigurationTab } from "../components/settings/configuration_tab";
+import { SkillsTab } from "../components/settings/skills_tab";
 import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 
 // The settings surface. Reached from the session, because a session is what decides which
@@ -9,7 +10,7 @@ import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 //
 // Tabs are added as they are BUILT, not as placeholders: an empty "coming soon" tab is worse than a
 // tab that is not there yet, because it looks like a broken feature rather than an unbuilt one.
-// Skills setup and provider defaults join this list when they land.
+// Provider defaults join this list when they land.
 //
 // Everything here is readable by every role; the WRITE controls each tab adds are gated by the
 // server's SessionPolicy (`manage_session` = owner), with the client only hiding buttons.
@@ -17,6 +18,7 @@ import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 const TABS = [
   { id: "configuration", label: "Configuration" },
   { id: "auth", label: "Auth test" },
+  { id: "skills", label: "Skills setup" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -67,7 +69,9 @@ export const SettingsPage: FC = () => {
       </nav>
 
       <section aria-label={`${tab} settings`} className="min-h-0 flex-1">
-        {tab === "configuration" ? <ConfigurationTab sessionId={sessionId} /> : <AuthTestTab />}
+        {tab === "configuration" && <ConfigurationTab sessionId={sessionId} />}
+        {tab === "auth" && <AuthTestTab />}
+        {tab === "skills" && <SkillsTab sessionId={sessionId} />}
       </section>
     </main>
   );

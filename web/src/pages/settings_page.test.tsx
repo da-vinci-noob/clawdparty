@@ -67,13 +67,13 @@ describe("the settings route", () => {
   });
 
   it("offers no tab that is not built yet", () => {
-    // A "coming soon" tab reads as a broken feature rather than an unbuilt one. Skills setup
-    // and provider defaults appear when they land.
+    // A "coming soon" tab reads as a broken feature rather than an unbuilt one. Provider
+    // defaults appear when they land.
     setRole("owner");
     renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
 
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(tabs).toEqual(["Configuration", "Auth test"]);
+    expect(tabs).toEqual(["Configuration", "Auth test", "Skills setup"]);
   });
 
   it("is reachable by a viewer, not just an owner", async () => {

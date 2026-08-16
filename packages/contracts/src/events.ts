@@ -11,8 +11,8 @@
  * FREEZE STATE: the envelope fields, their scalar types, and the `Actor` union
  * are FROZEN (since v1.0). Per-type `payload` interfaces were FINALIZED from the
  * real SDK spike at v1.1 (`sdk-message-spike`). The taxonomy has grown additively
- * — 20 at v1.0, 21 at v1.2, 22 at v1.3, 30 at v1.5 (the harness types) — and each
- * growth is a CHANGELOG entry with a `minor` bump.
+ * — 20 at v1.0, 21 at v1.2, 22 at v1.3, 30 at v1.5 (the harness types), 31 at
+ * v1.10 (`skill_changed`) — and each growth is a CHANGELOG entry with a `minor` bump.
  */
 
 /**
@@ -22,10 +22,10 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 9 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 10 } as const;
 
 /**
- * The 30 frozen event type names. Adding or removing a name is a CONTRACT
+ * The 31 frozen event type names. Adding or removing a name is a CONTRACT
  * CHANGE (see `docs/contracts/CHANGELOG.md`). Order is for readability only;
  * clients order events by `id`/`seq`, never by position here.
  */
@@ -61,9 +61,11 @@ export const EVENT_TYPES = [
   "plugin_disabled",
   "provider_error",
   "recovery_applied",
+  // --- Added at v1.10: a host capability changed, outside any run ----------------
+  "skill_changed",
 ] as const;
 
-/** One of the 30 frozen taxonomy names. */
+/** One of the 31 frozen taxonomy names. */
 export type EventType = (typeof EVENT_TYPES)[number];
 
 /**
@@ -73,7 +75,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
  */
 export const AI_RAW = "ai_raw" as const;
 
-/** Any value the `type` field may hold: the 30 names plus the `ai_raw` fallback. */
+/** Any value the `type` field may hold: the 31 names plus the `ai_raw` fallback. */
 export type EnvelopeType = EventType | typeof AI_RAW;
 
 /**
@@ -144,7 +146,7 @@ export type Actor = { kind: "claude" } | { kind: "user"; id: string } | { kind: 
  * - `ai_run_id`  present for run-scoped events; `null` for session-scoped events.
  * - `seq`        per-run monotonic integer for DURABLE run-scoped events;
  *                `null` for ephemeral and for session-scoped events.
- * - `type`       one of the 30 names, or `ai_raw`.
+ * - `type`       one of the 31 names, or `ai_raw`.
  * - `actor`      see `Actor`.
  * - `ts`         ISO-8601 UTC, millisecond precision, `Z` suffix
  *                (e.g. `2026-06-28T20:11:05.123Z`). DISPLAY-ONLY: order by `id`
@@ -484,7 +486,28 @@ export interface RecoveryAppliedPayload {
 }
 
 /**
- * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 30
+ * A skill was added or removed on the host (v1.10).
+ *
+ * SESSION-scoped, not run-scoped: it happens in settings, between runs, and it changes what a
+ * FUTURE run can do. It is an event rather than a silent file write because a skill is instructions
+ * Claude will follow — closer to granting a capability than to editing a document — so who changed
+ * it, and when, belongs in the room's timeline.
+ *
+ * `scope` matters more than it looks: a `project` skill affects this repo, while a `host` one
+ * affects every session on the machine AND the developer's own terminal Claude Code. A removal
+ * reports `moved_to` because nothing is deleted — the directory is renamed, so an unwanted removal
+ * is recoverable, and the record says where it went.
+ */
+export interface SkillChangedPayload {
+  action: "added" | "removed" | "replaced";
+  name: string;
+  scope: "project" | "host";
+  /** Where a removed skill was moved to, relative to the skills root. */
+  moved_to?: string;
+}
+
+/**
+ * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 31
  * names + `ai_raw`) exactly — enforced by `PAYLOAD_MAP_COVERS_TAXONOMY` below.
  */
 export interface EventPayloadMap {
@@ -518,6 +541,7 @@ export interface EventPayloadMap {
   plugin_disabled: PluginTogglePayload;
   provider_error: ProviderErrorPayload;
   recovery_applied: RecoveryAppliedPayload;
+  skill_changed: SkillChangedPayload;
   ai_raw: AiRawPayload;
 }
 
@@ -536,16 +560,18 @@ type Extends<A, B> = [A] extends [B] ? true : false;
 type Equal<A, B> = Extends<A, B> extends true ? (Extends<B, A> extends true ? true : false) : false;
 
 /**
- * Guard: the taxonomy holds EXACTLY 30 names. If `EVENT_TYPES` drifts from 30
+ * Guard: the taxonomy holds EXACTLY 31 names. If `EVENT_TYPES` drifts from 31
  * entries without a contract change, this assignment stops type-checking.
  *
- * 30, not 29: `harness_http.md` lists the v1.5 additions in seven table rows
- * because `plugin_enabled` and `plugin_disabled` share one. Eight names.
+ * Was 30 through v1.5–v1.9 (`harness_http.md` lists the v1.5 additions in seven table rows because
+ * `plugin_enabled` and `plugin_disabled` share one — eight names). `skill_changed` makes 31 at
+ * v1.10, and this line is deliberately the thing that has to be edited: a taxonomy that can grow
+ * without anyone noticing is a taxonomy nobody can rely on.
  */
-export const EVENT_TYPE_COUNT: 30 = EVENT_TYPES.length;
+export const EVENT_TYPE_COUNT: 31 = EVENT_TYPES.length;
 
 /**
- * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 30 names +
+ * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 31 names +
  * `ai_raw`) — no missing key, no stray key. If they diverge, this assignment's
  * type becomes `false` and `true` no longer satisfies it.
  */

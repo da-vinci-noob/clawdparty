@@ -237,6 +237,22 @@ plus **`connectors_failed`** (`1.9`) — the selected servers that did not load,
 CLASSIFICATION (`not_configured` / `timeout` / `failed`) rather than the transport's own message,
 which could carry a URL with a token in it. `connectors` lists only what actually loaded.
 
+### Skill writes — `POST /skills` · `POST /skills/remove`
+
+The only harness routes that MUTATE host files. Rails owner-gates them; the harness lands them.
+
+`POST /skills` takes `{ cwd, scope, name, description, body, replace? }`. The name is validated as a
+strict single lowercase segment **before** anything touches the filesystem — that is what makes the
+write incapable of landing outside `<cwd>/.claude/skills` (scope `project`) or `~/.claude/skills`
+(scope `host`), rather than a check applied afterwards. The description is written as a YAML **block
+scalar** with every line indented, so a newline (or a line reading `---`) in free text cannot rewrite
+the skill's own frontmatter. An existing name is **`422`** unless `replace: true`.
+
+`POST /skills/remove` is a POST because it does not delete: the directory is MOVED to a sibling
+`.claude/skills-removed/<name>` (then `-2`, `-3`…, so an earlier removal is never clobbered).
+Moving it out of `skills/` rather than renaming in place is the whole point — discovery keys on the
+frontmatter `name`, so a `deploy.removed` directory stayed discovered, indexed and loadable.
+
 ### Discovery (read-only, `cwd`-scoped)
 
 The harness exposes two read-only discovery endpoints Rails proxies (the built-in **tools** set is a

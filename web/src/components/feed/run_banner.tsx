@@ -16,6 +16,28 @@ const LABELS: Record<string, string> = {
   participant_joined: "joined the session",
 };
 
+/**
+ * A capability change, in a sentence.
+ *
+ * `skill_changed` is session-scoped and not part of a run, but it belongs in the timeline for the
+ * same reason a run does: a skill is instructions Claude will follow, so WHO changed what the room
+ * can do is exactly what a reader needs. A removal says "moved aside" because that is what happened
+ * — the directory is renamed, not deleted.
+ */
+function skillSentence(payload: {
+  action?: string;
+  name?: string;
+  scope?: string;
+  moved_to?: string;
+}): string {
+  const where = payload.scope === "host" ? "host-wide" : "this repo";
+  if (payload.action === "removed") {
+    return `moved the ${where} skill ${payload.name} aside`;
+  }
+  const verb = payload.action === "replaced" ? "replaced" : "added";
+  return `${verb} the ${where} skill ${payload.name}`;
+}
+
 // Whether a run_started's RESOLVED scope withheld every built-in tool — the shape a run gets on
 // a model that cannot use tools. Read from the event, so a late joiner arriving by
 // backfill learns it too: otherwise a run that can only answer is indistinguishable from one
@@ -56,7 +78,10 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   event,
   names,
 }) => {
-  const label = LABELS[event.type] ?? event.type;
+  const label =
+    event.type === "skill_changed"
+      ? skillSentence(event.payload as Parameters<typeof skillSentence>[0])
+      : (LABELS[event.type] ?? event.type);
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const answerOnly = isAnswerOnly(event);
   const failed = failedConnectors(event);

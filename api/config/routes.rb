@@ -48,6 +48,10 @@ Rails.application.routes.draw do
       # GET /api/sessions/:session_id/connectors|skills
       get 'connectors', to: 'connectors#index'
       get 'skills', to: 'skills#index'
+      # Managing skills is OWNER-only: a skill is instructions Claude follows, and these are
+      # the app's only writes outside a session worktree. The DELETE renames aside, never unlinks.
+      post 'skills', to: 'skills#create'
+      delete 'skills/:id', to: 'skills#destroy'
       # Chat: POST /api/sessions/:session_id/messages
       resources :messages, only: :create
       # Read-only repo browse: GET /api/sessions/:session_id/files (tree) and

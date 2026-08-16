@@ -233,6 +233,46 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.10.0] — `skill_changed`, the 31st event type (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 10 }`.** Additive `minor` bump: one new event type, taking
+the taxonomy from 30 names to **31**. `EVENT_TYPE_COUNT` and the Rails `TAXONOMY` size assertion both
+had to be edited by hand, which is the point — a taxonomy that can grow unnoticed is one nobody can
+rely on.
+
+```ts
+interface SkillChangedPayload {
+  action: "added" | "removed" | "replaced";
+  name: string;
+  scope: "project" | "host";
+  moved_to?: string;   // where a removed skill went; nothing is deleted
+}
+```
+
+**Why an event at all.** The settings surface lets an owner add and remove host skills from the
+browser. A skill is *instructions Claude will follow*, so adding one is closer to granting a
+capability than to editing a document — and the room's other capability changes are all events. A
+file's mtime does not say who.
+SESSION-scoped, not run-scoped: it happens in settings, between runs, and it changes what a FUTURE
+run can do.
+
+**`scope` carries the blast radius.** A `project` skill affects one repo; a `host` skill affects every
+session on the machine *and* the developer's own terminal Claude Code. The UI states that next to the
+control, and the event records which was chosen.
+
+**`moved_to` exists because removal does not delete.** The harness moves the directory to a sibling
+`.claude/skills-removed/`, so an unwanted removal is recoverable — and the record says where to look.
+Moving it OUT of `skills/` rather than renaming it in place was a correction found by live testing:
+discovery keys on the frontmatter `name`, so a `deploy.removed` directory stayed listed, stayed in
+every run's skill index, and stayed loadable by the `skill` tool. Removal was a no-op.
+
+**Rendered, not just recorded.** The feed shows it as a banner naming the participant, the skill and
+the scope ("Alice added the host-wide skill pdf"). An audit trail nobody reads is not an audit trail.
+
+**What consumers should do.** Treat it like `participant_joined`: session-scoped, `ai_run_id` null,
+durable. A client that does not know the type still renders the envelope safely (the `default` branch),
+but the sentence is worth having.
+
 ## [endpoint] — `POST /api/providers/verify` and harness `POST /verify` (additive)
 
 **No `CONTRACT_VERSION` bump** — per the governance table, endpoint changes are recorded here and do

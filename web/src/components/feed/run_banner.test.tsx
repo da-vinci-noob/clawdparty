@@ -47,6 +47,52 @@ describe("RunBanner has no capability echo", () => {
   });
 });
 
+describe("a skill change", () => {
+  const names = new Map([["p1", "Alice"]]);
+
+  it("names the person, the skill, and the scope", () => {
+    render(
+      <RunBanner
+        event={evt("skill_changed", { action: "added", name: "release-notes", scope: "project" })}
+        names={names}
+      />,
+    );
+
+    // WHO is the point of the audit trail; scope is the point of the sentence, because a host skill
+    // reaches every session on the machine.
+    const banner = screen.getByTestId("feed-run-banner");
+    expect(banner).toHaveTextContent("Alice");
+    expect(banner).toHaveTextContent(/added the this repo skill release-notes/);
+  });
+
+  it("says host-wide when it was host-wide", () => {
+    render(
+      <RunBanner
+        event={evt("skill_changed", { action: "added", name: "pdf", scope: "host" })}
+        names={names}
+      />,
+    );
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent(/host-wide skill pdf/);
+  });
+
+  it("says MOVED ASIDE for a removal, because nothing was deleted", () => {
+    render(
+      <RunBanner
+        event={evt("skill_changed", {
+          action: "removed",
+          name: "deploy",
+          scope: "project",
+          moved_to: "deploy.removed",
+        })}
+        names={names}
+      />,
+    );
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent(
+      /moved the this repo skill deploy aside/,
+    );
+  });
+});
+
 describe("a connector the run could not load", () => {
   const names = new Map([["p1", "Alice"]]);
 
