@@ -13,8 +13,9 @@ export type { Position, ToolCallPosition, ReplayPolicy };
  *
  * ONE register, overwritten TOTALLY after every step. Recovery READS it and
  * switches; it never replays the log to work out where it got to. That is what
- * makes recovery O(1) in session length  and why no code path may consult
- * `entries` to decide what to do next (invariant 6).
+ * makes recovery O(1) in session length  and why no code path may
+ * consult `entries` to decide what to do next (invariant 6 — the marker is total, so
+ * there is nothing to reconstruct).
  *
  * "Totally" is load-bearing and easy to erode: a partial update that merged with
  * the previous value would leave recovery reading a `phase` whose fields belong to

@@ -15,7 +15,7 @@ import type { HarnessStoreApi, Position, Write } from "./types.js";
  * O(1) IN SESSION LENGTH : nothing here reads `entries`. Recovery switches on
  * the position and writes; it never replays the log to work out where it got to. A
  * `SELECT` over entries added anywhere in this file breaks the recovery budget on
- * exactly the long sessions that need it most (invariant 6).
+ * exactly the long sessions that need it most (invariant 9).
  */
 
 export interface ReexecuteResult {
