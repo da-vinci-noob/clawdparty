@@ -4,6 +4,7 @@ import type { ParticipantNames } from "../helpers/participant_names";
 import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
 import { FileChangedRow } from "./feed/file_changed_row";
 import { RawFallback } from "./feed/raw_fallback";
+import { RecoveryAppliedRow } from "./feed/recovery_applied_row";
 import { RunBanner } from "./feed/run_banner";
 import { ShimmerLoader } from "./feed/shimmer_loader";
 import { TerminalBlock } from "./feed/terminal_block";
@@ -163,6 +164,11 @@ function renderEvent(
     case "tool_failed":
       // Rendered as part of their tool_started chip; skip standalone.
       return null;
+    case "recovery_applied":
+      // Its OWN row, and NOT the RUN_LIFECYCLE banner below. A generic banner would say
+      // "run failed" or "run finished" about a request whose fate is genuinely unknown
+      //.
+      return <RecoveryAppliedRow event={event} />;
     case "tool_refused":
       // Its OWN row, not folded into the chip: a refusal is the room's policy
       // acting, not a tool breaking, and showing them alike would hide the rule.

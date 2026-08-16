@@ -26,6 +26,33 @@ describe("ActivityFeed", () => {
   beforeEach(() => useEventStore.getState().reset());
   afterEach(() => useEventStore.getState().reset());
 
+  it("renders recovery_applied as its own row, NOT the generic run banner", async () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany(fixture.filter((e) => e.type === "recovery_applied")),
+    );
+
+    // A run-lifecycle banner would say "run failed" or "run finished" about a recovery, and for
+    // an UNCERTAIN one both are claims the record cannot support. RawFallback
+    // would show raw JSON, which is what happened before this row existed.
+    expect(await screen.findByTestId("feed-recovery-applied")).toBeInTheDocument();
+    expect(screen.queryByTestId("feed-run-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("feed-raw-fallback")).not.toBeInTheDocument();
+  });
+
+  it("survives a from_phase the harness never emits", async () => {
+    renderFeed();
+    // The fixture says `awaiting_provider_response`; the harness emits `request_pending`.
+    // `from_phase` is typed as a free string, so an unknown value must pass through rather
+    // than render blank or throw.
+    act(() =>
+      useEventStore.getState().applyMany(fixture.filter((e) => e.type === "recovery_applied")),
+    );
+
+    const row = await screen.findByTestId("feed-recovery-applied");
+    expect(row.textContent).toContain("awaiting_provider_response");
+  });
+
   it("renders the contract fixture: text bubbles, tool chips, terminal, banners, file rows", async () => {
     renderFeed();
     // Apply the fixture through the store (the live path the feed reads from).
