@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# bin/rubocop — lint api/ INSIDE the Docker stack. Args pass straight through:
+#   bin/rubocop                                  # whole api/ tree
+#   bin/rubocop app/services/harness             # one path
+#   bin/rubocop -a                               # safe autocorrect
+#   bin/rubocop --only Rails/BulkChangeTable     # one cop
+#
+# The gems live in the `bundle` named volume, not on the host, so `bundle exec
+# rubocop` from a host shell fails with Bundler::GemNotFound. This is the wrapper
+# that makes the documented lint command actually runnable.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+tty_flags=()
+[ -t 0 ] && [ -t 1 ] && tty_flags=(-it)
+
+# Reuse the running rails container when there is one; RuboCop needs no database,
+# so the one-off path deliberately does NOT bring postgres up.
+if docker compose ps --status running --services 2>/dev/null | grep -qx rails; then
+  exec docker compose exec ${tty_flags[@]+"${tty_flags[@]}"} rails bundle exec rubocop "$@"
+fi
+
+exec docker compose run --rm --no-deps ${tty_flags[@]+"${tty_flags[@]}"} \
+  rails bundle exec rubocop "$@"
