@@ -165,6 +165,86 @@ describe("event_store", () => {
     });
   });
 
+  it("keeps ignoring deltas that arrive AFTER the run terminated", () => {
+    // The reported duplicate: the answer rendered twice, once in place and once at the bottom
+    // with a live cursor, and a refresh fixed it (a refresh backfills durables only).
+    //
+    // The two channels are independent and the ephemeral one is DELAYED (~150ms coalescing)
+    // while durables POST immediately, so the real arrival order is:
+    //
+    //     ai_text (settles the block)  ->  run_finished  ->  the block's last deltas
+    //
+    // The terminal sweep used to FORGET the run's settled keys — bounding the set, but opening
+    // the exact hole the set exists to close: the late delta then re-created the accumulator and
+    // `activity_feed` renders every accumulator, forever.
+    const store = useEventStore.getState();
+    store.apply(delta("run_1", "m:1", "Hello "));
+    store.apply({
+      id: 5,
+      session_id: "s",
+      ai_run_id: "run_1",
+      seq: 5,
+      type: "ai_text",
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: { block: "m:1", text: "Hello again!" },
+    });
+    store.apply({
+      id: 6,
+      session_id: "s",
+      ai_run_id: "run_1",
+      seq: 6,
+      type: "run_finished",
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: {},
+    });
+    // The straggler.
+    store.apply(delta("run_1", "m:1", "again!"));
+
+    const state = useEventStore.getState();
+    expect(state.textByBlock.size).toBe(0);
+    // Rendered exactly once, from the durable log.
+    expect(selectDurableEvents(state).filter((e) => e.type === "ai_text")).toHaveLength(1);
+  });
+
+  it("ignores a delta for a terminated run even on a block that never settled", () => {
+    // A run that FAILED mid-block has no `ai_text` to settle it, so the per-block guard cannot
+    // help — only "this run is over" can.
+    const store = useEventStore.getState();
+    store.apply({
+      id: 7,
+      session_id: "s",
+      ai_run_id: "run_9",
+      seq: 1,
+      type: "run_failed",
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: {},
+    });
+    store.apply(delta("run_9", "m:0", "orphan text"));
+
+    expect(useEventStore.getState().textByBlock.size).toBe(0);
+  });
+
+  it("still accepts deltas for a DIFFERENT, live run", () => {
+    const store = useEventStore.getState();
+    store.apply({
+      id: 8,
+      session_id: "s",
+      ai_run_id: "run_old",
+      seq: 1,
+      type: "run_finished",
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: {},
+    });
+    store.apply(delta("run_new", "m:0", "live"));
+
+    // Terminating one run must not silence the next one.
+    expect(useEventStore.getState().textByBlock.get("run_new::m:0")).toBe("live");
+  });
+
   it("sweeps a run's live blocks on a terminal run event (safety net)", () => {
     const store = useEventStore.getState();
     store.apply(delta("run_1", "m:1", "partial"));

@@ -23,7 +23,10 @@ interface PresencePayload {
   online?: boolean;
 }
 
-type LiveFields = Pick<EventStoreState, "textByBlock" | "thinkingByBlock" | "settledBlocks">;
+type LiveFields = Pick<
+  EventStoreState,
+  "textByBlock" | "thinkingByBlock" | "settledBlocks" | "terminatedRuns"
+>;
 
 // When a durable block settles (ai_text/ai_thinking), drop its live accumulator so
 // the block is not rendered twice (live + durable), and REMEMBER that it settled so a
@@ -53,11 +56,16 @@ function reconcileLive(state: EventStoreState, event: EventEnvelope): Partial<Li
     return {
       textByBlock: withoutPrefix(state.textByBlock, prefix),
       thinkingByBlock: withoutPrefix(state.thinkingByBlock, prefix),
-      settledBlocks: new Set(
-        [...state.settledBlocks].filter(
-          (key) => !key.slice(key.indexOf(":") + 1).startsWith(prefix),
-        ),
-      ),
+      // The run is RECORDED as over, rather than its settled keys being forgotten.
+      //
+      // Forgetting them bounded the set but opened the exact hole the set closes: ephemerals are
+      // delayed ~150ms while durables POST immediately, so the true order is `ai_text` ->
+      // `run_finished` -> the block's last deltas. With the keys dropped, that straggler
+      // re-created the accumulator, and the feed renders every accumulator — the answer appeared
+      // twice, the second copy with a live cursor, until a refresh (which backfills durables
+      // only). One entry per RUN is a tighter bound than one per block anyway, and it also covers
+      // a run that failed mid-block, where no `ai_text` ever settled anything.
+      terminatedRuns: new Set(state.terminatedRuns).add(event.ai_run_id),
     };
   }
   return {};
@@ -90,8 +98,10 @@ export interface EventStoreState {
   // In-progress streamed thinking, keyed by (ai_run_id, block).
   thinkingByBlock: Map<string, string>;
   // Blocks whose durable ai_text/ai_thinking has already been applied — deltas for these
-  // are ignored. Cleared per run on its terminal event.
+  // are ignored.
   settledBlocks: Set<string>;
+  /** Runs that have reached a terminal event. A delta arriving for one is stale by definition. */
+  terminatedRuns: Set<string>;
   // Presence, last-writer-wins per participant id.
   presenceByParticipant: Map<string, boolean>;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
@@ -118,6 +128,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   textByBlock: new Map(),
   thinkingByBlock: new Map(),
   settledBlocks: new Set(),
+  terminatedRuns: new Set(),
   presenceByParticipant: new Map(),
   maxAppliedId: 0,
   runPending: false,
@@ -129,7 +140,12 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         const payload = (event.payload ?? {}) as DeltaPayload;
         const key = deltaKey(event.ai_run_id, payload.block ?? "");
         const field = event.type === "ai_text_delta" ? "textByBlock" : "thinkingByBlock";
-        if (get().settledBlocks.has(settledKey(field, key))) {
+        // Stale if the block already settled, OR if the whole run is over — the second case is
+        // what a delayed delta after `run_finished` actually is.
+        if (
+          get().settledBlocks.has(settledKey(field, key)) ||
+          (event.ai_run_id !== null && get().terminatedRuns.has(event.ai_run_id))
+        ) {
           return;
         }
         const next = new Map(get()[field]);
@@ -189,6 +205,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       textByBlock: new Map(),
       thinkingByBlock: new Map(),
       settledBlocks: new Set(),
+      terminatedRuns: new Set(),
       presenceByParticipant: new Map(),
       maxAppliedId: 0,
       runPending: false,
