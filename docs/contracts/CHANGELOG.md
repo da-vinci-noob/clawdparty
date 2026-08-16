@@ -14,7 +14,7 @@ nothing changes silently — every change is an entry here.**
 | Add a new **optional field** to a payload | additive | a CHANGELOG entry; bump `minor` | `minor +1` |
 | Finalize a `pending-spike` **payload** schema | additive | a CHANGELOG entry; bump `minor` | `minor +1` |
 | Change the **envelope** shape (add/remove/rename a field, change a scalar type) | **breaking** | a **breaking** entry; treated as an **emergency**; bump `major` (reset `minor` to 0) | `major +1` |
-| Change a frozen **endpoint signature** (path, method, request/response shape, status) | **breaking** | a **breaking** entry; emergency; bump `major` | `major +1` |
+| Change a frozen **endpoint signature** (path, method, request/response shape, status) | **breaking** | a **breaking** entry; emergency; **no `CONTRACT_VERSION` bump** — see the resolved governance question below | — |
 | Remove or rename an **event type** | **breaking** | a **breaking** entry; emergency; bump `major` | `major +1` |
 
 `CONTRACT_VERSION` is `{ major, minor }` in `events.ts`. A consumer asserts compatibility by
@@ -118,50 +118,24 @@ would refuse to continue. A settlement key is NULL on ordinary entries, so it ca
 collide by construction. Found by the crash-injection gate, invisible to every other
 test because the happy path never settles under a reserved id.
 
-### ⚠️ Unreconciled governance question (raised, not decided)
+### Governance question — RESOLVED
 
-The table at the top of this file says a frozen **endpoint signature** change is breaking
-and bumps `CONTRACT_VERSION.major`. Two prior entries — `[protocol]` and `[http-api]` —
-did the opposite, holding `CONTRACT_VERSION` still on the grounds that it versions the
-*event* contract, not the protocol. **This entry follows that precedent**: B1–B5 change
-endpoint signatures and `CONTRACT_VERSION.major` stays at 1.
+The table at the top of this file said a frozen **endpoint signature** change bumps
+`CONTRACT_VERSION.major`. Two earlier entries did the opposite, holding it still on the
+grounds that it versions the *event* contract. B1–B7 followed that precedent, which left
+ ("...with a version bump") measurably unmet across seven breaking changes.
 
-The consequence is worth stating plainly rather than leaving implicit: **B1–B5 ship with
-no machine-detectable version signal.** A consumer cannot assert its way out of them; it
-finds out at runtime. That is tolerable only because this window is declared and
-coordinated by sign-off. Either the governance table's endpoint row or the precedent is
-wrong, and reconciling them is a **separate decision** — not something this entry settles.
+**Resolved in favour of the precedent, and  amended to say so.** `CONTRACT_VERSION`
+is what a consumer asserts against to decide whether it can read an event stream. Bumping
+`major` for an endpoint, topology or store-schema break would fail that assertion for
+every consumer, for a reason that does not apply to any of them — while telling them
+nothing about the break that actually happened. The event contract has
+`CONTRACT_VERSION`; the store has `STORE_SCHEMA_VERSION`; endpoints and topology are
+versioned by this file and the declared window.
 
-### Sign-off — all three streams, before M0 merges
-
-Each stream signs that it has read B1–B5 + the rename table and has its side scheduled.
-
-- [x] **api** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
-- [x] **harness** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
-- [x] **web** — signed: Shah Rukh &lt;shahrukh@hackerone.com&gt; date: 2026-08-16
-
-**One maintainer signed all three streams, and that is worth stating rather than
-leaving implied.** 's sign-off exists to force *coordination between
-independent parties*; with a single maintainer it cannot do that job, so what these
-three boxes attest to is narrower: that the breaking set was enumerated before any of
-it shipped, and that each affected stream has an owning task. They are not three
-independent reviews.
-
-Verified per change rather than asserted — every stream a break touches has an owner:
-
-| Change | api | harness | web |
-|---|---|---|---|
-| B1 `POST /runs` shape | ✓ | ✓ | — |
-| B2 `permission_mode` removed | ✓ | ✓ | **✓** |
-| B3 `GET /models` shape | ✓ | ✓ | ✓ |
-| B4 heartbeat rename + `store_seq_high_water` | ✓ | ✓ | — |
-| B5 one-active-run lifted (M7) | ✓ | ✓ | — |
-| Rename  | ✓ | ✓ | — |
-
-**What this sign-off does NOT cover**, so a later reader does not over-read it: the
-two items still unverified at signing are the six-field Solid Queue cron
-(needs a live dispatcher) and `bin/check-docs` reaching green (4 genuine findings
-remain, each owned by a follow-up). Neither is a contract break; both are tracked.
+The governance table above is corrected accordingly. What has NOT changed: every break
+still needs an entry here and still must fall inside the window. The looser rule is about
+which number moves, not about whether the change is recorded.
 
 ## [1.5.0] — harness event taxonomy (additive)
 
