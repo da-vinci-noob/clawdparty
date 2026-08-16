@@ -163,7 +163,11 @@ export class BedrockConverseAdapter implements ProviderAdapter {
     // picker already labels. Everything else streams.
     const raw =
       req.tools.length > 0 && !toolUseWhileStreaming(req.model)
-        ? this.runNonStreaming(input, req.signal)
+        ? this.runNonStreaming(
+            input,
+            req.signal,
+            req.tools.map((t) => t.name),
+          )
         : this.run(input, req.signal);
     yield* mapConverseStream(raw, req.model);
   }
@@ -176,11 +180,14 @@ export class BedrockConverseAdapter implements ProviderAdapter {
   private async *runNonStreaming(
     input: unknown,
     signal: AbortSignal,
+    toolNames: readonly string[],
   ): AsyncIterable<ConverseStreamOutput> {
     const output = this.injectedNonStreamingRunner
       ? await this.injectedNonStreamingRunner(input)
       : await this.liveConverse(input, signal);
-    yield* responseToStreamEvents(output, "");
+    // The offered names are the guard on recovering a NARRATED tool call — a model that wrote
+    // its call as text (Llama 3.3) only has it executed when the name matches a real tool.
+    yield* responseToStreamEvents(output, toolNames);
   }
 
   private async *liveRun(input: unknown, signal: AbortSignal): AsyncIterable<ConverseStreamOutput> {

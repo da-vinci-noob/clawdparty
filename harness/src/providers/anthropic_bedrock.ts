@@ -2,6 +2,7 @@ import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { dedupeByModel, inferContextWindow } from "../models.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
+import { toAnthropicMessages } from "./anthropic_request.js";
 import { isAnthropicProfileId } from "./bedrock_routing.js";
 import type {
   Capabilities,
@@ -203,7 +204,7 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
         model: req.model,
         max_tokens: req.maxTokens,
         system: req.system,
-        messages: req.messages as never,
+        messages: toAnthropicMessages(req.messages) as never,
         tools: req.tools as never,
         ...(req.thinking ? { thinking: req.thinking as never } : {}),
         ...(req.effort ? { output_config: { effort: req.effort } as never } : {}),

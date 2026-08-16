@@ -21,7 +21,7 @@ import { mapConverseStream } from "../../src/providers/converse_stream.js";
 
 async function collect(output: ConverseCommandOutput, model = "m"): Promise<ProviderEvent[]> {
   const out: ProviderEvent[] = [];
-  for await (const e of mapConverseStream(responseToStreamEvents(output, model), model)) {
+  for await (const e of mapConverseStream(responseToStreamEvents(output), model)) {
     out.push(e);
   }
   return out;

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { EffortLevel } from "@clawdparty/contracts";
 import { type RawStream, classifyProbeFailure, mapAnthropicStream } from "./anthropic_family.js";
+import { toAnthropicMessages } from "./anthropic_request.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -149,7 +150,7 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
         max_tokens: req.maxTokens,
         system: req.system,
         // Verbatim blocks cross back out exactly as they came in (R6).
-        messages: req.messages as Anthropic.MessageParam[],
+        messages: toAnthropicMessages(req.messages) as Anthropic.MessageParam[],
         tools: req.tools as Anthropic.ToolUnion[],
         ...(req.thinking ? { thinking: req.thinking } : {}),
         ...(req.effort ? { output_config: { effort: req.effort } } : {}),

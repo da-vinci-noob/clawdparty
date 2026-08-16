@@ -1,6 +1,7 @@
 import { platform } from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
 import { type RawStream, classifyProbeFailure, mapAnthropicStream } from "./anthropic_family.js";
+import { toAnthropicMessages } from "./anthropic_request.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -179,7 +180,7 @@ subscription.`,
         model: req.model,
         max_tokens: req.maxTokens,
         system: req.system,
-        messages: req.messages as Anthropic.MessageParam[],
+        messages: toAnthropicMessages(req.messages) as Anthropic.MessageParam[],
         tools: req.tools as Anthropic.ToolUnion[],
         ...(req.thinking ? { thinking: req.thinking } : {}),
         ...(req.effort ? { output_config: { effort: req.effort } } : {}),
