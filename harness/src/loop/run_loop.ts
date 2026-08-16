@@ -187,8 +187,8 @@ export class RunLoop {
         credential_source: await this.credentialSource(),
         model: spec.model,
         effort: spec.effort ?? null,
-        system_prompt_digest: digest(spec.systemPrompt),
-        tool_schemas_digest: digest(JSON.stringify(built.tools)),
+        system_prompt_digest: request.digest(spec.systemPrompt),
+        tool_schemas_digest: request.digest(JSON.stringify(built.tools)),
         plugins: [] as string[],
       };
 
@@ -801,12 +801,4 @@ function classifyStreamError(err: unknown): { kind: string; message: string; rem
     message: String(err),
     remedy: "Check network access to the provider and retry the run.",
   };
-}
-
-function digest(value: string): string {
-  // Not cryptographic — this only has to prove which version was used, and a full
-  // hash import for that would be noise. Deterministic and stable is enough.
-  let hash = 5381;
-  for (let i = 0; i < value.length; i++) hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
-  return `djb2:${(hash >>> 0).toString(16)}`;
 }

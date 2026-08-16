@@ -175,6 +175,126 @@ export function placeBreakpoints(blockCount: number): number[] {
 }
 
 /**
+ * Fingerprint of a value the record references but does not copy.
+ *
+ * 32-bit and not cryptographic, which is sufficient because the job is ACCIDENT
+ * detection — "is the system prompt in the code still the one this run used?" — and not
+ * tamper detection. The record is a local file the developer already owns outright, so
+ * there is no attacker to raise the bar against. Lives here rather than in the loop
+ * because reconstruction is what the digest exists FOR, and the two must agree.
+ */
+export function digest(value: string): string {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i++) hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
+  return `djb2:${(hash >>> 0).toString(16)}`;
+}
+
+/** The `request_header` payload, as the record stores it. */
+export interface RequestSnapshot {
+  provider: string;
+  model: string;
+  effort: EffortLevel | null;
+  system_prompt_digest: string;
+  tool_schemas_digest: string;
+}
+
+export interface ReconstructInput {
+  /**
+   * A LOG PREFIX in store order — every entry up to the point being rebuilt. Not
+   * pre-filtered: the fold needs the surface entries and the snapshot needs the
+   * `request_header`s, and making the caller separate them is how the two get
+   * misaligned.
+   */
+  entries: Entry[];
+  /**
+   * The two values the record holds only as a digest. Supplied rather than recorded
+   * because a system prompt restated on every turn would dwarf the turn itself; the
+   * digest is what makes supplying them safe, since a stale one is REFUSED below
+   * instead of silently producing a request the run never sent.
+   */
+  systemPrompt: string;
+  tools: ToolSchema[];
+  capabilities: Capabilities;
+  signal: AbortSignal;
+  answerTokens?: number;
+}
+
+export type ReconstructResult =
+  | { ok: true; request: ProviderRequest; snapshot: RequestSnapshot }
+  | { ok: false; reason: "no_snapshot" }
+  | {
+      ok: false;
+      reason: "digest_mismatch";
+      field: "system_prompt" | "tool_schemas";
+      recorded: string;
+      supplied: string;
+    };
+
+/**
+ * Rebuild the request a log prefix implies.
+ *
+ * Delegates the whole construction to `build`, which is what makes "no two paths can
+ * disagree" true rather than asserted — a reconstruction that re-implemented the fold
+ * would drift the first time a cache rule or a thinking default changed, and it would
+ * drift SILENTLY because both sides would look reasonable.
+ *
+ * `model`, `effort` and `provider` come from the RECORD, never from a caller's live
+ * config. That is the direction that matters: reading them from live state would make
+ * the reconstruction describe the machine it runs on instead of the run it replays.
+ *
+ * The snapshot used is the LAST `request_header` at or before the end of the prefix,
+ * matching emit-on-change semantics — a header is written when established or changed,
+ * so folding forward to the latest one is what reproduces the turn's real configuration.
+ */
+export function reconstruct(input: ReconstructInput): ReconstructResult {
+  const snapshot = latestSnapshot(input.entries);
+  if (!snapshot) return { ok: false, reason: "no_snapshot" };
+
+  const promptDigest = digest(input.systemPrompt);
+  if (promptDigest !== snapshot.system_prompt_digest) {
+    return {
+      ok: false,
+      reason: "digest_mismatch",
+      field: "system_prompt",
+      recorded: snapshot.system_prompt_digest,
+      supplied: promptDigest,
+    };
+  }
+
+  const toolsDigest = digest(JSON.stringify(input.tools));
+  if (toolsDigest !== snapshot.tool_schemas_digest) {
+    return {
+      ok: false,
+      reason: "digest_mismatch",
+      field: "tool_schemas",
+      recorded: snapshot.tool_schemas_digest,
+      supplied: toolsDigest,
+    };
+  }
+
+  const request = build({
+    model: snapshot.model,
+    capabilities: input.capabilities,
+    systemPrompt: input.systemPrompt,
+    tools: input.tools,
+    surface: input.entries.filter((entry) => entry.on_surface === 1),
+    ...(snapshot.effort ? { effort: snapshot.effort } : {}),
+    ...(input.answerTokens === undefined ? {} : { answerTokens: input.answerTokens }),
+    signal: input.signal,
+  });
+
+  return { ok: true, request, snapshot };
+}
+
+function latestSnapshot(entries: Entry[]): RequestSnapshot | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.type === "request_header") return entry.payload as RequestSnapshot;
+  }
+  return null;
+}
+
+/**
  * Deep-freeze so mutating a built request THROWS  — a request the record
  * cannot explain becomes impossible to construct by accident rather than merely
  * discouraged.
