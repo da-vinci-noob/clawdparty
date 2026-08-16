@@ -90,13 +90,36 @@ describe("no shell input path exists", () => {
 
   it("passes bash a fixed argv and never interpolates into the shell invocation", () => {
     const body = read(join(SRC, "tools/bash.ts"));
+    const sandbox = read(join(SRC, "tools/sandbox.ts"));
 
-    // The command reaches bash as an ARGUMENT to `-lc`, which is the model's own
-    // tool call — the documented, gated path. What must never appear is the command
-    // spliced into the spawn invocation itself.
-    expect(body).toMatch(/spawn\("bash",\s*\["-lc",\s*command\]/);
-    expect(body).not.toMatch(/spawn\(\s*`/);
-    expect(body).not.toMatch(/shell:\s*true/);
+    // The command reaches bash as an ARGUMENT to `-lc`, which is the model's own tool
+    // call — the documented, gated path. What must never appear is the command spliced
+    // into the invocation itself.
+    //
+    // The argv is now BUILT by sandbox.ts (the optional sandbox-exec wrapper prepends
+    // to it), so the assertion moved from a literal spawn call to the property that
+    // matters: `command` is a standalone array element in every shape, and neither file
+    // ever builds an invocation by interpolation.
+    expect(body).toMatch(/spawn\(invocation\.bin, invocation\.args/);
+    for (const [name, source] of [
+      ["bash.ts", body],
+      ["sandbox.ts", sandbox],
+    ] as const) {
+      expect(source, `${name} interpolates into a spawn call`).not.toMatch(/spawn\(\s*`/);
+      expect(source, `${name} enables a shell`).not.toMatch(/shell:\s*true/);
+      // No template literal or concatenation may CONTAIN the command — the shapes that
+      // would turn a tool argument back into part of the command line.
+      expect(source, `${name} embeds command in a template literal`).not.toMatch(
+        /`[^`]*\$\{command\}/,
+      );
+      expect(source, `${name} concatenates command into a string`).not.toMatch(
+        /["'][^"']*"\s*\+\s*command/,
+      );
+    }
+
+    // Both shapes end with the command as its own element, after `-lc`.
+    expect(sandbox).toMatch(/args: \["-lc", command\]/);
+    expect(sandbox).toMatch(/"-lc",\n\s*command,/);
   });
 
   it("closes stdin on the spawned shell rather than inheriting it", () => {

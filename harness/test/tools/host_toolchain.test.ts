@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BashTool } from "../../src/tools/bash.js";
 import type { ToolContext } from "../../src/tools/registry.js";
+import { bashInvocation } from "../../src/tools/sandbox.js";
 import { shimDirs, toolchainEnv } from "../../src/tools/toolchain.js";
 
 /**
@@ -113,9 +114,18 @@ describe("the shell the harness actually runs", () => {
     const body = readFileSync(new URL("../../src/tools/bash.ts", import.meta.url), "utf8");
 
     // `-lc`, not `-c`. A non-login shell reads no profile at all, so a toolchain set up
-    // there would be invisible. Asserted at the source because the flag is the
-    // mechanism and nothing else observes it.
-    expect(body).toMatch(/spawn\("bash", \["-lc", command\]/);
+    // there would be invisible. Asserted behaviourally now that sandbox.ts builds the
+    // argv: BOTH shapes must be login shells, or enabling the optional sandbox would
+    // silently change which toolchain a command resolves.
+    expect(bashInvocation("echo hi", { env: {} }).args).toEqual(["-lc", "echo hi"]);
+    expect(
+      bashInvocation("echo hi", {
+        env: { HARNESS_BASH_SANDBOX: "1" },
+        platform: "darwin",
+        home: "/Users/dev",
+        exists: () => true,
+      }).args,
+    ).toEqual(expect.arrayContaining(["-lc", "echo hi"]));
     expect(body).toMatch(/env: toolchainEnv\(/);
   });
 

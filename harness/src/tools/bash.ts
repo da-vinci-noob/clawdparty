@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { type ToolContext, type ToolDefinition, type ToolResult, textResult } from "./registry.js";
+import { bashInvocation } from "./sandbox.js";
 import { toolchainEnv } from "./toolchain.js";
 
 /**
@@ -38,6 +39,8 @@ export interface BashInput {
  */
 export class BashTool {
   private current: ChildProcess | null = null;
+  /** Warn ONCE per process, not once per command — a per-call warning is noise. */
+  private warnedUnavailable = false;
 
   readonly definition: ToolDefinition = {
     name: "bash",
@@ -62,7 +65,14 @@ export class BashTool {
 
   private execute(command: string, ctx: ToolContext): Promise<ToolResult> {
     return new Promise((resolvePromise) => {
-      const child = spawn("bash", ["-lc", command], {
+      // `command` stays a standalone array element in BOTH the plain and sandboxed
+      // shapes — never interpolated into the invocation (no_shell_input.test.ts).
+      const invocation = bashInvocation(command);
+      if (invocation.unavailable && !this.warnedUnavailable) {
+        this.warnedUnavailable = true;
+        process.stderr.write(`[harness] ${invocation.unavailable}; running bash unsandboxed\n`);
+      }
+      const child = spawn(invocation.bin, invocation.args, {
         cwd: ctx.cwd,
         // stdin is closed, not inherited: a command that reads stdin gets EOF
         // rather than blocking forever on a stream nobody can write to.
