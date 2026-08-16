@@ -88,9 +88,9 @@ class RunsController < ApplicationController
       session: session,
       requested_by: participant,
       prompt: params.require(:prompt),
-      model: params[:model].presence || default_model,
+      model: Runs::ResolveModel.call(provider: provider_param, requested: params[:model]),
       mode: params[:mode].presence || 'fresh',
-      provider: params[:provider].presence || Runs::Start::DEFAULT_PROVIDER,
+      provider: provider_param,
       lane: params[:lane].presence || Runs::Start::DEFAULT_LANE,
       effort: params[:effort].presence,
       **capability_params(session)
@@ -127,7 +127,7 @@ class RunsController < ApplicationController
     participant
   end
 
-  def default_model
-    ENV.fetch('ANTHROPIC_MODEL', 'claude-opus-4-8')
+  def provider_param
+    params[:provider].presence || Runs::Start::DEFAULT_PROVIDER
   end
 end

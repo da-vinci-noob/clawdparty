@@ -1,14 +1,19 @@
-// Fetches the models available to the host's Claude/Bedrock login from
-// GET /api/models (proxied from the harness, discovered at runtime). On Bedrock the
-// ids are inference-profile ids (e.g. "global.anthropic.claude-opus-4-8") — exactly
-// what run start needs.
+// Models the host can actually serve, from GET /api/models (Rails proxies the harness's
+// per-provider discovery verbatim).
 //
-// IMPORTANT: only models the harness actually DISCOVERED (source "bedrock" or
-// "anthropic") are safe to run. A hardcoded plain id like "claude-opus-4-8" is
-// invalid on Bedrock (which requires the inference-profile id), so we never offer a
-// static fallback in the picker — until discovery resolves (and if it fails), the
-// only choice is "Default model" (the server's configured model), which always works.
+// SHAPE: `{ providers: ProviderStatus[] }`. It used to be `{ models, source }`, and this hook
+// was still reading the old shape after the harness moved to the new one — so `data.source`
+// was undefined, the gate below rejected everything, and the picker silently offered nothing
+// but "Default model". Both test suites passed the whole time: the web tests mocked the old
+// shape and the harness tests asserted the new one, and nothing exercised the seam. Hence
+// `providers_shape` in the tests, which asserts against the real contract type.
+//
+// Only models from an AVAILABLE provider are offered. A Bedrock id is an
+// account-specific inference profile, so an id that was not discovered on THIS host may not
+// resolve at all — offering one produces a run that dies at dispatch instead of a picker that
+// explains itself.
 
+import type { ProviderStatus } from "@clawdparty/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 export interface ModelInfo {
@@ -16,40 +21,90 @@ export interface ModelInfo {
   label: string;
   // The model's native context window in tokens (the CONTEXT bar's denominator).
   context_window: number;
+  /** Which provider serves it — the picker groups on this, and a run records it. */
+  provider: string;
+  providerLabel: string;
 }
 
-interface ModelList {
-  models: ModelInfo[];
-  source?: string;
-  error?: string;
+interface ProviderList {
+  providers?: ProviderStatus[];
 }
 
-// Only these sources are real, host-valid discoveries; "fallback"/loading/errors
-// carry ids that may not resolve for this login, so the picker ignores them.
-const REAL_SOURCES = new Set(["bedrock", "anthropic"]);
-
-async function fetchModels(): Promise<ModelList> {
+async function fetchProviders(): Promise<ProviderList> {
   try {
     const res = await fetch("/api/models", {
       headers: { accept: "application/json" },
       credentials: "include",
     });
-    if (!res.ok) {
-      return { models: [], source: "unavailable" };
-    }
-    return (await res.json()) as ModelList;
+    // A non-OK response is indistinguishable from "no providers" for the picker's purpose,
+    // and it must not throw: the composer stays usable with the server default.
+    if (!res.ok) return { providers: [] };
+    return (await res.json()) as ProviderList;
   } catch {
-    return { models: [], source: "unavailable" };
+    return { providers: [] };
   }
 }
 
-// The discovered, host-valid models (empty while loading or if discovery failed).
-// Consumers pair this with a "Default model" option that uses the server default.
+function toModels(providers: ProviderStatus[]): ModelInfo[] {
+  return (
+    providers
+      // The gate. An unavailable provider still arrives — reported with a reason, never
+      // omitted  — and its `models` array is empty, but filtering on `available`
+      // rather than on emptiness keeps the intent legible.
+      .filter((provider) => provider.available)
+      .flatMap((provider) =>
+        provider.models.map((model) => ({
+          id: model.id,
+          label: model.displayName,
+          // The REAL per-model window, from the provider. Previously a family-name guess in
+          // `models.ts`, which silently returned 200K for anything it did not recognise —
+          // and this number is the denominator of the live context bar.
+          context_window: model.capabilities.contextWindow,
+          provider: provider.id,
+          providerLabel: provider.displayName,
+        })),
+      )
+  );
+}
+
+/**
+ * Every model this host can serve, flattened across available providers.
+ *
+ * Empty while loading and when discovery fails, which is what makes the composer's
+ * "Default model" option load-bearing rather than decorative.
+ */
 export function useModels(): ModelInfo[] {
   const { data } = useQuery({
     queryKey: ["models"],
-    queryFn: fetchModels,
+    queryFn: fetchProviders,
     staleTime: 60_000,
   });
-  return data?.source && REAL_SOURCES.has(data.source) ? data.models : [];
+  return toModels(data?.providers ?? []);
+}
+
+/**
+ * Providers that cannot serve, with the reason and the fix.
+ *
+ * Exposed so the composer can SHOW them instead of leaving a participant with an
+ * empty picker and no explanation — the failure  were written against.
+ */
+export function useUnavailableProviders(): Array<{
+  id: string;
+  label: string;
+  reason?: string;
+  remedy?: string;
+}> {
+  const { data } = useQuery({
+    queryKey: ["models"],
+    queryFn: fetchProviders,
+    staleTime: 60_000,
+  });
+  return (data?.providers ?? [])
+    .filter((provider) => !provider.available)
+    .map((provider) => ({
+      id: provider.id,
+      label: provider.displayName,
+      reason: provider.reason,
+      remedy: provider.remedy,
+    }));
 }

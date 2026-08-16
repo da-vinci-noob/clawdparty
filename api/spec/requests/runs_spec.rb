@@ -22,6 +22,46 @@ RSpec.describe('Run control') do
     post("/api/sessions/#{session.id}/runs", params: { prompt: 'build it', model: 'm' })
   end
 
+  # Every example above names a model explicitly, which is why the hardcoded default went
+  # unnoticed: the resolution path was never entered. These cover it.
+  describe 'POST /api/sessions/:id/runs with NO model named' do
+    def providers(list)
+      allow_any_instance_of(Harness::Client).to(receive(:list_models)
+        .and_return(Harness::Client::Result.new(status: 200, body: { 'providers' => list })))
+    end
+
+    it "uses the chosen provider's own first model, not a hardcoded id" do
+      providers([{ 'id' => 'anthropic-bedrock', 'displayName' => 'Amazon Bedrock',
+                   'available' => true,
+                   'models' => [{ 'id' => 'anthropic.claude-opus-5', 'displayName' => 'Opus 5' }] }])
+      join_as(session, role: 'owner')
+
+      post("/api/sessions/#{session.id}/runs",
+           params: { prompt: 'build it', provider: 'anthropic-bedrock' })
+
+      # A bare `claude-opus-4-8` is REJECTED on Bedrock, so the old default made every
+      # unspecified run on a Bedrock host fail at dispatch with an invalid model id.
+      expect(response).to(have_http_status(:accepted))
+      expect(AiRun.last.model).to(eq('anthropic.claude-opus-5'))
+    end
+
+    it 'refuses with the provider’s remedy when nothing can be resolved' do
+      providers([{ 'id' => 'anthropic-bedrock', 'displayName' => 'Amazon Bedrock',
+                   'available' => false, 'reason' => 'unreachable',
+                   'remedy' => 'Run `aws sso login`.', 'models' => [] }])
+      join_as(session, role: 'owner')
+
+      expect do
+        post("/api/sessions/#{session.id}/runs",
+             params: { prompt: 'build it', provider: 'anthropic-bedrock' })
+      end.not_to(change(AiRun, :count))
+
+      # 422 with the fix named, not a 500 and not a queued run that dies later.
+      expect(response).to(have_http_status(:unprocessable_content))
+      expect(response.parsed_body['errors'].first['message']).to(include('aws sso login'))
+    end
+  end
+
   describe 'POST /api/sessions/:id/runs (role matrix)' do
     it 'allows owner to start a run (202)' do
       join_as(session, role: 'owner')

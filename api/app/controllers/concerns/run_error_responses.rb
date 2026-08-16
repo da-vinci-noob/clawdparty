@@ -25,6 +25,12 @@ module RunErrorResponses
     rescue_from Harness::Client::TransportError do
       render_error('The harness is unavailable; try again', :bad_gateway)
     end
+    # The message carries the provider's own remedy, so a Bedrock host with an expired SSO
+    # session is told to run `aws sso login` rather than shown "invalid model id" from a
+    # provider error two steps later.
+    rescue_from Runs::ResolveModel::Unresolvable do |error|
+      render_error("Cannot start a run: #{error.message}", :unprocessable_content)
+    end
     rescue_from Git::WorktreeManager::GitError do
       render_error('Could not prepare the session worktree — is the target repo a git repository? ' \
                    '(set TARGET_REPO_PATH to a repo with a commit)', :unprocessable_content)

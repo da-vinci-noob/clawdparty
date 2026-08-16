@@ -1,3 +1,4 @@
+import type { ProviderStatus } from "@clawdparty/contracts";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
@@ -46,6 +47,55 @@ function planRunFinished() {
   useEventStore.getState().applyMany([started, finished]);
 }
 
+/**
+ * A `/api/models` response in the REAL contract shape.
+ *
+ * TYPED against `ProviderStatus` on purpose. These mocks previously hand-wrote
+ * `{ source, models }` — the pre-harness shape — so they kept passing after the server moved
+ * to `{ providers }` and the picker was silently broken in production while this suite was
+ * green. A typed fixture makes the next shape change a compile error here.
+ */
+function providersResponse(
+  models: Array<{ id: string; label: string; window?: number }>,
+  over: Partial<ProviderStatus> = {},
+): { providers: ProviderStatus[] } {
+  return {
+    providers: [
+      {
+        id: "anthropic-direct",
+        displayName: "Anthropic (direct)",
+        available: true,
+        credentialSource: "env:ANTHROPIC_API_KEY",
+        models: models.map((m) => ({
+          id: m.id,
+          displayName: m.label,
+          capabilities: { ...MODEL_CAPS, contextWindow: m.window ?? 200_000 },
+        })),
+        ...over,
+      },
+    ],
+  };
+}
+
+const MODEL_CAPS = {
+  streaming: true as const,
+  toolUse: true as const,
+  contextWindow: 200_000,
+  maxOutputTokens: 64_000,
+  adaptiveThinking: true,
+  thinkingDisplaySummarized: true,
+  effortLevels: [],
+  promptCaching: true,
+  minCacheablePrefixTokens: 512,
+  serverSideCompaction: false,
+  contextEditing: false,
+  serverSideTools: { webSearch: true, webFetch: true, codeExecution: true },
+  liveModelDiscovery: true,
+  serverSideRefusalFallback: true,
+  midConversationSystemMessages: true,
+  midConversationToolChanges: true,
+};
+
 describe("PromptComposer permission modes", () => {
   beforeEach(() => {
     useParticipantStore.getState().clear();
@@ -91,10 +141,13 @@ describe("PromptComposer permission modes", () => {
   it("populates the model dropdown from GET /api/models and sends the chosen model", async () => {
     server.use(
       http.get("/api/models", () =>
-        HttpResponse.json({
-          source: "bedrock",
-          models: [{ id: "us.anthropic.claude-opus-4-8", label: "Bedrock Opus 4.8" }],
-        }),
+        HttpResponse.json(
+          providersResponse([{ id: "us.anthropic.claude-opus-4-8", label: "Bedrock Opus 4.8" }], {
+            id: "anthropic-bedrock",
+            displayName: "Amazon Bedrock",
+            credentialSource: "env:AWS_PROFILE",
+          }),
+        ),
       ),
     );
     const cap = captureRunStart();
@@ -251,10 +304,9 @@ describe("PromptComposer context bar", () => {
     // window must come from model discovery (context_window / max_input_tokens).
     server.use(
       http.get("/api/models", () =>
-        HttpResponse.json({
-          source: "anthropic",
-          models: [{ id: "claude-opus-4-8", label: "Opus 4.8", context_window: 1_000_000 }],
-        }),
+        HttpResponse.json(
+          providersResponse([{ id: "claude-opus-4-8", label: "Opus 4.8", window: 1_000_000 }]),
+        ),
       ),
     );
     // 120000 input + 4000 cache-read = 124000 → 124K of a 1M window → 12%.
@@ -279,10 +331,9 @@ describe("PromptComposer context bar", () => {
   it("reflects usage against a 200K-model window (haiku)", async () => {
     server.use(
       http.get("/api/models", () =>
-        HttpResponse.json({
-          source: "anthropic",
-          models: [{ id: "claude-haiku-4-5-20251001", label: "Haiku", context_window: 200_000 }],
-        }),
+        HttpResponse.json(
+          providersResponse([{ id: "claude-haiku-4-5-20251001", label: "Haiku", window: 200_000 }]),
+        ),
       ),
     );
     runWithUsage("claude-haiku-4-5-20251001", {

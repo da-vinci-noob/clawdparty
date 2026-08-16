@@ -1,5 +1,5 @@
 import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
-import { inferContextWindow } from "../models.js";
+import { dedupeByModel, inferContextWindow } from "../models.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
 import type {
   Capabilities,
@@ -62,16 +62,25 @@ const BEDROCK_CAPABILITIES: Omit<Capabilities, "contextWindow"> = {
 };
 
 /**
- * Last-resort model list, used when the AWS control plane cannot be reached.
+ * NO STATIC MODEL LIST, deliberately.
  *
- * `anthropic.`-prefixed, which is the id form Bedrock's `model` parameter needs (R3) —
- * bare first-party ids are rejected there. Deliberately short: a long guessed list would
- * fill the picker with models the account may not have access to.
+ * An earlier version of this file kept two `anthropic.`-prefixed ids as a fallback for when
+ * the control plane could not be reached, reasoning that an empty picker is worse than a
+ * guessed one. That is backwards:  says a participant MUST NOT be offered a model the
+ * host cannot serve, and a guessed inference-profile id is exactly that — the account may
+ * not have it enabled, and the run fails at dispatch with a provider error instead of at
+ * selection with a reason.
+ *
+ * So discovery FAILS LOUDLY here. `listProviders` catches it and reports this provider
+ * `available: false` with the message below as its remedy, which satisfies 's "report
+ * why" as well. `web/src/hooks/use_models.ts` already argued the same position for the
+ * picker; this makes the harness agree with it.
  */
-const FALLBACK_PROFILES: ReadonlyArray<{ id: string; displayName: string }> = [
-  { id: "anthropic.claude-opus-4-8", displayName: "Claude Opus 4.8 (Bedrock)" },
-  { id: "anthropic.claude-sonnet-5", displayName: "Claude Sonnet 5 (Bedrock)" },
-];
+const DISCOVERY_FAILED =
+  "could not list Bedrock inference profiles. The AWS session needs " +
+  "bedrock:ListInferenceProfiles, and Bedrock model ids are account-specific so they " +
+  "cannot be guessed. Run `aws sso login`, check the region, and confirm the role has " +
+  "Bedrock read access";
 
 export interface AnthropicBedrockOptions {
   client?: AnthropicBedrockMantle;
@@ -140,11 +149,11 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   }
 
   /**
-   * Live model discovery from the AWS control plane, with a static fallback.
+   * Live model discovery from the AWS control plane. THROWS when it cannot enumerate.
    *
-   * Never throws: a listing failure degrades to `FALLBACK_PROFILES` rather than emptying
-   * the picker, because `/models` reporting nothing is the failure mode  were
-   * written against.
+   * The throw is the feature: `listProviders` turns it into `available: false` plus a
+   * remedy, so the participant sees why Bedrock is not offering models instead of seeing
+   * two ids that may not resolve on this account.
    */
   async listModels(): Promise<ModelInfo[]> {
     const profiles = await this.profiles();
@@ -210,25 +219,37 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   }
 
   /**
-   * The seam replaces only the SOURCE, so the fallback runs identically for a real control
-   * plane and an injected one.
+   * The seam replaces only the SOURCE, so the surrounding handling runs identically for a
+   * real control plane and an injected one.
    *
    * It was originally an early return — `if (injected) return injected()` — which put the
-   * seam OUTSIDE the fallback and made both fallback paths untestable: an injected thrower
-   * propagated instead of degrading, and an injected empty list came straight back. A test
-   * seam that bypasses the behaviour under test is worse than none, because the suite then
-   * reports on a path production never takes.
+   * seam OUTSIDE that handling and made both failure paths untestable: an injected thrower
+   * propagated unchanged, and an injected empty list came straight back. A test seam that
+   * bypasses the behaviour under test is worse than none, because the suite then reports on
+   * a path production never takes.
    */
   private async profiles(): Promise<Array<{ id: string; displayName: string }>> {
     const source = this.injectedListProfiles ?? (() => listInferenceProfiles(this.region()));
+    let found: Array<{ id: string; displayName: string }>;
     try {
-      const found = await source();
-      // An account with no Anthropic profiles enabled returns an EMPTY list rather than an
-      // error, and empty reaching the picker is indistinguishable from a broken login.
-      return found.length > 0 ? found : [...FALLBACK_PROFILES];
-    } catch {
-      return [...FALLBACK_PROFILES];
+      found = await source();
+    } catch (err) {
+      throw new Error(`${DISCOVERY_FAILED} (${String(err)})`);
     }
+
+    // An account with no Anthropic profiles enabled returns an EMPTY list rather than an
+    // error, so empty is treated the same as a failure: both mean "this host cannot tell you
+    // which models it serves", and neither justifies inventing ids.
+    if (found.length === 0) throw new Error(`${DISCOVERY_FAILED} (the account listed none)`);
+
+    // DEDUPED HERE, not inside `listInferenceProfiles`, so an injected source is deduped too —
+    // the same seam lesson as above. Bedrock exposes a separate cross-region inference profile
+    // per routing scope (us./global./eu./apac.) for the SAME model, so the raw listing yields
+    // "US Claude Opus 5" next to "Global Claude Opus 5". Without this the picker shows one
+    // model four times and a participant has to guess which routing scope they want.
+    return dedupeByModel(
+      found.map((p) => ({ id: p.id, label: p.displayName, context_window: 0 })),
+    ).map((p) => ({ id: p.id, displayName: p.label }));
   }
 }
 
