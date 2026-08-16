@@ -54,8 +54,13 @@ jobs:
 
       # Gate 1 (scenario S3). Its own REQUIRED step because it is the only thing that
       # exercises a real SIGKILL: it spawns a child, kills it at every commit boundary,
-      # and asserts no `never` tool ran twice and no call went unanswered. It already
-      # found two defects invisible to every other test, so a regression here must be
-      # legible instead of one line among 337.
+      # and asserts no `never` tool ran twice and no call went unanswered. It has already
+      # found three defects invisible to every other test, so a regression here must be
+      # legible instead of one line among 350.
+      #
+      # Runs through scripts/crash_gate.mjs, which enforces a SKIP BUDGET: vitest exits 0
+      # on skipped assertions, so without it the gate reported green while 12 of its 50
+      # assertions were switched off. The budget fails in BOTH directions -- over it is a
+      # regression, under it means lower the budget.
       - name: Crash injection gate (test:crash)
         run: npm run test:crash
