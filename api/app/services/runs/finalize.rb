@@ -46,15 +46,12 @@ module Runs
 
     private
 
-    # Transition queued → running and capture the Claude session id the harness
-    # reports in run_started, so a later follow-up can resume that session. Both
-    # writes are combined into one update! (payload keys are strings).
+    # Transition queued → running. It used to also capture a `claude_session_id` off the
+    # payload so a follow-up could resume that SDK session; resumption is now by harness
+    # session + lane (Runs::Start#resume_context?), so the field is gone from the payload
+    # and the column with it.
     def finalize_run_started(run)
-      attrs = {}
-      attrs[:status] = 'running' if run.status == 'queued'
-      sid = @event.payload['claude_session_id'].presence
-      attrs[:claude_session_id] = sid if sid && run.claude_session_id.blank?
-      run.update!(attrs) unless attrs.empty?
+      run.update!(status: 'running') if run.status == 'queued'
     end
 
     # Apply a derived terminal/review status. Entering awaiting_review is special:

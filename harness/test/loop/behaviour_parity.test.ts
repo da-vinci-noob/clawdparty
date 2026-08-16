@@ -9,6 +9,7 @@ import {
   SYNTHESIZED_EVENT_TYPES,
 } from "@clawdparty/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { TURNS } from "../../scripts/narrative.js";
 import { RunLoop } from "../../src/loop/run_loop.js";
 import type {
   Capabilities,
@@ -255,46 +256,17 @@ async function runScripted(turns: Turn[], cwd: string) {
 }
 
 describe("behaviour parity — the executable contract still holds", () => {
-  it("reproduces the fixture's durable type sequence for an equivalent run", async () => {
-    const { outcome } = await runScripted(
-      [
-        // Turn 1: thinking, text, then a FILE-WRITING tool that fails — which is
-        // the fixture's narrative, and the reason file_changed precedes
-        // tool_failed there. The event is derived from the call, not the outcome.
-        turn(
-          [
-            block(0, "thinking", "considering the request"),
-            block(1, "text", "I'll add the note."),
-            toolUse(2, "toolu_a", "failing_writer", {
-              command: "create",
-              path: "SPIKE_NOTE.md",
-              file_text: "hello from the spike\n",
-            }),
-          ],
-          "tool_use",
-        ),
-        // Turn 2: thinking, then a READ that succeeds — the fixture's second tool
-        // is Read, so no file_changed accompanies it.
-        turn(
-          [
-            block(0, "thinking", "trying another way"),
-            toolUse(1, "toolu_b", "read", { path: "SPIKE_NOTE.md" }),
-          ],
-          "tool_use",
-        ),
-        // Turn 3: thinking, a bash call producing terminal output.
-        turn(
-          [
-            block(0, "thinking", "verifying"),
-            toolUse(1, "toolu_c", "bash", { command: "cat SPIKE_NOTE.md" }),
-          ],
-          "tool_use",
-        ),
-        // Turn 4: the closing answer.
-        turn([block(0, "text", "Done — the note is in place.")], "end_turn"),
-      ],
-      worktree,
-    );
+  it("reproduces the fixture's durable type sequence for the SHARED narrative", async () => {
+    // Replays the SAME narrative `scripts/capture_fixture.ts` generated the fixture from —
+    // imported, not restated. When the two were separate scripts this comparison silently
+    // came out empty and passed as "nothing to compare".
+    //
+    // A generated fixture cannot prove the harness CORRECT; it is checking the harness
+    // against its own output. It proves the harness STABLE: an unintended change to the
+    // durable type sequence fails here and has to be regenerated on purpose. The
+    // correctness properties are asserted separately below, where the fixture is not the
+    // authority.
+    const { outcome } = await runScripted(TURNS, worktree);
 
     expect(outcome.outcome).toBe("finished");
 

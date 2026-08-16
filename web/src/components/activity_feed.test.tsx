@@ -40,17 +40,18 @@ describe("ActivityFeed", () => {
     expect(screen.queryByTestId("feed-raw-fallback")).not.toBeInTheDocument();
   });
 
-  it("survives a from_phase the harness never emits", async () => {
+  it("translates the fixture's from_phase into plain terms", async () => {
     renderFeed();
-    // The fixture says `awaiting_provider_response`; the harness emits `request_pending`.
-    // `from_phase` is typed as a free string, so an unknown value must pass through rather
-    // than render blank or throw.
     act(() =>
       useEventStore.getState().applyMany(fixture.filter((e) => e.type === "recovery_applied")),
     );
 
+    // The fixture now carries `request_pending`, captured from a real recovery — it used to
+    // say `awaiting_provider_response`, a phase name the harness never emits. A participant
+    // needs to know the run was waiting on the model, not which register held it.
     const row = await screen.findByTestId("feed-recovery-applied");
-    expect(row.textContent).toContain("awaiting_provider_response");
+    expect(row.textContent).toContain("waiting on the model");
+    expect(row.textContent).not.toContain("request_pending");
   });
 
   it("renders the contract fixture: text bubbles, tool chips, terminal, banners, file rows", async () => {
@@ -68,11 +69,12 @@ describe("ActivityFeed", () => {
   it("renders tool chips with the SUMMARIZED input, never the full payload", () => {
     renderFeed();
     act(() => useEventStore.getState().applyMany(fixture));
-    // The Write tool's chip shows the path (SPIKE_NOTE.md), not file content.
+    // The editor's chip shows the command and path, never `file_text`. A chip that rendered
+    // the payload would put whole files — and anything in them — into the shared feed.
     const chips = screen.getAllByTestId("feed-tool-chip");
     const text = chips.map((c) => c.textContent).join(" ");
-    expect(text).toContain("SPIKE_NOTE.md");
-    expect(text).not.toContain("hello from the spike\nmore"); // no full file body
+    expect(text).toContain("note.md");
+    expect(text).not.toContain("First line."); // the file body must not appear
   });
 
   it("renders user_prompt first, then run banner, then Claude text — a conversation", () => {

@@ -118,6 +118,39 @@ would refuse to continue. A settlement key is NULL on ordinary entries, so it ca
 collide by construction. Found by the crash-injection gate, invisible to every other
 test because the happy path never settles under a reserved id.
 
+### Breaking — the fixture is recaptured, not edited (B8)
+
+| # | Change | Streams |
+|---|---|---|
+| B8 | **`fixtures/sample_run.jsonl` is regenerated from a real harness run** (`npm run capture:fixture`). `RunStartedPayload` drops `permission_mode` and `claude_session_id`. `file_changed` now follows the OUTCOME, so a failed write emits none at all. `recovery_applied` carries a `seq` — it is durable per `events.md` and was being emitted with `seq: null`. `CONTRACT_VERSION` unchanged: the taxonomy is untouched and `RunStartedPayload` loses two fields no producer has filled since the engine swap. | harness, api, web |
+
+The fixture was captured from an Agent SDK spike, and that SDK is deleted — so it had
+drifted into describing a predecessor system on four counts, all verified before deciding:
+`run_started` still carried the two Agent-SDK fields; `recovery_applied.from_phase` said
+`awaiting_provider_response` where the harness emits `request_pending`; `file_changed`
+preceded `tool_failed` because it was derived from the tool CALL; and it contained no
+`ai_raw` at all, so it never described the tool-result surface write either.
+
+**It is now generated, not hand-maintained.** A hand-edited fixture drifts again; a
+generated one drifts only when behaviour does, and the diff is the review artifact.
+Regeneration is byte-identical (fixed clock, fixed ids, normalized scratch path) so the
+diff is readable.
+
+Two things the recapture could NOT do, stated rather than hidden:
+
+- **Five types have no emitter** — `chat_message` and `participant_joined` are
+  Rails-originated, and `context_compacted`/`context_usage`/`provider_error`/`plugin_*`
+  belong to unbuilt stories. They live in `fixtures/not_yet_emitted.jsonl` and are appended
+  verbatim. Deleting them to make the file "purely captured" would silently drop coverage
+  for types the taxonomy already froze.
+- **The parity comparison is now circular** — it checks the harness against its own output.
+  That is accepted, and mitigated two ways: the narrative is a SHARED module
+  (`scripts/narrative.ts`) so the capture and the test cannot diverge into an empty
+  comparison, and `behaviour_parity.test.ts` asserts properties the fixture cannot vouch for
+  (every `tool_use` answered, ephemeral events carrying null `seq`/`id`, gapless durable
+  `seq`, tool results in ONE user message). Golden-file testing proves stability, not
+  correctness; the properties cover the rest.
+
 ### Governance question — RESOLVED
 
 The table at the top of this file said a frozen **endpoint signature** change bumps

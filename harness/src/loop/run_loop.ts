@@ -107,10 +107,7 @@ export class RunLoop {
     // so a crash in the very first request still leaves a run a reader can explain.
     const opening = [
       normalizer.userPrompt(spec.prompt, this.now()),
-      normalizer.runStarted(
-        { model: spec.model, cwd: spec.cwd, permission_mode: "", claude_session_id: "" },
-        this.now(),
-      ),
+      normalizer.runStarted({ model: spec.model, cwd: spec.cwd }, this.now()),
     ];
     store.commit({
       writes: [
@@ -583,10 +580,13 @@ export class RunLoop {
       // The id has to be threaded in: `terminal_output` is keyed by tool_use_id so
       // the feed can attach output to the right chip.
       onOutput: (chunk) => emitted.push(...normalizer.terminalOutput(toolUseId, chunk, this.now())),
-      // `onFileChanged` is deliberately NOT subscribed: `file_changed` is derived
-      // from the tool CALL in the normalizer, so subscribing here emitted it twice.
-      // A failed write therefore still reports a file as changed — fixed by a follow-up,
-      // which owns the behaviour change and the contract update it needs.
+      // Subscribed here, and this is the whole fix: only a tool that actually
+      // WROTE calls this, so `file_changed` now follows the outcome. Derived from the
+      // tool call it fired for a failed write too, telling the room a file changed when
+      // it had not. The event consequently arrives AFTER `tool_finished` rather than
+      // before it, which is why this needed a contract update rather than a patch.
+      onFileChanged: (path, change) =>
+        emitted.push(...[normalizer.fileChanged(toolUseId, path, change, this.now())]),
     };
 
     try {

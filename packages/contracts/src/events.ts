@@ -197,8 +197,6 @@ export interface TokenUsage {
 export interface RunStartedPayload {
   model: string;
   cwd: string;
-  permission_mode: string;
-  claude_session_id: string;
   /** The capabilities the run actually applied (additive since v1.4), echoed so
    *  the UI — including late joiners via backfill — reflects a run's real scope.
    *  Omitted means "today's defaults" (nothing disabled / no connectors / no

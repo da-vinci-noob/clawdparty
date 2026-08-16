@@ -31,15 +31,14 @@ RSpec.describe(Runs::Finalize) do
     expect(run.reload.status).to(eq('running'))
   end
 
-  it 'captures claude_session_id from the run_started payload (so follow-ups can resume it)' do
-    ingest('run_started', seq: 1, actor_kind: 'user', payload: { 'claude_session_id' => 'sess-abc' })
-    expect(run.reload.claude_session_id).to(eq('sess-abc'))
-    expect(run.status).to(eq('running'))
-  end
+  it 'transitions queued -> running and stores no session identity' do
+    ingest('run_started', seq: 1, actor_kind: 'user', payload: { 'model' => 'claude-opus-5' })
 
-  it 'leaves claude_session_id nil when run_started carries none' do
-    ingest('run_started', seq: 1, actor_kind: 'user')
-    expect(run.reload.claude_session_id).to(be_nil)
+    # It used to capture a `claude_session_id` so a follow-up could resume that SDK
+    # session. Resumption is now by harness session + lane (Runs::Start#resume_context?),
+    # so the payload field and the column are both gone — and the run must still start.
+    expect(run.reload.status).to(eq('running'))
+    expect(AiRun.column_names).not_to(include('claude_session_id'))
   end
 
   it 'transitions running → failed on run_failed' do

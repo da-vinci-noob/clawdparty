@@ -113,8 +113,13 @@ RSpec.describe(FakeClaude::Replay) do
     it 'keeps recovery_applied uncertainty as an explicit boolean' do
       recovery = Event.find_by(session_id: result[:session_id], event_type: 'recovery_applied')
 
+      # TRUE on purpose. The fixture now captures a real recovery from `request_pending`,
+      # which is the load-bearing case (events.md: "never default it to `false` to simplify
+      # a display"). Pinning `false` — as this did while the fixture happened to carry it —
+      # would pass even if ingest coerced the flag to false, which is the exact bug the
+      # assertion exists to catch.
       expect(recovery.payload).to(include('uncertain'))
-      expect(recovery.payload['uncertain']).to(be(false))
+      expect(recovery.payload['uncertain']).to(be(true))
     end
 
     it 'rejects no event in the fixture' do

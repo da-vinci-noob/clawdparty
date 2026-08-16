@@ -234,19 +234,10 @@ export class LoopNormalizer {
       ),
     ];
 
-    // `file_changed` is derived from the tool CALL, not from the result, so the
-    // feed shows the file the moment the edit is dispatched.
-    const path = filePathFrom(name, shape.input);
-    if (path !== null) {
-      out.push(
-        this.envelope(
-          "file_changed",
-          { kind: "claude" },
-          { tool_use_id: id, path, change: name === "create" ? "created" : "modified" },
-          nowMs,
-        ),
-      );
-    }
+    // NO `file_changed` here. It used to be derived from the tool CALL, which
+    // meant a FAILED write still reported a file as changed — the feed asserted an
+    // effect that never happened. It is now emitted from `ToolContext.onFileChanged`,
+    // i.e. by the tool that actually wrote, so the event follows the OUTCOME.
     return out;
   }
 
@@ -439,16 +430,4 @@ function inferKind(shape: Record<string, unknown>): BlockAccumulator["kind"] {
 
 function firstNonEmpty(...candidates: string[]): string {
   return candidates.find((c) => c.length > 0) ?? "";
-}
-
-/**
- * The path a tool call is about to change, or null if it changes nothing.
- * Recognises the canonical `text_editor` sub-commands; `view` mutates nothing.
- */
-function filePathFrom(name: string, input: unknown): string | null {
-  const args = (input ?? {}) as Record<string, unknown>;
-  const command = String(args.command ?? name);
-  if (!["create", "str_replace", "insert"].includes(command)) return null;
-  const path = args.path ?? args.file_path;
-  return typeof path === "string" && path.length > 0 ? path : null;
 }

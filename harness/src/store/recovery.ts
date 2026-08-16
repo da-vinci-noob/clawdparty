@@ -69,7 +69,7 @@ export async function applyRecovery(
 
   switch (plan.action) {
     case "resume":
-      return outcome(plan, fromPhase, "resumed", false, 0, 0, [], false, runId, deps);
+      return outcome(plan, fromPhase, "resumed", false, 0, 0, [], false, runId, deps, store);
 
     case "settle_uncertain":
       return settleUncertain(store, runId, plan, fromPhase, deps);
@@ -81,15 +81,15 @@ export async function applyRecovery(
       // Deterministic over the logged region, so the loop simply redoes it. Position
       // returns to `checkpoint` because compaction is not an effect to settle.
       checkpoint.write(store, runId, { phase: "checkpoint" });
-      return outcome(plan, fromPhase, "replayed", false, 0, 0, [], false, runId, deps);
+      return outcome(plan, fromPhase, "replayed", false, 0, 0, [], false, runId, deps, store);
 
     case "nothing_owed":
       // A terminal position means the terminal transaction already ran. Nothing to
       // write; Rails may still be behind, so this is reported rather than silent.
-      return outcome(plan, fromPhase, "resumed", false, 0, 0, [], true, runId, deps);
+      return outcome(plan, fromPhase, "resumed", false, 0, 0, [], true, runId, deps, store);
 
     case "report_failed":
-      return outcome(plan, fromPhase, "failed", false, 0, 0, [], true, runId, deps);
+      return outcome(plan, fromPhase, "failed", false, 0, 0, [], true, runId, deps, store);
   }
 }
 
@@ -144,7 +144,7 @@ function settleUncertain(
     synthesized: 1,
     reexecuted: 0,
     executed: 0,
-    events: [recoveryEvent(runId, fromPhase, "abandoned", true, ts)],
+    events: [recoveryEvent(store, runId, fromPhase, "abandoned", true, ts)],
     terminal: true,
   };
 }
@@ -242,7 +242,7 @@ async function finishTools(
 
   const synthesized = plan.synthesize.length;
   events.push(
-    recoveryEvent(runId, fromPhase, synthesized > 0 ? "abandoned" : "replayed", false, ts),
+    recoveryEvent(store, runId, fromPhase, synthesized > 0 ? "abandoned" : "replayed", false, ts),
   );
 
   return {
@@ -314,7 +314,15 @@ function resultWrite(
   };
 }
 
+/**
+ * `recovery_applied` is DURABLE, so it carries a `seq` (events.md: "durable | run |
+ * ai_run_id + seq"). Emitting it with `seq: null` made it look ephemeral by envelope while
+ * Rails classified it as durable BY TYPE and persisted it with a null dedupe key — so a
+ * late joiner had no ordered position for the one event that explains why the run restarted.
+ * Caught by recapturing the fixture, which showed it missing from the durable sequence.
+ */
 function recoveryEvent(
+  store: HarnessStoreApi,
   runId: string,
   fromPhase: string,
   action: RecoveryAppliedPayload["action"],
@@ -325,7 +333,7 @@ function recoveryEvent(
     id: null,
     session_id: "",
     ai_run_id: runId,
-    seq: null,
+    seq: store.allocateSeq(runId),
     type: "recovery_applied",
     actor: { kind: "system" },
     ts: new Date(ts).toISOString(),
@@ -344,6 +352,7 @@ function outcome(
   terminal: boolean,
   runId: string,
   deps: RecoveryDeps,
+  store: HarnessStoreApi,
 ): RecoveryOutcome {
   return {
     plan,
@@ -353,7 +362,7 @@ function outcome(
     synthesized,
     reexecuted,
     executed: 0,
-    events: [...extra, recoveryEvent(runId, fromPhase, action, uncertain, deps.now())],
+    events: [...extra, recoveryEvent(store, runId, fromPhase, action, uncertain, deps.now())],
     terminal,
   };
 }

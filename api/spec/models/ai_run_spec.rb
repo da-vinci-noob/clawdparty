@@ -21,7 +21,6 @@ require 'rails_helper'
 #  usage             :jsonb
 #  created_at        :datetime         not null
 #  updated_at        :datetime         not null
-#  claude_session_id :string
 #  requested_by_id   :bigint
 #  reviewed_by_id    :bigint
 #  session_id        :bigint           not null
