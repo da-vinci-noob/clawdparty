@@ -5,7 +5,7 @@ import type { EnvelopeType } from "@clawdparty/contracts";
  * rather than migrating it  — the harness reports the run
  * failed instead of guessing at an older layout.
  */
-export const STORE_SCHEMA_VERSION = 1;
+export const STORE_SCHEMA_VERSION = 2;
 
 /** Staleness threshold, shared with Rails' Harness::HealthcheckJob. */
 export const LOCK_STALE_AFTER_MS = 15_000;
@@ -32,6 +32,13 @@ export interface Entry {
   blocks: unknown[] | null;
   /** 1 = contributes to model history, i.e. is part of the request surface. */
   on_surface: 0 | 1;
+  /**
+   * The settlement identity of an uncertain effect; NULL for an ordinary entry.
+   * `UNIQUE (run_id, settlement_key)` is what makes a settlement single-use, so a
+   * crash DURING recovery cannot double-settle. See schema.sql for why this replaced
+   * reserving a `seq`.
+   */
+  settlement_key?: string | null;
 }
 
 export interface UsageRow {
@@ -82,12 +89,13 @@ export type Position =
   | {
       /**
        * THE ONLY PERMITTED UNCERTAINTY WINDOW. The request may have been
-       * billed and may or may not have produced output. Both ids are reserved
+       * billed and may or may not have produced output. The identity is fixed
        * BEFORE the request is dispatched so a synthetic outcome can be written
        * under the same identity after a crash.
        */
       phase: "request_pending";
-      reservedEntrySeq: number;
+      /** Settlement identity, NOT a reserved seq — see schema.sql. */
+      settlementKey: string;
       reservedUsageId: number;
       requestSnapshotId: string;
       attempt: number;
@@ -106,7 +114,12 @@ export interface ToolCallPosition {
   index: number;
   toolUseId: string;
   name: string;
-  reservedEntrySeq: number;
+  /**
+   * Settlement identity, NOT a reserved seq. It IS the `toolUseId`: already unique,
+   * already known before the effect starts, and it cannot collide with the turn's own
+   * entries because those carry no settlement key at all.
+   */
+  settlementKey: string;
   /**
    * Declared by the tool, defaulting to `never` for anything undeclared
    *. `never` means a crash mid-effect writes a synthetic interrupted

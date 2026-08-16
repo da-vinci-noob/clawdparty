@@ -38,7 +38,15 @@ export interface RecoveryOutcome {
   action: RecoveryAppliedPayload["action"];
   uncertain: boolean;
   synthesized: number;
+  /** Calls RE-run after their effect may already have happened (`replay: "safe"`). */
   reexecuted: number;
+  /**
+   * Calls run for the FIRST time (they were `planned`, so nothing had happened yet).
+   * Reported separately from `reexecuted` on purpose: conflating them loses the
+   * distinction between "we replayed something" and "we started something", which is the
+   * only distinction that matters for double-effect reasoning.
+   */
+  executed: number;
   /** `recovery_applied`, plus a synthetic settlement event per interrupted call. */
   events: EventEnvelope[];
   /** True when the run is over and Rails should be told. */
@@ -109,7 +117,10 @@ function settleUncertain(
       kind: "entry",
       entry: {
         run_id: runId,
-        seq: plan.reservedEntrySeq,
+        // seq allocated NORMALLY. Single-use comes from `settlement_key`, not from a
+        // reserved seq — reserving one collided with the turn's own entries.
+        seq: store.nextSeq(runId),
+        settlement_key: plan.settlementKey,
         type: "run_interrupted",
         actor_kind: "system",
         actor_id: null,
@@ -132,6 +143,7 @@ function settleUncertain(
     uncertain: true,
     synthesized: 1,
     reexecuted: 0,
+    executed: 0,
     events: [recoveryEvent(runId, fromPhase, "abandoned", true, ts)],
     terminal: true,
   };
@@ -165,7 +177,8 @@ async function finishTools(
           kind: "entry",
           entry: {
             run_id: runId,
-            seq: call.reservedEntrySeq,
+            seq: store.nextSeq(runId),
+            settlement_key: call.settlementKey,
             type: "tool_failed",
             actor_kind: "system",
             actor_id: null,
@@ -195,44 +208,30 @@ async function finishTools(
     });
   }
 
+  // `planned` FIRST: they never started, so this is a first execution and is safe
+  // whatever the replay policy says. Without this they were left with no tool_result at
+  // all, which a provider rejects outright.
+  let executed = 0;
+  for (const call of plan.execute) {
+    const result = await runCall(store, position, call, deps);
+    executed += 1;
+    position = checkpoint.withCallStatus(position, call.index, "completed");
+    store.commit({
+      writes: [
+        resultWrite(runId, store.nextSeq(runId), call, result, ts),
+        checkpoint.positionWrite(runId, position),
+      ],
+    });
+  }
+
   let reexecuted = 0;
   for (const call of plan.reexecute) {
-    // Args come from the RECORD (`run.tool_args`, persisted at clearance), not
-    // from memory — memory is what the crash destroyed.
-    const args = store.readRegister?.("run.tool_args", `${position.stepId}:${call.index}`) ?? null;
-    const result = deps.reexecute
-      ? await deps.reexecute(call, args)
-      : { ok: false, text: INTERRUPTED };
+    const result = await runCall(store, position, call, deps);
     reexecuted += 1;
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
       writes: [
-        {
-          kind: "entry",
-          entry: {
-            run_id: runId,
-            seq: call.reservedEntrySeq,
-            type: result.ok ? "tool_finished" : "tool_failed",
-            actor_kind: "system",
-            actor_id: null,
-            ts_ms: ts,
-            payload: {
-              tool_use_id: call.toolUseId,
-              name: call.name,
-              recovered: true,
-              ...(result.ok ? {} : { error: result.text }),
-            },
-            blocks: [
-              {
-                type: "tool_result",
-                tool_use_id: call.toolUseId,
-                content: [{ type: "text", text: result.text }],
-                is_error: !result.ok,
-              },
-            ],
-            on_surface: 1,
-          },
-        },
+        resultWrite(runId, store.nextSeq(runId), call, result, ts),
         checkpoint.positionWrite(runId, position),
       ],
     });
@@ -253,8 +252,65 @@ async function finishTools(
     uncertain: false,
     synthesized,
     reexecuted,
+    executed,
     events,
     terminal: false,
+  };
+}
+
+/**
+ * Run one call, taking its args from the RECORD (`run.tool_args`, persisted at
+ * clearance) rather than from memory — memory is what the crash destroyed.
+ */
+async function runCall(
+  store: HarnessStoreApi,
+  position: checkpoint.ToolsPosition,
+  call: ToolCallPosition,
+  deps: RecoveryDeps,
+): Promise<ReexecuteResult> {
+  const args = store.readRegister?.("run.tool_args", `${position.stepId}:${call.index}`) ?? null;
+  return deps.reexecute ? deps.reexecute(call, args) : { ok: false, text: INTERRUPTED };
+}
+
+/** One settled tool result, ON the surface, under the call's SETTLEMENT KEY. */
+function resultWrite(
+  runId: string,
+  seq: number,
+  call: ToolCallPosition,
+  result: ReexecuteResult,
+  ts: number,
+): Write {
+  return {
+    kind: "entry",
+    entry: {
+      run_id: runId,
+      // Allocated normally; the SETTLEMENT KEY is what makes this single-use. A seq
+      // spent on a rejected duplicate simply leaves a gap, which the contract permits
+      // ("per-run monotonic", not gapless).
+      seq,
+      settlement_key: call.settlementKey,
+      type: result.ok ? "tool_finished" : "tool_failed",
+      actor_kind: "system",
+      actor_id: null,
+      ts_ms: ts,
+      payload: {
+        tool_use_id: call.toolUseId,
+        name: call.name,
+        recovered: true,
+        ...(result.ok ? {} : { error: result.text }),
+      },
+      // ON the surface: a provider REJECTS a request whose tool_use has no matching
+      // tool_result, so off-surface here breaks the very next request.
+      blocks: [
+        {
+          type: "tool_result",
+          tool_use_id: call.toolUseId,
+          content: [{ type: "text", text: result.text }],
+          is_error: !result.ok,
+        },
+      ],
+      on_surface: 1,
+    },
   };
 }
 
@@ -296,6 +352,7 @@ function outcome(
     uncertain,
     synthesized,
     reexecuted,
+    executed: 0,
     events: [...extra, recoveryEvent(runId, fromPhase, action, uncertain, deps.now())],
     terminal,
   };

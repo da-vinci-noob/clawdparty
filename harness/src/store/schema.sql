@@ -45,7 +45,21 @@ CREATE TABLE IF NOT EXISTS entries (
   payload     TEXT NOT NULL,
   blocks      TEXT,
   on_surface  INTEGER NOT NULL DEFAULT 0,
+  -- The SETTLEMENT IDENTITY of an uncertain effect, NULL for an ordinary entry.
+  --
+  -- This replaces reserving a `seq` up front, which did not work: `seq` has one
+  -- allocator (the normalizer) and reserving from a second one handed the same id to
+  -- the turn's own entries, so UNIQUE (run_id, seq) rejected the settlement — the
+  -- constraint meant to stop a SECOND settlement was blocking the FIRST. A settlement
+  -- key cannot collide with ordinary allocation because ordinary entries do not have
+  -- one, and SQLite permits many NULLs in a UNIQUE index, which is exactly the shape
+  -- needed: unique among settlements, absent everywhere else.
+  --
+  -- For a tool call the key is its `tool_use_id`, already unique and already known
+  -- before the effect starts. For a provider request it is the run's turn identity.
+  settlement_key TEXT,
   UNIQUE (run_id, seq),
+  UNIQUE (run_id, settlement_key),
   -- Validation rule 4: an entry on the model surface must carry verbatim blocks.
   -- Flattening to text loses compaction and thinking state (R6), so an on-surface
   -- entry without blocks is unusable for request reconstruction.

@@ -202,7 +202,13 @@ export class RunLoop {
       this.lastSnapshot = fingerprint;
 
       // ── intent ──────────────────────────────────────────────────────────────
-      const reserved = checkpoint.reserveForRequest(store, spec.runId);
+      // The settlement identity of THIS request attempt: run + snapshot + attempt is
+      // stable across a crash and distinct per retry, so a retry settles under its own
+      // identity rather than being rejected as a duplicate of the attempt it replaced.
+      const reserved = checkpoint.reserveForRequest(
+        store,
+        `${spec.runId}:${snapshotId}:${resumeAttempt}`,
+      );
       checkpoint.commitRequestIntent(
         store,
         spec.runId,
@@ -232,8 +238,7 @@ export class RunLoop {
 
       if (action.kind === "dispatch_tools") {
         const planned = checkpoint.planTools(
-          store,
-          spec.runId,
+          `${spec.runId}:${normalizer.currentSeq()}`,
           turn.toolCalls.map((call) => ({
             toolUseId: call.id,
             name: call.name,

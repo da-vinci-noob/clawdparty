@@ -241,7 +241,7 @@ describe("invariant 6 — the position marker is total", () => {
   it("determines what a run owes from one read, with no log access", () => {
     const pending: Position = {
       phase: "request_pending",
-      reservedEntrySeq: 4,
+      settlementKey: "settle_4",
       reservedUsageId: 1,
       requestSnapshotId: "snap_1",
       attempt: 1,

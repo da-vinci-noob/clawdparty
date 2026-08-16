@@ -51,6 +51,7 @@ export interface RecoveredState {
   action: string;
   synthesized: number;
   reexecuted: number;
+  executed: number;
 }
 
 function newDir(): string {
@@ -127,6 +128,7 @@ export async function recover(run: CrashRun, staleAfterMs = 0): Promise<Recovere
       action: outcome.action,
       synthesized: outcome.synthesized,
       reexecuted: outcome.reexecuted,
+      executed: outcome.executed,
     };
   } finally {
     await store.close();

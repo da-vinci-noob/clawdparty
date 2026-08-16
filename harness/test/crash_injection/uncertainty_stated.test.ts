@@ -13,24 +13,7 @@ import { commitBoundaries, recover, runToCrash } from "./harness.js";
 
 const boundaries = commitBoundaries();
 
-/**
- * ⚠️ SKIPPED PENDING A FIX — these assertions FAIL today, and the failure is real.
- *
- * A settlement written under a RESERVED entry seq is silently dropped, because two
- * independent allocators hand out the same ids: the normalizer owns `seq` (its own
- * doc says "assigned HERE and nowhere else"), while `checkpoint.planTools` and
- * `reserveForRequest` take theirs from `store.nextSeq` (MAX(seq)+1). Measured: a turn
- * reserves 4 and 5 for its tool results, then the loop's own `ai_text` and two
- * `tool_started` entries take 4, 5 and 6 — so UNIQUE (run_id, seq) rejects the
- * settlement. The constraint meant to stop a SECOND settlement blocks the FIRST.
- *
- * Consequence: a recovered tool call gets no `tool_result`, and a provider REJECTS the
- * next request outright. Permanently stuck, not degraded.
- *
- * Skipped rather than deleted or weakened: the assertions are correct and the code is
- * wrong. Un-skip when the fix lands — that is the signal it worked.
- */
-describe.skip("uncertainty is stated, not guessed", () => {
+describe("uncertainty is stated, not guessed", () => {
   it("reports uncertain for at least one boundary — the request window exists", async () => {
     const states = await Promise.all(boundaries.map(async (at) => recover(runToCrash(at))));
 

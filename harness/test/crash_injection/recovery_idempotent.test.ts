@@ -66,12 +66,18 @@ describe("recovery is idempotent", () => {
     try {
       const before = store.entriesFrom(0).length;
       // Rewind the marker by hand — the state a crash between the settlement write and
-      // the position write would leave behind.
+      // the position write would leave behind. The key must be the one the settlement
+      // ACTUALLY used; a different key is a different settlement and would legitimately
+      // write, which is the point of moving the identity off the seq.
       const position = checkpoint.read(store, RUN);
       if (position?.phase !== "terminal") throw new Error("expected a terminal position");
+      const settled = store
+        .entriesFrom(0)
+        .find((e) => e.run_id === RUN && e.settlement_key !== null);
+      if (!settled?.settlement_key) throw new Error("no settlement to replay");
       checkpoint.write(store, RUN, {
         phase: "request_pending",
-        reservedEntrySeq: 1,
+        settlementKey: settled.settlement_key,
         reservedUsageId: 1,
         requestSnapshotId: "s",
         attempt: 1,
@@ -81,7 +87,7 @@ describe("recovery is idempotent", () => {
 
       await applyRecovery(store, RUN, { now: () => 1_700_000_000_000 });
 
-      // seq 1 is already taken by the real first entry, so the duplicate is dropped.
+      // The key is already used, so UNIQUE (run_id, settlement_key) drops the duplicate.
       expect(store.entriesFrom(0).length).toBe(before);
     } finally {
       await close();

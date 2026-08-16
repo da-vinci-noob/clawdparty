@@ -212,14 +212,16 @@ class HarnessStore implements HarnessStoreApi {
     return run();
   }
 
-  // Returns null when the entry was skipped as a duplicate (run_id, seq).
+  // Returns null when the entry was skipped as a duplicate — either (run_id, seq) for
+  // ordinary ingest, or (run_id, settlement_key) for a settlement.
   private insertEntry(entry: Omit<Entry, "store_seq">): number | null {
     try {
       const info = this.db
         .prepare(
           `INSERT INTO entries
-             (run_id, seq, type, actor_kind, actor_id, ts_ms, payload, blocks, on_surface)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (run_id, seq, type, actor_kind, actor_id, ts_ms, payload, blocks, on_surface,
+              settlement_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           entry.run_id,
@@ -231,12 +233,16 @@ class HarnessStore implements HarnessStoreApi {
           JSON.stringify(entry.payload ?? {}),
           entry.blocks === null || entry.blocks === undefined ? null : JSON.stringify(entry.blocks),
           entry.on_surface,
+          entry.settlement_key ?? null,
         );
       return Number(info.lastInsertRowid);
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
-      // A duplicate (run_id, seq) is idempotent ingest, not an error — and it is
-      // what stops a reserved id being used twice (invariant 7).
+      // Two idempotency rules land here, and they cover different things. A duplicate
+      // (run_id, seq) is replayed ingest. A duplicate (run_id, settlement_key) is a
+      // SECOND settlement of one uncertain effect — which is what makes a crash during
+      // recovery safe (invariant 7). Ordinary entries carry no key, so they can never
+      // be blocked by the second rule; that was the bug this replaced.
       return null;
     }
   }
@@ -421,6 +427,7 @@ class HarnessStore implements HarnessStoreApi {
       payload: JSON.parse(r.payload as string),
       blocks: r.blocks === null ? null : (JSON.parse(r.blocks as string) as unknown[]),
       on_surface: r.on_surface as 0 | 1,
+      settlement_key: (r.settlement_key as string | null) ?? null,
     }));
   }
 }

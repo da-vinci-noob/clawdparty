@@ -25,25 +25,23 @@ function pairs(entries: Awaited<ReturnType<typeof recover>>["entries"]) {
   return { uses, results };
 }
 
-/**
- * ⚠️ SKIPPED PENDING A FIX — these assertions FAIL today, and the failure is real.
- *
- * A settlement written under a RESERVED entry seq is silently dropped, because two
- * independent allocators hand out the same ids: the normalizer owns `seq` (its own
- * doc says "assigned HERE and nowhere else"), while `checkpoint.planTools` and
- * `reserveForRequest` take theirs from `store.nextSeq` (MAX(seq)+1). Measured: a turn
- * reserves 4 and 5 for its tool results, then the loop's own `ai_text` and two
- * `tool_started` entries take 4, 5 and 6 — so UNIQUE (run_id, seq) rejects the
- * settlement. The constraint meant to stop a SECOND settlement blocks the FIRST.
- *
- * Consequence: a recovered tool call gets no `tool_result`, and a provider REJECTS the
- * next request outright. Permanently stuck, not degraded.
- *
- * Skipped rather than deleted or weakened: the assertions are correct and the code is
- * wrong. Un-skip when the fix lands — that is the signal it worked.
- */
-describe.skip("every tool_use has a tool_result", () => {
-  it.each(boundaries)("kill at commit %i, then recover: no unanswered call", async (at) => {
+describe("every tool_use has a tool_result", () => {
+  // ⚠️ SKIPPED PENDING A FIX — this assertion FAILS today and the failure is real.
+  //
+  // The loop holds completed tool results in MEMORY and writes them to the surface as one
+  // combined entry only after EVERY call finishes (measured: a clean run puts both
+  // tool_result blocks in a single `ai_raw` entry at seq 9, while the per-call
+  // `tool_finished` entries are off-surface). So a crash after some calls completed but
+  // before that combined write loses those results for good: recovery sees the calls as
+  // `completed`, so it neither re-runs nor synthesizes them, and the surface never gains
+  // a tool_result. That is precisely the "effect happened, outcome lost" case the effect
+  // sandwich exists to prevent.
+  //
+  // Not fixed here because the repair changes WHERE tool results are written, which moves
+  // the fixture's durable type sequence and therefore the frozen parity baseline — a
+  // contract decision, not a bug fix. The related defects are fixed, which is why the rest of this
+  // file now passes.
+  it.skip.each(boundaries)("kill at commit %i, then recover: no unanswered call", async (at) => {
     const state = await recover(runToCrash(at));
     const { uses, results } = pairs(state.entries);
 
@@ -51,7 +49,7 @@ describe.skip("every tool_use has a tool_result", () => {
     expect(unanswered, `unanswered tool_use after a kill at commit ${at}`).toEqual([]);
   });
 
-  it("answers a `never` call with an explicit interrupted result, not silence", async () => {
+  it.skip("answers a `never` call with an explicit interrupted result, not silence", async () => {
     const state = await recover(runToCrash(5));
     const { uses, results } = pairs(state.entries);
 

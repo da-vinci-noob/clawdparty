@@ -98,6 +98,26 @@ decisions worth stating rather than leaving to be inferred:
 governance question below: it versions the *event* contract, and B6 changes neither the
 envelope nor the taxonomy.
 
+### Breaking — harness store schema (B7)
+
+| # | Change | Streams |
+|---|---|---|
+| B7 | **`STORE_SCHEMA_VERSION` 1 → 2.** `entries` gains `settlement_key TEXT` with `UNIQUE (run_id, settlement_key)`, and the position marker's `reservedEntrySeq` becomes `settlementKey`. An existing session store is REFUSED at open with `incompatible_version` rather than misread , so any store written before this is unreadable. | harness |
+
+Not a client-visible contract change — no event, envelope or endpoint moves — but it is
+recorded here because it makes existing records unopenable, which is the same practical
+break. Acceptable inside the window on the stated basis that this is a fresh setup with no
+sessions to preserve.
+
+The reason it was necessary: reserving a `seq` up front is unsound. `seq` has exactly one
+allocator (the normalizer, which says so in its own header), so reserving from a second
+one handed the same ids to the turn's own entries and `UNIQUE (run_id, seq)` rejected the
+settlement — **the constraint that exists to stop a second settlement was silently
+blocking the first**, leaving a `tool_use` with no `tool_result` and a session the provider
+would refuse to continue. A settlement key is NULL on ordinary entries, so it cannot
+collide by construction. Found by the crash-injection gate, invisible to every other
+test because the happy path never settles under a reserved id.
+
 ### ⚠️ Unreconciled governance question (raised, not decided)
 
 The table at the top of this file says a frozen **endpoint signature** change is breaking

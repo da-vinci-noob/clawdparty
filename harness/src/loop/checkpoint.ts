@@ -45,7 +45,7 @@ export function write(store: HarnessStoreApi, runId: string, position: Position)
 //   TX[ insert entry n2, insert usage u1, position := tools(...) ]    ← settlement
 
 export interface RequestIntent {
-  reservedEntrySeq: number;
+  settlementKey: string;
   reservedUsageId: number;
   requestSnapshotId: string;
   attempt: number;
@@ -65,7 +65,7 @@ export function commitRequestIntent(
 ): Position {
   const position: Position = {
     phase: "request_pending",
-    reservedEntrySeq: intent.reservedEntrySeq,
+    settlementKey: intent.settlementKey,
     reservedUsageId: intent.reservedUsageId,
     requestSnapshotId: intent.requestSnapshotId,
     attempt: intent.attempt,
@@ -76,18 +76,23 @@ export function commitRequestIntent(
   return position;
 }
 
-/** Reserve the ids a request will settle under, before dispatching it. */
+/**
+ * Fix the identity a request will settle under, before dispatching it.
+ *
+ * NOT a reserved `seq`. `seq` has exactly one allocator (the normalizer), and taking a
+ * second opinion from `store.nextSeq` handed out ids the turn's own entries were about
+ * to use — so `UNIQUE (run_id, seq)` rejected the settlement and the constraint meant to
+ * stop a second one blocked the first. The settlement key cannot collide, because
+ * ordinary entries do not have one.
+ */
 export function reserveForRequest(
   store: HarnessStoreApi,
-  runId: string,
+  settlementKey: string,
 ): {
-  reservedEntrySeq: number;
+  settlementKey: string;
   reservedUsageId: number;
 } {
-  return {
-    reservedEntrySeq: store.nextSeq(runId),
-    reservedUsageId: store.reserveUsageId(),
-  };
+  return { settlementKey, reservedUsageId: store.reserveUsageId() };
 }
 
 /**
@@ -115,19 +120,19 @@ export type ToolsPosition = Extract<Position, { phase: "tools" }>;
  * per turn.
  */
 export function planTools(
-  store: HarnessStoreApi,
-  runId: string,
+  stepId: string,
   calls: Array<{ toolUseId: string; name: string; replay: ReplayPolicy }>,
 ): ToolsPosition {
-  let nextSeq = store.nextSeq(runId);
   return {
     phase: "tools",
-    stepId: `${runId}:${nextSeq}`,
+    stepId,
     calls: calls.map((call, index) => ({
       index,
       toolUseId: call.toolUseId,
       name: call.name,
-      reservedEntrySeq: nextSeq++,
+      // The tool_use_id IS the settlement identity: unique, known before the effect
+      // starts, and impossible to collide with the turn's own entries.
+      settlementKey: call.toolUseId,
       replay: call.replay,
       status: "planned" as const,
     })),
@@ -169,12 +174,13 @@ export function allCallsCompleted(position: Position): boolean {
  */
 export type Recovery =
   | { action: "resume" }
-  | { action: "settle_uncertain"; reservedEntrySeq: number; reservedUsageId: number }
+  | { action: "settle_uncertain"; settlementKey: string; reservedUsageId: number }
   | {
       action: "finish_tools";
       position: Position;
       synthesize: ToolCallPosition[];
       reexecute: ToolCallPosition[];
+      execute: ToolCallPosition[];
     }
   | { action: "recompact"; preparationId: string }
   | { action: "nothing_owed"; outcome: "finished" | "failed" | "interrupted" }
@@ -193,7 +199,7 @@ export function planRecovery(position: Position | null): Recovery {
     case "request_pending":
       return {
         action: "settle_uncertain",
-        reservedEntrySeq: position.reservedEntrySeq,
+        settlementKey: position.settlementKey,
         reservedUsageId: position.reservedUsageId,
       };
 
@@ -207,6 +213,11 @@ export function planRecovery(position: Position | null): Recovery {
         // nothing executes twice.
         synthesize: pending.filter((c) => c.replay === "never"),
         reexecute: pending.filter((c) => c.replay === "safe"),
+        // `planned` never STARTED, so no effect occurred and executing it is safe
+        // whatever its replay policy says — a first execution, not a replay. The earlier
+        // decision table omitted this status, so these calls were abandoned with
+        // no tool_result at all, which a provider rejects outright.
+        execute: position.calls.filter((c) => c.status === "planned"),
       };
     }
 

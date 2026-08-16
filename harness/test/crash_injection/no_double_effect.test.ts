@@ -45,6 +45,8 @@ describe("no `never` tool executes twice", () => {
     const after = await recover(crashed);
 
     expect(after.effects).toEqual(before);
+    // No REPLAY. A first execution of a different, still-`planned` call is fine and is
+    // counted separately — folding the two together would hide which one happened.
     expect(after.reexecuted).toBe(0);
   });
 
@@ -52,7 +54,10 @@ describe("no `never` tool executes twice", () => {
     // Without this the suite above would pass with a recovery that re-executes nothing,
     // which would be a different bug wearing the same green tick.
     const results = await Promise.all(
-      boundaries.map(async (at) => (await recover(runToCrash(at))).reexecuted),
+      boundaries.map(async (at) => {
+        const state = await recover(runToCrash(at));
+        return state.reexecuted + state.executed;
+      }),
     );
 
     expect(results.some((n) => n > 0)).toBe(true);

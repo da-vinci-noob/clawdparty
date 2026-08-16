@@ -62,7 +62,7 @@ describe("request_pending — the only permitted uncertainty", () => {
   beforeEach(() => {
     seed({
       phase: "request_pending",
-      reservedEntrySeq: 7,
+      settlementKey: "settle_7",
       reservedUsageId: 3,
       requestSnapshotId: "snap_1",
       attempt: 1,
@@ -81,11 +81,15 @@ describe("request_pending — the only permitted uncertainty", () => {
     expect(result.action).toBe("abandoned");
   });
 
-  it("writes the settlement under the RESERVED entry id", async () => {
+  it("writes the settlement under its SETTLEMENT KEY, with a normal seq", async () => {
     await applyRecovery(store, RUN, deps);
 
     const entry = entriesFor(RUN).at(0);
-    expect(entry?.seq).toBe(7);
+    // The key carries the identity; the seq is allocated normally. Reserving a seq
+    // instead collided with the turn's own entries, so UNIQUE (run_id, seq) rejected
+    // the settlement — the constraint meant to stop a SECOND one blocked the FIRST.
+    expect(entry?.settlement_key).toBe("settle_7");
+    expect(entry?.seq).toBe(1);
     expect(entry?.type).toBe("run_interrupted");
     expect(entry?.payload).toMatchObject({ uncertain: true, reason: "harness_restart" });
   });
@@ -111,7 +115,7 @@ describe("request_pending — the only permitted uncertainty", () => {
     // recovering again from the SAME position.
     seed({
       phase: "request_pending",
-      reservedEntrySeq: 7,
+      settlementKey: "settle_7",
       reservedUsageId: 3,
       requestSnapshotId: "snap_1",
       attempt: 1,
@@ -121,10 +125,11 @@ describe("request_pending — the only permitted uncertainty", () => {
 
     await applyRecovery(store, RUN, deps);
 
-    // UNIQUE (run_id, seq) rejects the second write under the reserved id, so the
-    // transcript gains no duplicate — enforced by the schema rather than by
-    // remembering to check (invariant 7).
-    expect(entriesFor(RUN).filter((e) => e.seq === 7)).toHaveLength(1);
+    // UNIQUE (run_id, settlement_key) rejects the second settlement, so the transcript
+    // gains no duplicate — enforced by the schema rather than by remembering to check
+    // (invariant 7). Note the seq differs on the second attempt; the KEY is what makes
+    // it single-use, which is exactly why the identity moved off the seq.
+    expect(entriesFor(RUN).filter((e) => e.settlement_key === "settle_7")).toHaveLength(1);
   });
 });
 
@@ -133,7 +138,7 @@ describe("tools — replay policy decides per call", () => {
     calls: Array<{
       name: string;
       replay: "safe" | "never";
-      status: "effect_pending" | "completed";
+      status: "planned" | "effect_pending" | "completed";
     }>,
   ): Position {
     return {
@@ -143,7 +148,7 @@ describe("tools — replay policy decides per call", () => {
         index,
         toolUseId: `tu_${index}`,
         name: c.name,
-        reservedEntrySeq: 10 + index,
+        settlementKey: `tu_${index}`,
         replay: c.replay,
         status: c.status,
       })),
@@ -170,7 +175,7 @@ describe("tools — replay policy decides per call", () => {
     await applyRecovery(store, RUN, deps);
 
     const entry = entriesFor(RUN).at(0);
-    expect(entry?.seq).toBe(10);
+    expect(entry?.settlement_key).toBe("tu_0");
     expect(entry?.on_surface).toBe(1);
     // A provider rejects a request whose tool_use has no matching tool_result, so
     // "off the surface" here would break the very next request.
@@ -221,6 +226,39 @@ describe("tools — replay policy decides per call", () => {
     expect(reexecute.mock.calls[0]?.[0]?.name).toBe("grep");
   });
 
+  it("gives each call a DISTINCT settlement key, so both can settle", async () => {
+    seed(
+      toolsPosition([
+        { name: "bash", replay: "never", status: "effect_pending" },
+        { name: "sh", replay: "never", status: "effect_pending" },
+      ]),
+    );
+
+    const result = await applyRecovery(store, RUN, deps);
+
+    // One shared key would make the SECOND settlement a duplicate of the first, so one
+    // call would silently go unanswered — the same class of failure the reserved-seq
+    // collision produced, arriving from the other direction.
+    expect(result.synthesized).toBe(2);
+    const keys = entriesFor(RUN).map((e) => e.settlement_key);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it("EXECUTES a `planned` call, which never started, and answers it", async () => {
+    seed(toolsPosition([{ name: "bash", replay: "never", status: "planned" }]));
+    const reexecute = vi.fn().mockResolvedValue({ ok: true, text: "ran now" });
+
+    const result = await applyRecovery(store, RUN, { ...deps, reexecute });
+
+    // `planned` means the effect never happened, so this is a FIRST execution and safe
+    // even for `never`. The recovery decision table omitted this status, so these
+    // calls used to be dropped with no tool_result at all — which a provider rejects.
+    expect(result.executed).toBe(1);
+    expect(result.reexecuted).toBe(0);
+    expect(reexecute).toHaveBeenCalledTimes(1);
+    expect(entriesFor(RUN).at(0)?.on_surface).toBe(1);
+  });
+
   it("leaves the position at checkpoint so the loop can assemble the results", async () => {
     seed(toolsPosition([{ name: "bash", replay: "never", status: "effect_pending" }]));
 
@@ -247,6 +285,31 @@ describe("tools — replay policy decides per call", () => {
     const second = await applyRecovery(store, RUN, deps);
     expect(second.action).toBe("resumed");
     expect(entriesFor(RUN)).toHaveLength(1);
+  });
+});
+
+describe("planTools derives the settlement identity", () => {
+  it("uses each call's tool_use_id, so keys are distinct by construction", () => {
+    const position = checkpoint.planTools("step_1", [
+      { toolUseId: "tu_a", name: "bash", replay: "never" },
+      { toolUseId: "tu_b", name: "sh", replay: "never" },
+    ]);
+
+    // Tested through planTools, not by hand-building a position: a shared key would make
+    // the second settlement a duplicate of the first and one call would go unanswered,
+    // and a test that constructs its own keys cannot see that.
+    expect(position.calls.map((c) => c.settlementKey)).toEqual(["tu_a", "tu_b"]);
+    expect(new Set(position.calls.map((c) => c.settlementKey)).size).toBe(2);
+  });
+
+  it("reserves no seq at all, which is what removed the collision", () => {
+    const position = checkpoint.planTools("step_1", [
+      { toolUseId: "tu_a", name: "bash", replay: "never" },
+    ]);
+
+    // The identity must not be a seq. Reserving one handed out ids the turn's own entries
+    // were about to use, so UNIQUE (run_id, seq) rejected the settlement.
+    expect(position.calls[0]).not.toHaveProperty("reservedEntrySeq");
   });
 });
 
@@ -293,7 +356,7 @@ describe("recovery_applied says what happened", () => {
   it("carries the frozen payload shape, with from_phase and uncertain", async () => {
     seed({
       phase: "request_pending",
-      reservedEntrySeq: 7,
+      settlementKey: "settle_7",
       reservedUsageId: 3,
       requestSnapshotId: "s",
       attempt: 1,
@@ -327,7 +390,7 @@ describe("session-wide recovery on boot", () => {
     checkpoint.write(store, "run_a", { phase: "checkpoint" });
     checkpoint.write(store, "run_b", {
       phase: "request_pending",
-      reservedEntrySeq: 1,
+      settlementKey: "settle_1",
       reservedUsageId: 1,
       requestSnapshotId: "s",
       attempt: 1,
@@ -348,7 +411,7 @@ describe("session-wide recovery on boot", () => {
   it("recovers BEFORE serving, via Supervisor.recoverAll", async () => {
     checkpoint.write(store, "run_c", {
       phase: "request_pending",
-      reservedEntrySeq: 5,
+      settlementKey: "settle_5",
       reservedUsageId: 1,
       requestSnapshotId: "s",
       attempt: 1,
