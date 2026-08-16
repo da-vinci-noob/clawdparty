@@ -14,7 +14,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "test:crash": "vitest run test/crash",
+    "test:crash": "vitest run test/crash_injection",
     "test:reconstruction": "vitest run test/reconstruction",
     "test:adapters": "vitest run test/adapters",
     "test:extensions": "vitest run test/extensions",

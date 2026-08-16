@@ -51,3 +51,11 @@ jobs:
       # host process does not, so they need to fail loudly on their own line.
       - name: Host-topology gate (test:security)
         run: npm run test:security
+
+      # Gate 1 (scenario S3). Its own REQUIRED step because it is the only thing that
+      # exercises a real SIGKILL: it spawns a child, kills it at every commit boundary,
+      # and asserts no `never` tool ran twice and no call went unanswered. It already
+      # found two defects invisible to every other test, so a regression here must be
+      # legible instead of one line among 337.
+      - name: Crash injection gate (test:crash)
+        run: npm run test:crash

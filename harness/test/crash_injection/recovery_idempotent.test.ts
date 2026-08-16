@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import * as checkpoint from "../../src/loop/checkpoint.js";
+import { applyRecovery } from "../../src/store/recovery.js";
+import { RUN, commitBoundaries, inspect, readEffects, recover, runToCrash } from "./harness.js";
+
+/**
+ * A kill DURING recovery is itself recoverable.
+ *
+ * The case that is easy to miss: recovery writes, so recovery can crash, and a recovery
+ * that is only safe to run once turns a single crash into a permanently stuck session.
+ * This is what makes the reserved-id design load-bearing rather than tidy — settling
+ * under a pre-reserved id means a second attempt is REJECTED BY THE SCHEMA
+ * (UNIQUE (run_id, seq)) instead of appending a duplicate.
+ */
+
+const boundaries = commitBoundaries();
+
+describe("recovery is idempotent", () => {
+  it.each(boundaries)(
+    "recovering twice from commit %i changes nothing the second time",
+    async (at) => {
+      const crashed = runToCrash(at);
+
+      const first = await recover(crashed);
+      const second = await recover(crashed);
+
+      // The record must be identical. Anything else means a replay appended.
+      expect(second.entries.length).toBe(first.entries.length);
+      expect(second.effects).toEqual(first.effects);
+    },
+  );
+
+  it("runs no side effect on the second pass", async () => {
+    const crashed = runToCrash(5);
+    const before = readEffects(crashed.effectsLog).length;
+
+    await recover(crashed);
+    await recover(crashed);
+    await recover(crashed);
+
+    // Three recoveries, still at most the one execution the crashed run performed.
+    expect(readEffects(crashed.effectsLog).length).toBe(before);
+  });
+
+  it("refuses a duplicate settlement under an already-used reserved id", async () => {
+    const crashed = runToCrash(9);
+    await recover(crashed);
+
+    const { store, close } = await inspect(crashed);
+    try {
+      const settled = store.entriesFrom(0).filter((e) => e.run_id === RUN);
+      const seqs = settled.map((e) => e.seq);
+      // No duplicate seq anywhere. This is the schema doing the work: the executor does
+      // not check first, it simply writes and lets UNIQUE reject the second attempt.
+      expect(new Set(seqs).size).toBe(seqs.length);
+    } finally {
+      await close();
+    }
+  });
+
+  it("re-settling a position that was already settled leaves ONE entry", async () => {
+    const crashed = runToCrash(9);
+    await recover(crashed);
+
+    const { store, close } = await inspect(crashed);
+    try {
+      const before = store.entriesFrom(0).length;
+      // Rewind the marker by hand — the state a crash between the settlement write and
+      // the position write would leave behind.
+      const position = checkpoint.read(store, RUN);
+      if (position?.phase !== "terminal") throw new Error("expected a terminal position");
+      checkpoint.write(store, RUN, {
+        phase: "request_pending",
+        reservedEntrySeq: 1,
+        reservedUsageId: 1,
+        requestSnapshotId: "s",
+        attempt: 1,
+        maxAttempts: 3,
+        notBeforeMs: 0,
+      });
+
+      await applyRecovery(store, RUN, { now: () => 1_700_000_000_000 });
+
+      // seq 1 is already taken by the real first entry, so the duplicate is dropped.
+      expect(store.entriesFrom(0).length).toBe(before);
+    } finally {
+      await close();
+    }
+  });
+});
