@@ -36,3 +36,10 @@ jobs:
 
       - name: Vitest
         run: npx vitest run
+
+      # The extension-point gate, run as its own REQUIRED step rather than relying
+      # on the full suite. `tool:before` is the only thing that can refuse a
+      # model-directed command once the harness runs on the host, so a regression
+      # here should be legible in the CI output instead of one line among 167.
+      - name: Extension points gate (test:extensions)
+        run: npm run test:extensions

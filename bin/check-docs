@@ -27,8 +27,13 @@ FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|
 # Files presented as interception points. Every exported symbol in one of these
 # must be imported somewhere outside itself and outside tests. Add a row when a
 # new extension point ships; never remove a row to make this pass.
+#
+# `sidecar/src/permissions.ts` was the original row and is deliberately gone: the
+# file was DELETED, not excused. Its `canUseTool` had no importer and could
+# never intercept, and its role is now `tool:before` in the file below — which does
+# have importers, so this row passes on merit rather than by omission.
 INTERCEPTION_POINTS=(
-  sidecar/src/permissions.ts
+  sidecar/src/extensions/points.ts
 )
 
 failures=0

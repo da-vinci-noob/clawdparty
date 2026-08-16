@@ -1,4 +1,6 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
+import { ExtensionRegistry } from "./extensions/points.js";
+import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
 import { AnthropicDirectAdapter } from "./providers/anthropic_direct.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
@@ -69,6 +71,7 @@ export interface SupervisorOptions {
   storeDir: string;
   systemPrompt?: string;
   adapters?: Record<string, ProviderAdapter>;
+  extensions?: ExtensionRegistry;
   /** Injected in tests so a run does not need a live provider. */
   buildLoop?: (deps: {
     store: HarnessStoreApi;
@@ -95,11 +98,18 @@ export class Supervisor {
   private readonly transport: Transport;
   private readonly opts: SupervisorOptions;
   private readonly tools: ToolRegistry;
+  /**
+   * The gate. Built once per supervisor so the 3-strike auto-disable is scoped to
+   * the process rather than reset on every run — a rule that fails on three
+   * consecutive runs is as broken as one that fails three times in one.
+   */
+  private readonly extensions: ExtensionRegistry;
 
   constructor(transport: Transport, opts: SupervisorOptions) {
     this.transport = transport;
     this.opts = opts;
     this.tools = buildRegistry();
+    this.extensions = opts.extensions ?? buildExtensions();
   }
 
   /**
@@ -143,7 +153,7 @@ export class Supervisor {
     const emit = (events: EventEnvelope[]) => this.ship(events, store);
     const loop = this.opts.buildLoop
       ? this.opts.buildLoop({ store, adapter, emit })
-      : new RunLoop({ store, adapter, tools: this.tools, emit });
+      : new RunLoop({ store, adapter, tools: this.tools, emit, extensions: this.extensions });
 
     const spec: RunSpec = {
       runId: input.run_id,
@@ -267,6 +277,13 @@ export class Supervisor {
     if (!run) throw new UnknownRun(runId);
     return run;
   }
+}
+
+/** The bundled rules, registered through the same contract a plugin would use. */
+export function buildExtensions(): ExtensionRegistry {
+  const registry = new ExtensionRegistry();
+  for (const rule of bundledRules) registry.register(rule);
+  return registry;
 }
 
 export function buildRegistry(): ToolRegistry {

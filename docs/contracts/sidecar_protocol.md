@@ -72,17 +72,18 @@ Body: `{ "requested_by": "<participant id>" }` — interrupt is a **human** acti
 Responses: **`200`** `{ "run_id": "...", "accepted": true }`; **`404`**/**`409`** when the run is
 unknown or not interruptible.
 
-### `POST /runs/:id/permission_mode` — switch the run's permission mode in-session
+### `GET /runs` — the authoritative active-run list
 
-Body: `{ "permission_mode": "<plan|acceptEdits|bypassPermissions>", "requested_by": "<participant id>" }`.
+**`200`** `{ "runs": [{ "run_id", "session_id", "lane", "store_seq" }] }`, read from the
+`run.position` registers rather than inferred from the log.
 
-Switches the active run's Claude permission mode **in-session** (via the SDK query handle, no
-respawn) — the mechanism behind the plan→execute flow. Rails validates the mode against the
-allowlist and role rules (bypass owner-only) before calling this.
+This is the ** reconciliation source**: on boot Rails calls it and reconciles
+`ai_runs` to the answer. **The harness wins**, because it holds the record and Rails holds
+a projection of it.
 
-Responses: **`200`** `{ "run_id": "...", "permission_mode": "<applied>" }`; **`404`** if the run is
-unknown; **`409`** when the run is no longer active (already terminal) — the caller then falls back
-to a fresh `acceptEdits` run resuming the same `claude_session_id`.
+> **`POST /runs/:id/permission_mode` was REMOVED** (CHANGELOG B2). Permission modes were an
+> Agent SDK concept; the gate is now `tool:before` (§5). Supplying the old route gets a
+> `404`, and a test asserts that — a removal nothing tests is a removal that comes back.
 
 ### `GET /healthz` — liveness + active runs
 
@@ -129,18 +130,77 @@ Request body: `{ "active_run_ids": ["run_...", ...] }`. **`200`** `{ "ok": true 
 - The worktree path **must be identical inside the Rails and sidecar containers** (both
   bind-mount the target repo at the same path) — git worktrees record absolute `.git` paths.
 
-## 5. Permission mode & tool scoping at run start
+## 5. Tool scoping and the command gate at run start
 
-A run's **`permission_mode`** is a selectable allowlist value — **`plan`**, **`acceptEdits`** (the
-default when omitted, and the prior fixed behavior), or **`bypassPermissions`** — with an
-**`allowed_tools`** whitelist and **`cwd` pinned to the session worktree in all modes**. `acceptEdits`
-auto-approves edits within the whitelist; `plan` explores read-only and makes no file edits;
-`bypassPermissions` auto-approves all tools and — per the SDK — is **not** constrained by
-`allowed_tools`, so **Rails restricts it to owners** (enforced by `SessionPolicy`, not the sidecar).
-Values outside the allowlist (incl. `default`/`dontAsk`/ask-per-tool) are rejected by Rails before
-reaching the sidecar. The mode may be switched mid-run via `POST /runs/:id/permission_mode` (§2).
-The `canUseTool` permission hook remains **allow-all for the MVP** and is the seam for later
-per-tool Bash gating; live per-tool approval remains out of scope.
+**`permission_mode` is GONE** (CHANGELOG B2). It was an Agent SDK concept: the SDK owned
+the loop, so the mode was the only lever over what a tool call could do. The harness owns
+the loop now, so the lever is the **`tool:before` extension point** plus the per-run tool
+set — both of which are ours and both of which are testable.
+
+`allowed_tools` still pre-approves and **`cwd` is still pinned to the session worktree**.
+
+### The four extension points
+
+Named places in the loop where registered code observes, transforms, or refuses work.
+`tool:before` is the command gate — the role `permissions.ts` was documented as filling
+and never could, because nothing imported it .
+
+| Point | Signature | May |
+|---|---|---|
+| `request:before` | `(RequestCtx) => Outcome<RequestCtx>` | rewrite the claimed messages, or refuse the turn |
+| `tool:before` | `(ToolCallCtx) => Outcome<ToolCallCtx>` | **refuse or transform a tool call** |
+| `tool:after` | `(ToolResultCtx) => Outcome<ToolResultCtx>` | transform the result the model sees |
+| `run:complete` | `(RunOutcomeCtx) => void` | **observe only** — nothing left to refuse, and failing the terminal transaction would strand the run |
+
+`Outcome<T>` is `continue` (pass through, possibly transformed) · `refuse` (deny, surfaced
+as `tool_refused`) · `replace` (short-circuit with a substitute).
+
+### Resolution order
+
+Priority **bands**, ascending; registration order **within** a band:
+
+| Band | Priority |
+|---|---|
+| bundled | `0` |
+| first-party plugin | `50` |
+| third-party plugin | `100` |
+
+**Never load order**. Load order is an accident of the filesystem, so a
+conflict resolved by it resolves differently on someone else's machine.
+
+- **Refusal wins** and short-circuits; a later handler cannot un-refuse.
+- **Transforms compose** — `continue` passes the transformed value onward.
+- **`replace` short-circuits**; remaining handlers are skipped.
+- **Failure is contained** — a throw is caught, logged with the contributor's identity,
+  and treated per the table below. It never terminates the run .
+- **Removal is total** — unregistering clears every binding *and* the strike history, so
+  a re-enabled plugin is not disabled by a previous session .
+
+### Time bounds and what happens on expiry
+
+| Point | Bound | On timeout or throw |
+|---|---|---|
+| `request:before` | 5s | `continue` |
+| **`tool:before`** | **30s** | **`refuse` — FAILS CLOSED** |
+| `tool:after` | 5s | `continue` |
+| `run:complete` | 5s | `continue` |
+
+`tool:before` gets 30s because it may await a human approval, and it fails **closed**.
+That asymmetry is the one worth stating outright: a hung approval gate must not silently
+permit the command it was installed to gate. A fail-closed refusal names the handler that
+broke, so it does not read as the model being blocked for no reason.
+
+**Three failures or timeouts in one session auto-disables that contributor** for the
+session and records it . It stops being invoked at all, rather than being invoked
+and ignored.
+
+### The bundled reference rule is not a security boundary
+
+`harness/src/extensions/rules/deny_destructive_bash.ts` catches the obvious accident —
+`rm -rf /`, force-push, `curl | sh`, scraping `env` for credentials. It cannot be
+exhaustive: `$(printf 'r''m') -rf /` gets through, and there is a test asserting that it
+does, so nobody reads the deny-list and concludes otherwise. Containment is the worktree,
+the realpath path rules, and human review.
 
 ### Per-run tool / connector / skill scoping (additive)
 

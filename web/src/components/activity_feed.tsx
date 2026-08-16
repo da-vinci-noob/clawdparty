@@ -10,6 +10,7 @@ import { TerminalBlock } from "./feed/terminal_block";
 import { TextBlock } from "./feed/text_block";
 import { ThinkingBlock } from "./feed/thinking_block";
 import { ToolChip } from "./feed/tool_chip";
+import { ToolRefusedRow } from "./feed/tool_refused_row";
 import { UserPromptBlock } from "./feed/user_prompt_block";
 import { useParticipantList } from "./participant_list";
 
@@ -162,6 +163,10 @@ function renderEvent(
     case "tool_failed":
       // Rendered as part of their tool_started chip; skip standalone.
       return null;
+    case "tool_refused":
+      // Its OWN row, not folded into the chip: a refusal is the room's policy
+      // acting, not a tool breaking, and showing them alike would hide the rule.
+      return <ToolRefusedRow event={event} />;
     case "terminal_output":
       return <TerminalBlock event={event} />;
     case "file_changed":

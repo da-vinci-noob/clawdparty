@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { EventEnvelope } from "@clawdparty/contracts";
+import type { ExtensionRegistry } from "../extensions/points.js";
 import type { ProviderAdapter, ProviderRequest, StopReason, Usage } from "../providers/contract.js";
 import type { HarnessStoreApi, Write } from "../store/types.js";
 import type { ToolContext, ToolRegistry, ToolResult } from "../tools/registry.js";
@@ -29,19 +30,15 @@ export interface RunLoopDeps {
   tools: ToolRegistry;
   /** Emits envelopes to the transport. */
   emit(events: EventEnvelope[]): void;
-  /** Gate consulted before every tool call — the `tool:before` extension point. */
-  gate?: ToolGate;
+  /**
+   * The four extension points. `tool:before` is the command gate — without it a
+   * model-directed `bash` has nothing that can refuse it, which is why this ships
+   * before the harness moves to the host.
+   */
+  extensions?: ExtensionRegistry;
   now?: () => number;
   newId?: () => string;
 }
-
-export type ToolGate = (call: {
-  toolUseId: string;
-  name: string;
-  input: unknown;
-}) => Promise<GateDecision>;
-
-export type GateDecision = { allow: true } | { allow: false; by: string; reason: string };
 
 export interface RunSpec {
   runId: string;
@@ -157,6 +154,32 @@ export class RunLoop {
         effort: spec.effort,
         signal: spec.signal,
       });
+
+      // request:before — may rewrite what is claimed, or refuse the turn outright.
+      // Dispatched AFTER the request is built so a handler sees the real assembled
+      // messages rather than a promise of them.
+      if (this.deps.extensions) {
+        const pre = await this.deps.extensions.dispatch("request:before", {
+          model: spec.model,
+          system: spec.systemPrompt,
+          messages: [...built.messages],
+          tools: [...built.tools],
+          request: built,
+        });
+        if (pre.outcome.k === "refuse") {
+          const event = normalizer.providerError(
+            {
+              provider: adapter.id,
+              kind: "api_error",
+              message: `request refused by ${pre.by ?? "policy"}: ${pre.outcome.reason}`,
+              remedy: "Adjust the prompt or the rule that refused it, then start a new run.",
+            },
+            this.now(),
+          );
+          emit([event]);
+          return this.fail(spec, normalizer, "refused", totalUsage);
+        }
+      }
 
       const snapshotId = `${spec.runId}:${turnId}`;
       const snapshot = {
@@ -373,7 +396,7 @@ export class RunLoop {
     planned: checkpoint.ToolsPosition,
     calls: Array<{ id: string; name: string; input: unknown }>,
   ): Promise<void> {
-    const { store, emit, gate } = this.deps;
+    const { store, emit, extensions } = this.deps;
     const resultBlocks: unknown[] = [];
     let position = planned;
 
@@ -381,15 +404,23 @@ export class RunLoop {
       const spec_ = calls.find((c) => c.id === call.toolUseId);
       const input = spec_?.input;
 
-      const decision = gate
-        ? await gate({ toolUseId: call.toolUseId, name: call.name, input })
-        : { allow: true as const };
-      if (!decision.allow) {
+      // tool:before — the gate. A refusal is recorded and surfaced, never silent.
+      const gated = extensions
+        ? await extensions.dispatch("tool:before", {
+            toolUseId: call.toolUseId,
+            name: call.name,
+            input,
+            cwd: spec.cwd,
+            runId: spec.runId,
+          })
+        : null;
+
+      if (gated?.outcome.k === "refuse") {
         const refused = normalizer.toolRefused(
           call.toolUseId,
           call.name,
-          decision.by,
-          decision.reason,
+          gated.by ?? "policy",
+          gated.outcome.reason,
           this.now(),
         );
         position = checkpoint.withCallStatus(position, call.index, "completed");
@@ -397,9 +428,12 @@ export class RunLoop {
           writes: [this.entryFor(refused, null), checkpoint.positionWrite(spec.runId, position)],
         });
         emit([refused]);
-        resultBlocks.push(toolResultBlock(call.toolUseId, decision.reason, true));
+        resultBlocks.push(toolResultBlock(call.toolUseId, gated.outcome.reason, true));
         continue;
       }
+
+      // A handler may TRANSFORM the call (e.g. narrowing a path) before it runs.
+      const effectiveInput = gated?.outcome.k === "continue" ? gated.outcome.value.input : input;
 
       // Mark the effect pending BEFORE running it, so a crash mid-tool is
       // recoverable per the tool's own replay policy.
@@ -417,12 +451,30 @@ export class RunLoop {
         ],
       });
 
-      const outcome = await this.runTool(spec, normalizer, call.toolUseId, call.name, input);
-      const text = outcome.result.content.map((c) => c.text).join("\n");
+      const outcome = await this.runTool(
+        spec,
+        normalizer,
+        call.toolUseId,
+        call.name,
+        effectiveInput,
+      );
+
+      // tool:after — may transform the result the MODEL sees. Observed failures are
+      // contained as `continue`, so a broken transform cannot lose a tool result.
+      const after = extensions
+        ? await extensions.dispatch("tool:after", {
+            toolUseId: call.toolUseId,
+            name: call.name,
+            result: outcome.result,
+          })
+        : null;
+      const finalResult =
+        after && after.outcome.k !== "refuse" ? after.outcome.value.result : outcome.result;
+      const text = finalResult.content.map((c) => c.text).join("\n");
 
       const events = [
         ...outcome.emitted,
-        outcome.result.isError
+        finalResult.isError
           ? normalizer.toolFailed(call.toolUseId, text, this.now())
           : normalizer.toolFinished(call.toolUseId, this.now()),
       ];
@@ -435,7 +487,7 @@ export class RunLoop {
         ],
       });
       emit(events);
-      resultBlocks.push(toolResultBlock(call.toolUseId, text, outcome.result.isError));
+      resultBlocks.push(toolResultBlock(call.toolUseId, text, finalResult.isError));
     }
 
     // ONE user message carrying every result. Splitting these silently trains the
@@ -502,13 +554,14 @@ export class RunLoop {
 
   // --- Terminal transitions -------------------------------------------------
 
-  private finish(
+  private async finish(
     spec: RunSpec,
     normalizer: LoopNormalizer,
     stopReason: string,
     usage: Usage,
     turns: number,
-  ): RunOutcome {
+  ): Promise<RunOutcome> {
+    await this.notifyComplete(spec, { outcome: "finished", uncertain: false, turns });
     const event = normalizer.runFinished(
       { stop_reason: stopReason, num_turns: turns, duration_ms: 0, total_cost_usd: 0, usage },
       this.now(),
@@ -517,13 +570,14 @@ export class RunLoop {
     return { outcome: "finished", uncertain: false, stopReason, turns };
   }
 
-  private fail(
+  private async fail(
     spec: RunSpec,
     normalizer: LoopNormalizer,
     stopReason: string,
     usage: Usage,
     _message?: string,
-  ): RunOutcome {
+  ): Promise<RunOutcome> {
+    await this.notifyComplete(spec, { outcome: "failed", uncertain: false, turns: 0 });
     const event = normalizer.runFailed(
       { stop_reason: stopReason, api_error_status: null, total_cost_usd: 0, usage },
       this.now(),
@@ -532,7 +586,12 @@ export class RunLoop {
     return { outcome: "failed", uncertain: false, stopReason, turns: 0 };
   }
 
-  private interrupt(spec: RunSpec, normalizer: LoopNormalizer, _usage: Usage): RunOutcome {
+  private async interrupt(
+    spec: RunSpec,
+    normalizer: LoopNormalizer,
+    _usage: Usage,
+  ): Promise<RunOutcome> {
+    await this.notifyComplete(spec, { outcome: "interrupted", uncertain: false, turns: 0 });
     const event = normalizer.runInterrupted(this.now());
     this.terminate(spec, event, { outcome: "interrupted", uncertain: false, stopReason: null });
     return { outcome: "interrupted", uncertain: false, stopReason: null, turns: 0 };
@@ -543,6 +602,25 @@ export class RunLoop {
    * and set the terminal position — all at once (invariant 8). A finished session
    * holds the log, the ledger, and `lane.*`/`session.*`; no dead state.
    */
+  /**
+   * run:complete — OBSERVE ONLY, dispatched before the terminal transaction so a
+   * handler sees the outcome while the run still exists. It cannot refuse: there is
+   * nothing left to refuse, and letting it fail the terminal transaction would
+   * strand the run, which is the exact failure this whole feature removes.
+   */
+  private async notifyComplete(
+    spec: RunSpec,
+    result: { outcome: "finished" | "failed" | "interrupted"; uncertain: boolean; turns: number },
+  ): Promise<void> {
+    if (!this.deps.extensions) return;
+    await this.deps.extensions.dispatch("run:complete", {
+      runId: spec.runId,
+      outcome: result.outcome,
+      uncertain: result.uncertain,
+      turns: result.turns,
+    });
+  }
+
   private terminate(
     spec: RunSpec,
     event: EventEnvelope,
