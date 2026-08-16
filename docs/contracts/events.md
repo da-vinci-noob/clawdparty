@@ -212,13 +212,16 @@ cursor/idempotency/ephemeral rules, and per-type axes were frozen at v1.0 indepe
 spike**; finalizing the payloads is an **additive** `minor` bump (see
 [`CHANGELOG.md`](./CHANGELOG.md) `[1.1.0]`), not a breaking change.
 
-[`fixtures/sample_run.jsonl`](../../packages/contracts/fixtures/sample_run.jsonl) is the real
-spike-derived executable contract (concrete payloads), replacing the v1.0 envelope-only placeholder.
+[`fixtures/sample_run.jsonl`](../../packages/contracts/fixtures/sample_run.jsonl) is the executable
+contract (concrete payloads), replacing the v1.0 envelope-only placeholder. It was originally captured
+from an Agent SDK spike; since that SDK is gone it is **GENERATED from a real harness run**
+(`cd harness && npm run capture:fixture`, byte-stable) — see CHANGELOG `B8`. Five types it carries have
+no emitter yet and are appended from `fixtures/not_yet_emitted.jsonl`.
 
-**`user_prompt` (added v1.2 — harness-originated, not spike-derived):** payload
+**`user_prompt` (added v1.2 — synthesized by the harness, not mapped from a provider message):** payload
 `UserPromptPayload { text: string }` — the human's prompt text for the initial prompt and each
 follow-up. Attribution is on the envelope `actor` (`{ kind: "user", id }`), not the payload. Unlike
-the spike-derived types above, `user_prompt` is **not** a mapping of any provider message — the
+the provider-mapped types above, `user_prompt` is **not** a mapping of any provider message — the
 harness synthesizes it from the prompt it pushes into the input stream.
 
 ### Synthesized types — no provider message produces them
@@ -249,7 +252,7 @@ guard that passes by coincidence is not a guard.
 | envelope fields + scalar types | per-type `payload` field schemas |
 | `actor` union, per-type actor / durability / scope | concrete `events.ts` payload interfaces |
 | `(ai_run_id, seq)` idempotency, dual cursor | `ai_text_delta` `block` representation |
-| ephemeral-vs-durable rule | `fixtures/sample_run.jsonl` (real capture) |
+| ephemeral-vs-durable rule | `fixtures/sample_run.jsonl` (generated from a harness run) |
 
 The **taxonomy itself was never frozen against growth** — only against silent growth. It has gone
 20 → 21 (v1.2) → 22 (v1.3) → 30 (v1.5), each time additively with a CHANGELOG entry and a `minor`
