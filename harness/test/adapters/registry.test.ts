@@ -154,6 +154,20 @@ describe("no adapter id appears outside providers/", () => {
       "providers/anthropic_direct.ts",
       "providers/anthropic_oauth.ts",
     ]);
+
+    // The Bedrock RUNTIME client (Converse) is bedrock-converse's vendor SDK. A second file
+    // constructing it would be a second client with its own credential resolution — the same
+    // record-vs-reality hazard as the bedrock SDK above. VALUE imports only: `converse_stream`
+    // and `converse_request` take TYPES from it (erased at runtime), which is not a client.
+    const valueImporters = providerFiles
+      .filter((p) =>
+        /(?<!type )\{[^}]*\} from "@aws-sdk\/client-bedrock-runtime"|import\(\s*"@aws-sdk\/client-bedrock-runtime"/.test(
+          read(p),
+        ),
+      )
+      .map((p) => p.slice(SRC.length))
+      .sort();
+    expect(valueImporters).toEqual(["providers/bedrock_converse.ts"]);
   });
 
   it("keeps the shared family mapper vendor-free", () => {
