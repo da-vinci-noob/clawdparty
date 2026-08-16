@@ -16,6 +16,7 @@ import {
   isInvocable,
   toolUseWhileStreaming,
 } from "./converse_capabilities.js";
+import { converseMaxOutputTokens, sizeConverseMaxTokens } from "./converse_limits.js";
 import { toConverseInput } from "./converse_request.js";
 import { responseToStreamEvents } from "./converse_response.js";
 import { mapConverseStream } from "./converse_stream.js";
@@ -41,16 +42,6 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
  * cost is no live `ai_text_delta` on that turn — declared by `toolUseWhileStreaming: false` and
  * labelled in the picker.
  */
-
-/**
- * Not discoverable from Bedrock, so it is a constant rather than a per-model lookup.
- *
- * Deliberately MODEST. `ListFoundationModels` reports no output-token limit, and Bedrock
- * rejects a `maxTokens` above the model's real ceiling with a `ValidationException` that kills
- * the run — so erring high fails, while erring low only truncates. 8192 is accepted by every
- * model measured so far; raising it per-model is a follow-up once the ceilings are known.
- */
-const MAX_OUTPUT_TOKENS = 8192;
 
 /** A single ConverseStream call, as an async iterable of raw events. Injected in tests so the
  *  adapter's translation and mapping run without an AWS account. */
@@ -150,11 +141,18 @@ export class BedrockConverseAdapter implements ProviderAdapter {
   }
 
   capabilities(model: string): Capabilities {
-    return converseCapabilities(model, inferContextWindow(model), MAX_OUTPUT_TOKENS);
+    return converseCapabilities(model, inferContextWindow(model), converseMaxOutputTokens(model));
   }
 
   async *stream(req: ProviderRequest): AsyncIterable<ProviderEvent> {
-    const input = toConverseInput(req);
+    // The loop asks for a budget of ANSWER; Converse bills reasoning against the same budget and
+    // has no separate one, so expressing that ask here means adding reasoning headroom and
+    // clamping to what this model accepts. Same division of labour as the transport choice
+    // below — the loop states the intent, the adapter expresses it for this provider.
+    const input = toConverseInput({
+      ...req,
+      maxTokens: sizeConverseMaxTokens(req.model, req.maxTokens),
+    });
     // The one place the streaming-vs-not decision lives: a model that cannot use tools WHILE
     // streaming, asked to use tools, is served over NON-streaming `Converse` — which it
     // DOES accept a toolConfig on — and its single response is replayed as the same event

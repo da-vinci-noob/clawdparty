@@ -226,6 +226,43 @@ describe("stream — real translation and mapping over a replayed capture", () =
     expect((captured as { toolConfig?: unknown }).toolConfig).toBeDefined();
     expect((captured as { modelId?: string }).modelId).toBe("us.openai.gpt-5.6-sol");
   });
+
+  describe("the maxTokens that actually reaches Bedrock", () => {
+    // Asserted ON THE WIRE, not on the sizing function: `converse_limits.test.ts` proves the
+    // arithmetic, and this proves the adapter uses it. A correct helper nothing calls is the
+    // failure mode this repo keeps finding.
+    async function sentMaxTokens(model: string, maxTokens: number): Promise<number | undefined> {
+      let captured: unknown;
+      const a = adapter({
+        runner: (input) => {
+          captured = input;
+          return replayRunner("nova-text")();
+        },
+      });
+      await collect(a.stream(request({ model, maxTokens })));
+      return (captured as { inferenceConfig?: { maxTokens?: number } }).inferenceConfig?.maxTokens;
+    }
+
+    it("adds reasoning headroom, because Converse bills reasoning from the same budget", async () => {
+      expect(await sentMaxTokens("us.deepseek.r1-v1:0", 8192)).toBe(16_384);
+    });
+
+    it("clamps to the measured ceiling rather than sending a request Bedrock refuses", async () => {
+      // Llama's real ceiling IS 8192, so the headroom must not apply — a 16384 ask here is a
+      // ValidationException that kills the run.
+      expect(await sentMaxTokens("us.meta.llama3-3-70b-instruct-v1:0", 8192)).toBe(8192);
+      expect(await sentMaxTokens("us.amazon.nova-lite-v1:0", 8192)).toBe(10_000);
+    });
+
+    it("declares the same ceiling in its capabilities", async () => {
+      // The contract number and the request have to come from one table, or the context UI and
+      // the wire disagree.
+      expect(adapter().capabilities("us.openai.gpt-5.6-sol").maxOutputTokens).toBe(131_072);
+      expect(adapter().capabilities("us.meta.llama4-scout-17b-instruct-v1:0").maxOutputTokens).toBe(
+        8192,
+      );
+    });
+  });
 });
 
 describe("streaming-limited models fall back to non-streaming Converse", () => {

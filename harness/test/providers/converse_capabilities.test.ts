@@ -53,7 +53,8 @@ describe("the table agrees with the probe, row by row", () => {
 
   it("counts exactly 8 tool-capable models that cannot stream tools", () => {
     const limited = rows.filter(
-      (r) => isInvocable(r.profile_id) && toolUse(r.profile_id) && !toolUseWhileStreaming(r.profile_id),
+      (r) =>
+        isInvocable(r.profile_id) && toolUse(r.profile_id) && !toolUseWhileStreaming(r.profile_id),
     );
     // Every Llama, mistral pixtral, both writer palmyra. These are the models the rule exists for:
     // offered, usable, and declared honestly as unable to do both at once. The `toolUse` filter
