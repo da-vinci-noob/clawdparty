@@ -122,7 +122,14 @@ function fakeClient(options: FakeOptions, captured: CapturedRequest[]): Anthropi
     },
     messages: {
       stream: (body: Record<string, unknown>) => {
-        captured.push({ body });
+        captured.push({
+          body,
+          url: "https://api.anthropic.com/v1/messages",
+          headers: {
+            "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+            "content-type": "application/json",
+          },
+        });
         const handle = {
           currentMessage: { content: [] as unknown[] },
           async *[Symbol.asyncIterator]() {
@@ -208,6 +215,11 @@ function harness(): ConformanceHarness {
     },
     diskWrites() {
       return [];
+    },
+    allowedHosts() {
+      // First-party only. A Bedrock adapter would declare its regional host here,
+      // and declaring the wrong one is what assertion 11 catches.
+      return ["api.anthropic.com"];
     },
   };
 }

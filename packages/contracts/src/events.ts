@@ -179,7 +179,7 @@ export interface EventEnvelope<P = unknown> {
 
 /**
  * Per-type payload schemas, FINALIZED from the real SDK spike (`sdk-message-spike`;
- * see `docs/contracts/sdk_mapping.md` for the derivation from `raw_run.jsonl`).
+ * see `docs/contracts/provider_event_mapping.md` for the derivation from `raw_run.jsonl`).
  * SDK-produced types are derived from captured message shapes; Rails-originated
  * types (`chat_message`, `participant_joined`, `presence_changed`, `changeset_*`,
  * `task_*`) are defined from the data model (they were never SDK-gated). This

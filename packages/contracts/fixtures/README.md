@@ -20,7 +20,7 @@ separate fixture set, input to the normalizer tests, owned by the `harness/` str
 > Contract-1 envelopes with **concrete payloads** (real `total_cost_usd`, token `usage`, summarized
 > tool inputs, resolved `block` keys). It replaces the v1.0 envelope-only placeholder (`payload: {}`).
 > The per-type payload schemas it carries are documented in
-> [`docs/contracts/sdk_mapping.md`](../../../docs/contracts/sdk_mapping.md) and typed in
+> [`docs/contracts/provider_event_mapping.md`](../../../docs/contracts/provider_event_mapping.md) and typed in
 > [`src/events.ts`](../src/events.ts) (`EventPayloadMap`).
 
 ### What the fixture exercises (and is verified to)

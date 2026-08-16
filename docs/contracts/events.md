@@ -2,7 +2,7 @@
 
 > **Status:** envelope, type names, per-type axes (actor / durability / scope), cursor &
 > idempotency rules, and the ephemeral-vs-durable rule are **FROZEN** (v1.0). Per-type `payload`
-> field schemas were **finalized at v1.1** from real SDK spike output (see §8 + `sdk_mapping.md`).
+> field schemas were **finalized at v1.1** from real SDK spike output (see §8 + `provider_event_mapping.md`).
 > Every change after the freeze is recorded in [`CHANGELOG.md`](./CHANGELOG.md).
 >
 > **Machine-checked source of truth for SHAPE:** [`packages/contracts/src/events.ts`](../../packages/contracts/src/events.ts).
@@ -42,7 +42,7 @@ and treat `payload` as opaque JSON without erroring.
 | `type` | `string` | One of the 30 frozen names (§2) or the `ai_raw` fallback (§3). |
 | `actor` | object | Discriminated union on `kind` (§6). |
 | `ts` | `string` | ISO-8601 UTC, **millisecond precision**, `Z` suffix (e.g. `2026-06-28T20:11:05.123Z`). **Display-only** — never used to order events (§4). Fixed ms precision avoids the classic cross-stream date-format mismatch. |
-| `payload` | JSON | Type-specific; per-type field schemas finalized at v1.1 (§8 + `sdk_mapping.md`). |
+| `payload` | JSON | Type-specific; per-type field schemas finalized at v1.1 (§8 + `provider_event_mapping.md`). |
 
 ## 2. The frozen taxonomy — exactly 30 names
 
@@ -135,7 +135,7 @@ A **null `id` marks ephemerality.** Ephemeral events bypass REST backfill and ar
 ### Per-type table — actor / durability / scope are FROZEN
 
 > The three axes below were frozen at v1.0 so the three streams agree without inference; each row's
-> **payload internals** were finalized at v1.1 (§8 + `sdk_mapping.md`).
+> **payload internals** were finalized at v1.1 (§8 + `provider_event_mapping.md`).
 
 | type | actor.kind | durability | scope | carries |
 |---|---|---|---|---|
@@ -204,7 +204,7 @@ discriminated union makes a mismatched `kind`/`id` combination fail type-checkin
 
 Per-type `payload` field schemas were **finalized at `CONTRACT_VERSION` 1.1** (`sdk-message-spike`)
 from real SDK output — they are no longer `pending-spike`. The concrete per-type schemas, derived
-from the captured raw messages, live in **[`sdk_mapping.md`](./sdk_mapping.md)** (the single source)
+from the captured raw messages, live in **[`provider_event_mapping.md`](./provider_event_mapping.md)** (the single source)
 and are typed in [`packages/contracts/src/events.ts`](../../packages/contracts/src/events.ts)
 (`EventPayloadMap`, with one interface per type). The `ai_text_delta` `block` field is resolved to
 `"<assistant_message_uuid>:<content_block_index>"`. The **envelope, type names,

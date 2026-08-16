@@ -7,11 +7,17 @@ class SessionPolicy
   class NotAuthorized < StandardError; end
 
   # role => set of permitted action symbols.
+  #
+  # Every row here MUST be checked by real code — `review_roles_spec.rb` asserts it.
+  # A capability nothing enforces reads as a live privilege and invites someone to
+  # wire it up again. Two were removed for that reason: `bypass_permissions` gated
+  # the `permission_mode` parameter, which no longer exists, and `manage_tasks`
+  # gated the task board, which was cut from the MVP.
   MATRIX = {
-    'owner' => %i[view chat manage_tasks run interrupt approve reject
-                  manage_invites manage_session archive bypass_permissions].freeze,
-    'editor' => %i[view chat manage_tasks run interrupt approve reject].freeze,
-    'reviewer' => %i[view chat manage_tasks approve reject].freeze,
+    'owner' => %i[view chat run interrupt approve reject
+                  manage_invites manage_session archive].freeze,
+    'editor' => %i[view chat run interrupt approve reject].freeze,
+    'reviewer' => %i[view chat approve reject].freeze,
     'viewer' => %i[view chat].freeze
   }.freeze
 

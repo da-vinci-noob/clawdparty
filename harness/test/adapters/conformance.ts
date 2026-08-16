@@ -30,6 +30,10 @@ export const REMOVED_PARAMS = ["temperature", "top_p", "top_k", "budget_tokens"]
 export interface CapturedRequest {
   /** The literal body the adapter handed the vendor client. */
   body: Record<string, unknown>;
+  /** Where it went. Absent means the harness could not observe the destination. */
+  url?: string;
+  /** Headers the adapter set, so credential transport can be checked. */
+  headers?: Record<string, string>;
 }
 
 export interface ConformanceHarness {
@@ -50,6 +54,12 @@ export interface ConformanceHarness {
   abortMidStream(): Promise<ProviderEvent[]>;
   /** Anything the adapter wrote to disk during this harness's lifetime. */
   diskWrites(): string[];
+  /**
+   * Hosts this adapter is permitted to reach.  is about DESTINATION as much as
+   * content: a credential travelling to the right provider is the job, and the same
+   * credential travelling anywhere else is exfiltration.
+   */
+  allowedHosts(): string[];
 }
 
 export interface ConformanceOptions {
@@ -159,17 +169,81 @@ export function runConformanceSuite(opts: ConformanceOptions): void {
     expect(closed, `${opened} blocks opened, ${closed} closed after abort`).toBe(opened);
   });
 
-  it("9. stream() never reads or emits a credential value", async () => {
+  it("9. stream() never puts a credential value in a request body", async () => {
     const h = await build();
     await h.minimalTurn();
 
     for (const request of h.captured()) {
       expect(JSON.stringify(request.body)).not.toContain(KNOWN_TEST_SECRET);
     }
-    // no adapter writes a credential to disk, and none transmits one to
-    // a destination other than its own provider endpoint.
+  });
+
+  it("10. no credential value is written to disk", async () => {
+    const h = await build();
+    await h.minimalTurn();
+    await h.toolUseTurn();
+
+    // A credential on disk outlives the process and the session. Reading
+    // ~/.claude/.credentials.json is permitted; copying it anywhere is not.
     for (const written of h.diskWrites()) {
-      expect(written).not.toContain(KNOWN_TEST_SECRET);
+      expect(written, "an adapter wrote a credential to disk").not.toContain(KNOWN_TEST_SECRET);
+    }
+  });
+
+  it("11. a credential reaches ONLY this adapter's own provider endpoint", async () => {
+    const h = await build();
+    await h.minimalTurn();
+    await h.toolUseTurn();
+
+    const allowed = h.allowedHosts();
+    expect(allowed.length, "an adapter must declare where it may send credentials").toBeGreaterThan(
+      0,
+    );
+
+    for (const request of h.captured()) {
+      if (!request.url) continue;
+      const host = new URL(request.url).host;
+      expect(
+        allowed.some((a) => host === a || host.endsWith(`.${a}`)),
+        `${opts.name} sent a request to ${host}, which is not in its allowed set`,
+      ).toBe(true);
+    }
+  });
+
+  it("12. a credential travels in a HEADER, never in the body or a URL", async () => {
+    const h = await build();
+    await h.minimalTurn();
+
+    for (const request of h.captured()) {
+      // A credential in a URL lands in proxy logs, browser history and referrers;
+      // one in a body lands in request logs. Only the header carries it.
+      expect(request.url ?? "").not.toContain(KNOWN_TEST_SECRET);
+      expect(JSON.stringify(request.body)).not.toContain(KNOWN_TEST_SECRET);
+
+      const headerNames = Object.keys(request.headers ?? {}).map((k) => k.toLowerCase());
+      const carriers: string[] = headerNames.filter(
+        (k) => k === "authorization" || k === "x-api-key",
+      );
+      // Not an assertion that a carrier EXISTS — a faked client may set none. The
+      // assertion is that if the credential appears at all, it appears only there.
+      const elsewhere = Object.entries(request.headers ?? {})
+        .filter(([k]) => !carriers.includes(k.toLowerCase()))
+        .filter(([, v]) => String(v).includes(KNOWN_TEST_SECRET))
+        .map(([k]) => k);
+      expect(elsewhere, `credential leaked into ${elsewhere.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("13. probe() reports a credential SOURCE, never a value", async () => {
+    const h = await build();
+    const result = await h.adapter.probe();
+
+    // The distinction the whole design rests on: "which login did this run use?"
+    // must be answerable from the record without a credential ever entering it.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(KNOWN_TEST_SECRET);
+    if (result.available) {
+      expect(result.credentialSource).toMatch(/^(env|file|profile|keychain|none)/);
     }
   });
 }

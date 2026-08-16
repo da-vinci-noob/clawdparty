@@ -277,7 +277,7 @@ text. Live streaming was designed but unwired (the runner never enabled partial 
 - **`EVENT_TYPE_COUNT`** freeze guard updated `21 → 22`.
 - **Harness streaming** (behavior, not contract): the runner enables `includePartialMessages` + adaptive
   thinking and maps `content_block_delta` `text_delta` → `ai_text_delta` and `thinking_delta` →
-  `ai_thinking_delta` (see `sdk_mapping.md`).
+  `ai_thinking_delta` (see `provider_event_mapping.md`).
 
 ### Unchanged (why this is a `minor`, not a `major`)
 
@@ -322,7 +322,7 @@ per-type `payload` schemas, previously `pending-spike`, are now finalized from r
 
 - **Concrete per-type payload interfaces** in `packages/contracts/src/events.ts` (`EventPayloadMap`
   + one interface per type), replacing the `unknown` `PendingSpikePayload` stubs.
-- **`docs/contracts/sdk_mapping.md`** — the single source mapping each raw SDK message shape →
+- **`docs/contracts/provider_event_mapping.md`** — the single source mapping each raw SDK message shape →
   Contract-1 type + payload, derived from `harness/test/fixtures/raw_run.jsonl`.
 - **Resolved `ai_text_delta` `block` field** — `"<assistant_message_uuid>:<content_block_index>"`.
 - **Pinned PLAN payload obligations** — `total_cost_usd` + `usage` on `run_finished`/`run_failed`;

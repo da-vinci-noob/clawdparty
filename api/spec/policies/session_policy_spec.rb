@@ -38,15 +38,16 @@ RSpec.describe(SessionPolicy) do
     end
   end
 
-  describe 'bypass_permissions is owner-only' do
-    it 'permits an owner' do
-      expect(policy_for('owner').can?(:bypass_permissions)).to(be(true))
-    end
-
-    %w[editor reviewer viewer].each do |role|
-      it "denies a #{role}" do
-        expect(policy_for(role).can?(:bypass_permissions)).to(be(false))
-        expect { policy_for(role).authorize!(:bypass_permissions) }.to(raise_error(described_class::NotAuthorized))
+  # bypass_permissions and manage_tasks were REMOVED from the matrix: the first
+  # gated the permission_mode parameter, which no longer exists, and the second
+  # gated the task board, which was cut from the MVP. Asserted as absences so the
+  # matrix cannot regrow a privilege nothing enforces.
+  describe 'capabilities the matrix no longer declares' do
+    %i[bypass_permissions manage_tasks].each do |action|
+      it "grants #{action} to nobody, including an owner" do
+        described_class::MATRIX.each_key do |role|
+          expect(policy_for(role).can?(action)).to(be(false))
+        end
       end
     end
   end
@@ -57,13 +58,6 @@ RSpec.describe(SessionPolicy) do
       expect(policy_for('editor').can?(:interrupt)).to(be(true))
       expect(policy_for('reviewer').can?(:run)).to(be(false))
       expect(policy_for('viewer').can?(:run)).to(be(false))
-    end
-  end
-
-  describe 'tasks is owner+editor+reviewer (not viewer)' do
-    it 'permits reviewer, denies viewer' do
-      expect(policy_for('reviewer').can?(:manage_tasks)).to(be(true))
-      expect(policy_for('viewer').can?(:manage_tasks)).to(be(false))
     end
   end
 
