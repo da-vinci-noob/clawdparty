@@ -95,9 +95,7 @@ export function buildServer(supervisor: Supervisor): FastifyInstance {
 /**
  * Heartbeat: POST { active_run_ids, store_seq_high_water } every 5s, bearer-authed.
  *
- * `store_seq_high_water` is new (B4): it lets Rails detect projection lag without
- * polling. The path is `/internal/harness/heartbeat` — renamed from
- * `/internal/harness/heartbeat` inside the declared window.
+ * `store_seq_high_water` (B4) lets Rails detect projection lag without polling.
  *
  * 5xx/network is transient (keep going); 401/403/404 is a FATAL misconfiguration —
  * retrying a misroute forever looks identical to an outage, which is why it stops.

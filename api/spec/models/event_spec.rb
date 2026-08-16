@@ -12,6 +12,7 @@ require 'rails_helper'
 #  event_type           :string           not null
 #  payload              :jsonb            not null
 #  seq                  :bigint
+#  store_seq            :bigint
 #  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #  actor_participant_id :bigint
@@ -20,10 +21,11 @@ require 'rails_helper'
 #
 # Indexes
 #
-#  index_events_on_actor_participant_id  (actor_participant_id)
-#  index_events_on_ai_run_id             (ai_run_id)
-#  index_events_on_run_and_seq           (ai_run_id,seq) UNIQUE
-#  index_events_on_session_id            (session_id)
+#  index_events_on_actor_participant_id      (actor_participant_id)
+#  index_events_on_ai_run_id                 (ai_run_id)
+#  index_events_on_run_and_seq               (ai_run_id,seq) UNIQUE
+#  index_events_on_session_id                (session_id)
+#  index_events_on_session_id_and_store_seq  (session_id,store_seq)
 #
 # Foreign Keys
 #

@@ -73,6 +73,7 @@ module Events
         actor_participant_id: actor[:id] || attrs[:actor_participant_id],
         ai_run_id: attrs[:ai_run_id],
         seq: attrs[:seq],
+        store_seq: attrs[:store_seq],
         payload: attrs[:payload] || {}
       )
     end

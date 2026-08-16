@@ -37,6 +37,13 @@ fi
 if [[ "${1:-}" == "bin/rails" && "${2:-}" == "server" ]]; then
   echo "[rails-entrypoint] clearing any stale tmp/pids/server.pid"
   rm -f tmp/pids/server.pid
+
+  # agree with the harness about which runs are active. Scoped to the web
+  # server so it does not also fire for `jobs` (same image, same entrypoint) and
+  # never for a console or a spec run. Non-fatal by design — an unreachable harness
+  # reconciles nothing, and Rails must still boot.
+  echo "[rails-entrypoint] bin/rails harness:reconcile"
+  bin/rails harness:reconcile || echo "[rails-entrypoint] reconcile skipped (non-fatal)"
 fi
 
 exec "$@"

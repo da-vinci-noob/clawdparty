@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_01_000007) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_01_000009) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -23,10 +23,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000007) do
     t.string "base_sha"
     t.string "claude_session_id"
     t.datetime "created_at", null: false
+    t.string "credential_source"
     t.jsonb "diff_stats"
+    t.bigint "harness_store_seq"
     t.datetime "last_heartbeat_at"
     t.string "model", null: false
     t.text "prompt", null: false
+    t.string "provider", default: "anthropic-direct", null: false
     t.bigint "requested_by_id"
     t.bigint "reviewed_by_id"
     t.bigint "session_id", null: false
@@ -50,10 +53,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000007) do
     t.jsonb "payload", default: {}, null: false
     t.bigint "seq"
     t.bigint "session_id", null: false
+    t.bigint "store_seq"
     t.datetime "updated_at", null: false
     t.index ["actor_participant_id"], name: "index_events_on_actor_participant_id"
     t.index ["ai_run_id", "seq"], name: "index_events_on_run_and_seq", unique: true
     t.index ["ai_run_id"], name: "index_events_on_ai_run_id"
+    t.index ["session_id", "store_seq"], name: "index_events_on_session_id_and_store_seq"
     t.index ["session_id"], name: "index_events_on_session_id"
     t.check_constraint "(actor_kind = 'user'::event_actor_kind) = (actor_participant_id IS NOT NULL)", name: "events_user_actor_has_participant"
   end

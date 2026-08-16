@@ -7,10 +7,13 @@
 #
 #  id                :bigint           not null, primary key
 #  base_sha          :string
+#  credential_source :string
 #  diff_stats        :jsonb
+#  harness_store_seq :bigint
 #  last_heartbeat_at :datetime
 #  model             :string           not null
 #  prompt            :text             not null
+#  provider          :string           default("anthropic-direct"), not null
 #  status            :enum             default("queued"), not null
 #  total_cost_usd    :decimal(12, 6)
 #  usage             :jsonb

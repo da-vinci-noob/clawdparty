@@ -44,6 +44,13 @@ module Harness
       get('/skills', { cwd: cwd })
     end
 
+    # GET /runs — the authoritative active-run list, read from the harness's position
+    # registers. This is the  reconciliation source: the harness holds the record
+    # and Rails holds a projection of it, so on a disagreement the harness wins.
+    def list_runs
+      get('/runs')
+    end
+
     # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
     def start_run(payload)
       res = post('/runs', payload)
