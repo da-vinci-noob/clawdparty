@@ -13,6 +13,27 @@ import type {
 import { type Discovery, discoverAwsCredential } from "./credentials/discover.js";
 
 /**
+ * QUARANTINED — this adapter cannot complete a run, and offering it violates.
+ *
+ * It mixes two model-id namespaces. `listModels()` enumerates the AWS control plane, which
+ * returns Bedrock INFERENCE-PROFILE ids (`global.anthropic.claude-opus-5`); `stream()` posts
+ * to the Mantle endpoint, which is **Claude Platform on AWS** and takes BARE first-party ids
+ * (`claude-opus-5`). A run therefore 404s with `not_found_error` on a model the picker just
+ * offered.
+ *
+ * The deeper error is product identity, and the capability table below inherits it: Claude
+ * Platform on AWS is Anthropic-operated with same-day API parity, while Amazon Bedrock is
+ * partner-operated with a feature subset. They are different products that coexist. So every
+ * capability declared false below — web search, web fetch, code execution, automatic prompt
+ * caching, the Models API — is actually AVAILABLE on the platform this client talks to.
+ * The spike write-up's R3 paired the Mantle client with Bedrock's id form in one row, and R4
+ * researched the Bedrock column; both are being corrected.
+ *
+ * Reported unavailable rather than deleted: the code is nearly right for whichever product
+ * the adapter ends up serving, and  wants an unavailable provider REPORTED with a remedy rather
+ * than omitted. Set `HARNESS_ENABLE_AWS_PROVIDER=1` to lift the quarantine, which is how the
+ * spike verifies a namespace without editing this file.
+ *
  * Amazon Bedrock, through the host's own AWS session.
  *
  * Uses the **Mantle** client, not the legacy `AnthropicBedrock` bedrock-runtime InvokeModel
@@ -82,6 +103,14 @@ const DISCOVERY_FAILED =
   "cannot be guessed. Run `aws sso login`, check the region, and confirm the role has " +
   "Bedrock read access";
 
+/** Lifted by `HARNESS_ENABLE_AWS_PROVIDER=1`, so a test can exercise a namespace in place. */
+const QUARANTINE_REMEDY =
+  "This provider is disabled: its model ids come from the AWS control plane " +
+  "(`global.anthropic.…`) while its endpoint is Claude Platform on AWS, which takes bare ids " +
+  "(`claude-opus-5`) — so a run 404s on the model the picker offered. Use Anthropic (direct) " +
+  "or Anthropic (host login) meanwhile. Set HARNESS_ENABLE_AWS_PROVIDER=1 to try it anyway " +
+  "at your own risk.";
+
 export interface AnthropicBedrockOptions {
   client?: AnthropicBedrockMantle;
   discovery?: Discovery;
@@ -128,6 +157,13 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
    * remedy below names SSO expiry up front for exactly that case.
    */
   async probe(): Promise<ProbeResult> {
+    // a participant must not be offered a model the host cannot serve, and right now
+    // this adapter cannot serve any of the ones it lists. Checked BEFORE the credential, so a
+    // developer with a perfectly good AWS session is told the real reason.
+    if (!this.quarantineLifted()) {
+      return { available: false, reason: "not_entitled", remedy: QUARANTINE_REMEDY };
+    }
+
     const discovery = this.discover();
     if (!discovery.usable) {
       return {
@@ -192,6 +228,11 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
       { signal: req.signal },
     );
     yield* mapAnthropicStream(stream as unknown as RawStream);
+  }
+
+  private quarantineLifted(): boolean {
+    const flag = this.env.HARNESS_ENABLE_AWS_PROVIDER;
+    return flag === "1" || flag === "true";
   }
 
   private discover(): Discovery {

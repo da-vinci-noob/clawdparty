@@ -50,7 +50,9 @@ describe("no credential at all", () => {
     // machine that happens to have `~/.aws` this passed the credential check and failed on
     // the region instead — a test whose outcome depended on whose laptop ran it.
     const adapter = new AnthropicBedrockAdapter({
-      env: {},
+      // The quarantine is lifted so this tests the CREDENTIAL message. The quarantine itself
+      // reports first and has its own coverage in `anthropic_bedrock.test.ts`.
+      env: { HARNESS_ENABLE_AWS_PROVIDER: "1" },
       discovery: {
         source: "none",
         usable: false,
@@ -91,7 +93,7 @@ describe("a credential that is present but unusable", () => {
 
   it("bedrock: a region-less AWS session is reported as such", async () => {
     const adapter = new AnthropicBedrockAdapter({
-      env: { AWS_PROFILE: "work" },
+      env: { AWS_PROFILE: "work", HARNESS_ENABLE_AWS_PROVIDER: "1" },
       discovery: { source: "env:AWS_PROFILE", usable: true },
     });
 
