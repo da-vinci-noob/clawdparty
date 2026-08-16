@@ -25,8 +25,10 @@ Rails.application.routes.draw do
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
     # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id.
     # #index lists the caller's sessions (host or participant): GET /api/sessions.
+    # #show gives one session's mode + working dir to any participant: GET /api/sessions/:id
+    # — the web needs `mode` to know whether a review affordance applies at all.
     # member #archive hard-closes a session (owner only): POST /api/sessions/:id/archive.
-    resources :sessions, only: %i[index create update] do
+    resources :sessions, only: %i[index show create update] do
       member do
         post :archive
       end

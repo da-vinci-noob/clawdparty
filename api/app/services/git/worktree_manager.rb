@@ -4,8 +4,11 @@ require 'open3'
 
 module Git
   # Rails owns worktree creation (the frozen harness-protocol convention): the
-  # per-session worktree lives at <repo>/.clawdparty/worktrees/session-<id> on
-  # branch clawd/session-<id>, created against the bind-mounted target repo. The
+  # per-session worktree lives at <repo_root>/.clawdparty/worktrees/session-<id> on
+  # branch clawd/session-<id>, created FROM the session's own repository
+  # (`repository_path`). Note the two are different directories — the checkout is
+  # centralized under the mount root so the user's repos are not littered with
+  # worktrees, which means the files are NOT under the repo they came from. The
   # harness only uses it as `cwd`; it never creates or relocates it.
   class WorktreeManager
     class GitError < StandardError; end

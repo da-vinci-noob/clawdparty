@@ -122,4 +122,25 @@ describe("SessionList", () => {
     await screen.findByText("TeammateSession");
     expect(screen.queryByRole("button", { name: "end session" })).not.toBeInTheDocument();
   });
+
+  // Which mode a session is in changes what you can do in it — a chat session never offers
+  // approve/reject — and the list is the last place to see it before committing to opening
+  // one. The API already returned `mode`; the row simply dropped it.
+  it("badges each row with its mode", async () => {
+    server.use(
+      http.get("/api/sessions", () =>
+        HttpResponse.json([
+          ROW({ id: "1", title: "ReviewOne", mode: "review" }),
+          ROW({ id: "2", title: "ChatOne", mode: "chat" }),
+        ]),
+      ),
+    );
+    renderList();
+
+    await screen.findByText("ReviewOne");
+    expect(screen.getAllByTestId("mode-badge").map((el) => el.textContent)).toEqual([
+      "review",
+      "chat",
+    ]);
+  });
 });

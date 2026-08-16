@@ -3,9 +3,14 @@ import { useCurrentParticipant } from "../../hooks/use_current_participant";
 import { SessionList } from "./session_list";
 
 // The left rail: logo, New/Join actions, the caller's real session lists (via
-// SessionList → GET /api/sessions), the session's owner controls (invite / change
-// dir) passed in via `ownerControls`, and a user footer.
-export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControls }) => {
+// SessionList → GET /api/sessions), what this session IS (`sessionInfo`, every role),
+// the session's owner controls (invite / change dir) passed in via `ownerControls`, and a
+// user footer. `sessionInfo` is separate from `ownerControls` because the mode is not a
+// setting anyone can change — every participant needs it to read the screen correctly.
+export const SessionSidebar: FC<{ sessionInfo?: ReactNode; ownerControls?: ReactNode }> = ({
+  sessionInfo,
+  ownerControls,
+}) => {
   const { participant } = useCurrentParticipant();
   const initials = (participant?.name ?? "you").slice(0, 2).toUpperCase();
 
@@ -44,6 +49,10 @@ export const SessionSidebar: FC<{ ownerControls?: ReactNode }> = ({ ownerControl
       </div>
 
       <SessionList />
+
+      {sessionInfo && (
+        <div className="mx-[14px] mb-3 border-t border-[#16211a] pt-3">{sessionInfo}</div>
+      )}
 
       {ownerControls && (
         <div className="mx-[14px] mb-4 space-y-3 border-t border-[#16211a] pt-4">

@@ -248,6 +248,40 @@ export function selectAwaitingReviewRunId(state: EventStoreState): string | null
   return awaiting ? currentRun : null;
 }
 
+/**
+ * Paths the CURRENT run reported changing, de-duplicated, in first-touch order.
+ *
+ * A chat run has no worktree and no changeset, so `GET /api/runs/:id/diff` has nothing to
+ * describe — these events are the only record of what was touched, and without them a
+ * participant who watched Claude edit files has no way to see which ones.
+ *
+ * Returns a NEW array each call, so subscribe to the stable `durableList` and derive from
+ * it — passing this straight to `useEventStore` would re-render forever. The parameter is
+ * narrowed to the one field it reads so callers can hand it that slice.
+ */
+export function selectChangedPaths(state: Pick<EventStoreState, "durableList">): string[] {
+  let currentRun: string | null = null;
+  for (const e of state.durableList) {
+    if (e.type === "run_started" && e.ai_run_id !== null) {
+      currentRun = e.ai_run_id;
+    }
+  }
+  if (currentRun === null) {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const e of state.durableList) {
+    if (e.ai_run_id !== currentRun || e.type !== "file_changed") {
+      continue;
+    }
+    const path = (e.payload as { path?: string }).path;
+    if (path) {
+      seen.add(path);
+    }
+  }
+  return [...seen];
+}
+
 export interface ContextUsage {
   // Prompt-side tokens of the most recent completed run — a proxy for how full the
   // context window is (input + cache-read + cache-creation = everything sent that turn).

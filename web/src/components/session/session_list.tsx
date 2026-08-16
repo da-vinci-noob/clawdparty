@@ -80,7 +80,10 @@ const SessionRow: FC<RowProps> = ({ session, onArchive }) => {
           <span className="text-[11px] text-[#6b726b]">
             {relativeActivity(session.last_activity_at ?? session.created_at)}
           </span>
-          <StatusBadge revoked={revoked} />
+          <span className="flex items-center gap-[6px]">
+            <ModeBadge mode={session.mode} />
+            <StatusBadge revoked={revoked} />
+          </span>
         </div>
       </Link>
       {canEnd && (
@@ -97,6 +100,22 @@ const SessionRow: FC<RowProps> = ({ session, onArchive }) => {
     </div>
   );
 };
+
+// Mode is fixed for a session's lifetime and decides whether approve/reject can ever
+// appear, so it belongs beside the row before you open it — not only inside.
+const ModeBadge: FC<{ mode: SessionSummary["mode"] }> = ({ mode }) => (
+  <span
+    data-testid="mode-badge"
+    className="rounded-full px-[7px] py-px font-mono text-[9px] uppercase tracking-[0.4px]"
+    style={
+      mode === "chat"
+        ? { background: "#1c1a10", color: "#c9a227" }
+        : { background: "#0f1c2b", color: "#8fb4d9" }
+    }
+  >
+    {mode}
+  </span>
+);
 
 const StatusBadge: FC<{ revoked: boolean }> = ({ revoked }) => (
   <span

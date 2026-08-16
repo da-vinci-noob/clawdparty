@@ -11,7 +11,7 @@ class SessionsController < ApplicationController
   include SessionWorkingDirectory
 
   # #create is the unauthenticated bootstrap; every other action requires an identity.
-  before_action :require_user, only: %i[index update archive]
+  before_action :require_user, only: %i[index show update archive]
 
   # GET /api/sessions — the caller's session history: every session they host OR
   # participate in, de-duplicated, newest activity first. A per-user index (not
@@ -21,6 +21,19 @@ class SessionsController < ApplicationController
   def index
     sessions = Session.for_user(current_user).includes(:participants)
     render(json: sessions.map { |session| history_row(session) }, status: :ok)
+  end
+
+  # GET /api/sessions/:id — one session's mode + working directory, for ANY participant
+  # (`:view`), because `mode` decides whether a review affordance applies at all: a `chat`
+  # session has no worktree and no changeset, so approve/reject can never appear, and
+  # without this the web could not tell that apart from a review session that happened to
+  # produce no changes. Non-participant/unknown => 404 (anti-enumeration), as elsewhere.
+  def show
+    session = Session.find_by(id: params[:id])
+    raise(ActiveRecord::RecordNotFound) if session.nil?
+
+    authorize!(:view, session)
+    render(json: session_json(session), status: :ok)
   end
 
   def create
