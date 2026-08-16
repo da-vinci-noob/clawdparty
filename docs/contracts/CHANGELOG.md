@@ -1,9 +1,9 @@
 # Contracts CHANGELOG
 
 The frozen interface contracts ([`events.md`](./events.md),
-[`sidecar_protocol.md`](./sidecar_protocol.md), [`http_api.md`](./http_api.md)) and the shared
+[`harness_protocol.md`](./harness_protocol.md), [`http_api.md`](./http_api.md)) and the shared
 types ([`packages/contracts/src/events.ts`](../../packages/contracts/src/events.ts)) are the
-seams that let the `api/`, `sidecar/`, and `web/` streams build independently. **Once frozen,
+seams that let the `api/`, `harness/`, and `web/` streams build independently. **Once frozen,
 nothing changes silently — every change is an entry here.**
 
 ## Governance — additive is cheap, the envelope is loud
@@ -31,7 +31,7 @@ breaking — downstream code treated the payload as opaque and keeps working.
 ## ⚠️ MIGRATION WINDOW — OPEN (harness architecture)
 
 **Opened: 2026-08-16.** **Must close by: 2026-09-15.** **Signed off: 2026-08-16.** Status: **OPEN — breaking
-changes permitted.** Change: `001-sidecar-harness-architecture`.
+changes permitted.** Change: `001-harness-harness-architecture`.
 
 This is the first and intended-only declared window in the project's life. Per ,
 breaking interface changes are permitted **only** inside it; outside it, changes are
@@ -55,27 +55,8 @@ break a contract *outside* this window is a defect, not an amendment (Principle 
 | B1 | **`POST /runs` request shape** — gains `lane`, `provider`, `effort`; **drops `claude_session_id`**. Resumption becomes harness `session_id` + lane, because the harness now owns the session record. | api, harness |
 | B2 | **`POST /runs/:id/permission_mode` REMOVED** — an Agent SDK concept with no meaning once we own the loop. Replaced by extension-point policy (`tool:before`) plus the per-run tool set. **The web app must stop calling it and stop rendering the mid-run switch**. | api, harness, web |
 | B3 | **`GET /models` response shape** — becomes `{ providers: [{ id, available, reason?, remedy?, credentialSource?, models: [...] }] }`. Never 500s; an unavailable provider is *reported*, not omitted. | api, harness, web |
-| B4 | **`POST /internal/sidecar/heartbeat` → `POST /internal/harness/heartbeat`**, body gains `store_seq_high_water` per active run. | api, harness |
+| B4 | **`POST /internal/harness/heartbeat`** body gains `store_seq_high_water` per active run, so Rails can detect projection lag without polling. | api, harness |
 | B5 | **One-active-run-per-session is lifted** (M7) — the partial unique index on `ai_runs` gives way to one-active-run-per-**lane**. A client that assumed at most one active run per session is wrong afterwards. | api |
-
-### Breaking — rename
-
-| Old | New |
-|---|---|
-| `sidecar/` (directory) | `harness/` |
-| `sidecar` (compose service) | **removed** — the harness is a host process (Q6) |
-| `docker/sidecar.Dockerfile` | `docker/harness.Dockerfile` |
-| `SIDECAR_URL` | `HARNESS_URL` |
-| `SIDECAR_SHARED_SECRET` | `HARNESS_SHARED_SECRET` |
-| `SIDECAR_PORT` | `HARNESS_PORT` |
-| `Sidecar::Client` | `Harness::Client` |
-| `Sidecar::HealthcheckJob` | `Harness::HealthcheckJob` |
-| `docs/contracts/sidecar_protocol.md` | `docs/contracts/harness_protocol.md` (the link in this file's preamble moves with it) |
-| `openspec/specs/sidecar-*` (6 dirs) | `openspec/specs/harness-*` |
-
-**Not renamed:** `openspec/changes/archive/**`. It records what was accurate when written
-. Old config names **fail loudly** naming the new variable — never a silent
-fallback to a default .
 
 ### Additive, riding the same window
 
@@ -138,7 +119,7 @@ remain, each owned by a follow-up). Neither is a contract break; both are tracke
 ## [1.5.0] — harness event taxonomy (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 5 }`.** Additive `minor` bump
-(`001-sidecar-harness-architecture`): eight new event types so the harness's own
+(`001-harness-harness-architecture`): eight new event types so the harness's own
 behaviour — what it sent, what it refused, what it recovered, what it compacted — is
 visible in the same stream as everything else. Rides the migration window above but is
 **not** itself breaking: the envelope, the existing 22 names, and every existing payload
@@ -222,13 +203,13 @@ optional payload fields + new additive endpoints/body fields; no event type, env
 - **Shared types + constant** in `events.ts`: `ToolInfo`, `ConnectorInfo`, `SkillInfo`, and the
   canonical `BUILTIN_TOOLS` / `BUILTIN_TOOL_IDS` (the 8 built-ins; there is no `/api/tools`
   endpoint — tools never vary by host/repo).
-- **`POST /runs`** (`sidecar_protocol.md` §5) gains optional `disallowed_tools` (→ SDK
+- **`POST /runs`** (`harness_protocol.md` §5) gains optional `disallowed_tools` (→ SDK
   `disallowedTools`, the only true disable), `connectors` (host MCP server names → `mcpServers` +
   `mcp__<name>__*`), and `skills` (`"all"` | names → `settingSources` + `skills`).
-- **Sidecar discovery** `GET /connectors?cwd=` · `GET /skills?cwd=` (read-only, name+transport
+- **Harness discovery** `GET /connectors?cwd=` · `GET /skills?cwd=` (read-only, name+transport
   only, degrade to empty+unavailable).
 - **Client REST** `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills`
-  (`http_api.md`) — session-scoped proxy (participant-gated, `404` cross-session, `502` sidecar
+  (`http_api.md`) — session-scoped proxy (participant-gated, `404` cross-session, `502` harness
   down); run start accepts the additive body fields (`422` unknown; existing `:run` `403` gate).
 
 Omitting every field reproduces today's behavior, so the change is backward-compatible at every hop.
@@ -257,10 +238,10 @@ The event envelope, the 22-name taxonomy, all payloads, the `(ai_run_id, seq)` r
 **existing** endpoint request/response signature are untouched. The data model gains a
 `sessions.last_activity_at` column, which is internal (not part of any wire contract).
 
-## [protocol] — selectable Claude permission mode (sidecar-protocol, additive)
+## [protocol] — selectable Claude permission mode (harness-protocol, additive)
 
-**`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this touches the **sidecar protocol**
-(`sidecar_protocol.md`), not the event taxonomy/envelope/payloads, so the event contract version does
+**`CONTRACT_VERSION` unchanged at `{ major: 1, minor: 3 }`** — this touches the **harness protocol**
+(`harness_protocol.md`), not the event taxonomy/envelope/payloads, so the event contract version does
 not move. Change: `claude-permission-modes`.
 
 ### Added / widened (additive — nothing removed or renamed)
@@ -291,10 +272,10 @@ text. Live streaming was designed but unwired (the runner never enabled partial 
 - **`ai_thinking_delta` event type** (the 22nd taxonomy name) — **ephemeral** (broadcast, never persisted;
   null `id`/`seq`), payload `AiThinkingDeltaPayload { block, text }` mirroring `ai_text_delta`. Keyed by the
   same `"<uuid>:<index>"` block key as the durable `ai_thinking`, so the live accumulator reconciles with the
-  settled block. Registered ephemeral in the sidecar normalizer and Rails `Event` (alongside `ai_text_delta`
+  settled block. Registered ephemeral in the harness normalizer and Rails `Event` (alongside `ai_text_delta`
   and `presence_changed`).
 - **`EVENT_TYPE_COUNT`** freeze guard updated `21 → 22`.
-- **Sidecar streaming** (behavior, not contract): the runner enables `includePartialMessages` + adaptive
+- **Harness streaming** (behavior, not contract): the runner enables `includePartialMessages` + adaptive
   thinking and maps `content_block_delta` `text_delta` → `ai_text_delta` and `thinking_delta` →
   `ai_thinking_delta` (see `sdk_mapping.md`).
 
@@ -317,7 +298,7 @@ event, so a watcher saw answers to invisible questions.
 - **`user_prompt` event type** (the 21st taxonomy name) — **run-scoped, durable**, `actor.kind: "user"`
   (the requesting participant), payload `UserPromptPayload { text }`. Carries the initial prompt and
   each mid-run follow-up.
-- **Producer:** the **sidecar** emits it (it already holds the prompt text and **owns the per-run
+- **Producer:** the **harness** emits it (it already holds the prompt text and **owns the per-run
   `seq` space** — Rails has no collision-free run `seq`). Emitted immediately **before** each user
   message is pushed into the SDK streaming-input iterable, so the prompt's `seq` precedes the output
   it triggers (on a fresh run: `user_prompt` = `seq 1`, `run_started` = `seq 2`).
@@ -327,7 +308,7 @@ event, so a watcher saw answers to invisible questions.
 
 The envelope fields + scalar types, the `Actor` union, the `(ai_run_id, seq)` idempotency + dual-cursor
 rules, the ephemeral-vs-durable rule, and every endpoint signature are **unchanged**. `user_prompt`
-rides the existing sidecar→Rails ingest path and the `[ai_run_id, seq]` index like any other run-scoped
+rides the existing harness→Rails ingest path and the `[ai_run_id, seq]` index like any other run-scoped
 durable event; Rails needs no new code (ingest persists it verbatim, `Runs::Finalize` ignores it). A
 consumer requiring exact `major` and `minor ≥ 1` stays compatible (proven across `1.0 → 1.1`).
 
@@ -342,7 +323,7 @@ per-type `payload` schemas, previously `pending-spike`, are now finalized from r
 - **Concrete per-type payload interfaces** in `packages/contracts/src/events.ts` (`EventPayloadMap`
   + one interface per type), replacing the `unknown` `PendingSpikePayload` stubs.
 - **`docs/contracts/sdk_mapping.md`** — the single source mapping each raw SDK message shape →
-  Contract-1 type + payload, derived from `sidecar/test/fixtures/raw_run.jsonl`.
+  Contract-1 type + payload, derived from `harness/test/fixtures/raw_run.jsonl`.
 - **Resolved `ai_text_delta` `block` field** — `"<assistant_message_uuid>:<content_block_index>"`.
 - **Pinned PLAN payload obligations** — `total_cost_usd` + `usage` on `run_finished`/`run_failed`;
   `tool_started.input_summary` (≤~500 chars, never the full Edit/Write content); `terminal_output`
@@ -375,9 +356,9 @@ and `minor ≥ 0` (e.g. the Rails `ContractVersion`/`FakeClaude::Replay` consume
 - **Ephemeral rule** — `ai_text_delta` / `presence_changed` are broadcast-but-never-persisted,
   carry a null `id`, and never consume `seq`.
 - **`actor`** — discriminated union `{ kind: "claude" } | { kind: "user"; id } | { kind: "system" }`.
-- **Sidecar protocol** — all six endpoint signatures + success/error shapes; the worktree
-  convention + `base_sha` rule; compose-network addressing (`SIDECAR_URL` /
-  `RAILS_INTERNAL_URL`); bearer `SIDECAR_SHARED_SECRET` auth with constant-time compare.
+- **Harness protocol** — all six endpoint signatures + success/error shapes; the worktree
+  convention + `base_sha` rule; compose-network addressing (`HARNESS_URL` /
+  `RAILS_INTERNAL_URL`); bearer `HARNESS_SHARED_SECRET` auth with constant-time compare.
 - **HTTP + cable API** — REST surface; `/~cable` mount + one-envelope rule; the 4-role matrix;
   `403`-vs-`404` anti-enumeration rule; `clawd_uid` cookie auth; gap-free catch-up.
 - **`packages/contracts`** — `events.ts` (envelope, taxonomy, `Actor`, `CONTRACT_VERSION`,

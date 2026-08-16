@@ -26,7 +26,7 @@ lifetime and chosen at create time. `review` mode SHALL behave exactly as today 
 A `chat` session's working directory SHALL be realpath-resolved and confirmed to be within the bind-mounted
 repo root before use (defeating `../` and symlink escape, the same containment rule the file API uses). A
 directory that resolves outside the repo root SHALL be refused at create with a client error; it SHALL NOT be
-persisted or handed to the sidecar. When no working directory is given, the mounted repo root SHALL be used.
+persisted or handed to the harness. When no working directory is given, the mounted repo root SHALL be used.
 
 #### Scenario: An escaping working directory is refused
 
@@ -42,14 +42,14 @@ persisted or handed to the sidecar. When no working directory is given, the moun
 ### Requirement: A chat run starts without a worktree or base_sha and runs in the working directory
 
 For a `chat`-mode session, `Runs::Start` SHALL NOT create a git worktree, SHALL NOT require a clean/dirty check,
-and SHALL NOT record `base_sha`; it SHALL pin the sidecar `cwd` to the session's working directory and otherwise
-start the run through the existing path (one active run per session still enforced; the sidecar protocol
+and SHALL NOT record `base_sha`; it SHALL pin the harness `cwd` to the session's working directory and otherwise
+start the run through the existing path (one active run per session still enforced; the harness protocol
 unchanged). For a `review`-mode session, `Runs::Start` SHALL be unchanged (worktree + `base_sha`).
 
 #### Scenario: Chat run skips the worktree
 
 - **WHEN** a run is started on a `chat` session
-- **THEN** no git worktree is created, `base_sha` is not recorded, and the sidecar is invoked with `cwd` set to
+- **THEN** no git worktree is created, `base_sha` is not recorded, and the harness is invoked with `cwd` set to
   the session's working directory
 
 #### Scenario: Chat run works when the directory is not a git repository

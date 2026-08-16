@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 module Events
-  # The single ingestion service for events arriving from the sidecar or a
+  # The single ingestion service for events arriving from the harness or a
   # replay. Classifies ephemeral vs durable, persists durable with DB-level
   # dedupe on (ai_run_id, seq), never persists ephemeral, and BROADCASTS every
   # accepted event — broadcast lives HERE (not in a controller) so a direct
   # in-process caller (the fake-Claude replay) both persists and broadcasts
-  # identically to a sidecar-driven ingest.
+  # identically to a harness-driven ingest.
   class Ingest
     Result = Struct.new(:status, :event, keyword_init: true) do
       def accepted? = status == :accepted

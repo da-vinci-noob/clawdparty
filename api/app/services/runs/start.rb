@@ -23,7 +23,7 @@ module Runs
     DEFAULT_LANE = 'main'
     DEFAULT_PROVIDER = 'anthropic-direct'
 
-    Result = Struct.new(:ai_run, :sidecar_status, keyword_init: true)
+    Result = Struct.new(:ai_run, :harness_status, keyword_init: true)
 
     def self.call(**)
       new(**).call
@@ -32,7 +32,7 @@ module Runs
     def initialize(session:, requested_by:, prompt:, model:, mode: 'fresh',
                    provider: DEFAULT_PROVIDER, lane: DEFAULT_LANE, effort: nil,
                    disallowed_tools: [], connectors: [], skills: [],
-                   client: Sidecar::Client.new, worktree: nil)
+                   client: Harness::Client.new, worktree: nil)
       @session = session
       @requested_by = requested_by
       @prompt = prompt
@@ -108,14 +108,14 @@ module Runs
       true
     end
 
-    # If the sidecar refuses the start, drop the just-created run so no
+    # If the harness refuses the start, drop the just-created run so no
     # queued/active run is left behind to block the session (queued counts toward
     # one-active-run); re-raise so the controller still surfaces the error.
     def create_and_post!(cwd, resume)
       run = create_run!
       status = post_to_harness(run, cwd, resume)
-      Result.new(ai_run: run, sidecar_status: status)
-    rescue Sidecar::Client::ActiveRunConflict, Sidecar::Client::TransportError
+      Result.new(ai_run: run, harness_status: status)
+    rescue Harness::Client::ActiveRunConflict, Harness::Client::TransportError
       run&.destroy
       raise
     end

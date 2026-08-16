@@ -13,17 +13,17 @@ context: |
   Architecture: three cooperating processes under Docker Compose (`bin/start` is the single entry),
   one container per process, plus N browsers on the LAN:
     - api/      Rails 8 API-only + ActionCable + Solid Queue/Cable (the only service publishing a port)
-    - sidecar/  Node + Fastify wrapping @anthropic-ai/claude-agent-sdk (the ONLY SDK-aware code; unpublished)
+    - harness/  Node + Fastify wrapping @anthropic-ai/claude-agent-sdk (the ONLY SDK-aware code; unpublished)
     - web/      React 19 + Vite + TypeScript + Tailwind SPA
     - postgres  PostgreSQL 18 (named volume)
-  Operate in the stream that owns a file — never put Rails logic in the sidecar or vice-versa.
+  Operate in the stream that owns a file — never put Rails logic in the harness or vice-versa.
 
   Pinned toolchain (images + CI): Ruby 4.0.5, Node 24 LTS, PostgreSQL 18, Docker Compose.
-  Lint/format: Biome (web + sidecar), RuboCop rubocop-rails/rubocop-rspec (api; line 120, frozen
-  string literals, required parens). Tests: Vitest + RTL + MSW (web/sidecar), RSpec + FactoryBot (api).
+  Lint/format: Biome (web + harness), RuboCop rubocop-rails/rubocop-rspec (api; line 120, frozen
+  string literals, required parens). Tests: Vitest + RTL + MSW (web/harness), RSpec + FactoryBot (api).
 
   Contract-first: the `freeze-interface-contracts` change freezes four capabilities that are the seams
-  letting the three streams build independently — `event-envelope`, `sidecar-protocol`,
+  letting the three streams build independently — `event-envelope`, `harness-protocol`,
   `http-api-contract`, `contracts-package`. All other changes CONSUME these by name; never re-derive
   or contradict them. Freeze-now vs spike-gated: the envelope, the 20 event-type names, all endpoint
   signatures, the worktree convention, and the 4-role matrix freeze immediately; per-type SDK payload
@@ -35,8 +35,8 @@ context: |
   (ai_run_id, seq); every mutation appends an event in the same transaction; ephemeral types
   (ai_text_delta, presence_changed) are broadcast-but-never-persisted; reject severs
   claude_session_id chaining (only revise resumes); diffs go over REST never cable; the server
-  enforces roles (client only hides buttons); the sidecar is unpublished (compose-network only); the
-  sidecar uses the host developer's EXISTING Claude login (API key | subscription/enterprise OAuth |
+  enforces roles (client only hides buttons); the harness is unpublished (compose-network only); the
+  harness uses the host developer's EXISTING Claude login (API key | subscription/enterprise OAuth |
   Bedrock) via read-only ~/.claude + ~/.aws mounts + inherited auth env — never an app-owned key.
 
   Engineering conventions (see docs/PLAN.md §16): backend = single-responsibility service POROs

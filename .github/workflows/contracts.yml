@@ -2,7 +2,7 @@ name: contracts
 
 # The executable contract (packages/contracts/fixtures/sample_run.test.ts) is the
 # FIRST of the four artifacts required to pass against
-# sample_run.jsonl — and it ran in no CI job at all. The sidecar and web jobs
+# sample_run.jsonl — and it ran in no CI job at all. The harness and web jobs
 # install the contracts package as a file: dependency and read the fixture DATA,
 # but neither runs the frozen-envelope-rules suite over it.
 on:

@@ -10,7 +10,7 @@ RUN apt-get update -qq \
 WORKDIR /app
 
 # Pre-create the node_modules mountpoint owned by `node` so the fresh named
-# volume inherits `node` ownership (see sidecar.Dockerfile for the rationale).
+# volume inherits `node` ownership (see harness.Dockerfile for the rationale).
 RUN mkdir -p /app/node_modules && chown -R node:node /app
 
 COPY docker/entrypoints/web.sh /usr/local/bin/web-entrypoint

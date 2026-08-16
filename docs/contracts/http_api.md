@@ -83,18 +83,18 @@ A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delive
 - `skills: "all" | string[]` — skills to enable (`"all"` or validated ⊆ discovered skills).
 
 An unknown/non-selectable value is refused **`422`** `{ errors }` and starts no run; when discovery
-is unavailable, validation **fails open** (the sidecar is the backstop). Setting these follows the
+is unavailable, validation **fails open** (the harness is the backstop). Setting these follows the
 existing **start-run** role gate (owner/editor) — a reviewer/viewer is **`403`** `{ errors }`. On
 success the run returns its existing **`202`** shape. The `run_started` event echoes the resolved
 selection.
 
 ### Capability discovery — `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills`
 
-Read-only, **session-scoped** (the repo is per-session), proxied from the sidecar and cached like
+Read-only, **session-scoped** (the repo is per-session), proxied from the harness and cached like
 model discovery (cache key includes the repo path). Return **`200`** with
 `{ connectors: [{ name, transport }], source }` and `{ skills: [{ name, description }], source }`
 respectively — an empty list with an unavailable `source` when the repo has no config, and **`502`**
-when the sidecar is unreachable. Any participant may read them; a non-participant/cross-session
+when the harness is unreachable. Any participant may read them; a non-participant/cross-session
 request is **`404`** `{ errors }`. Connector responses never contain a server's
 command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
 an endpoint.

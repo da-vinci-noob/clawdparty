@@ -2,7 +2,7 @@
 
 module Runs
   # Drives ai_run state transitions from ingested run-lifecycle events (not by
-  # polling). Rails — not the sidecar — owns every transition; the sidecar only
+  # polling). Rails — not the harness — owns every transition; the harness only
   # emits the events. Invoked from the Events::Ingest path after a durable
   # run-lifecycle event persists.
   #
@@ -46,7 +46,7 @@ module Runs
 
     private
 
-    # Transition queued → running and capture the Claude session id the sidecar
+    # Transition queued → running and capture the Claude session id the harness
     # reports in run_started, so a later follow-up can resume that session. Both
     # writes are combined into one update! (payload keys are strings).
     def finalize_run_started(run)

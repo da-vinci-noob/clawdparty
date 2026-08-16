@@ -5,17 +5,17 @@ TBD - created by archiving change claude-permission-modes. Update Purpose after 
 ## Requirements
 ### Requirement: Users select Claude's permission mode at run start
 
-Run start SHALL accept an optional `permission_mode` and forward it (via `Runs::Start` → the sidecar `POST /runs` payload) after validating it server-side against the allowlist `plan | acceptEdits | bypassPermissions`. When omitted, the mode SHALL default to `acceptEdits` (the prior fixed behavior, so existing clients are unchanged). A value outside the allowlist — including `default`, `dontAsk`, or any ask-per-tool mode — SHALL be rejected with HTTP `422` and a JSON body of the shape `{ errors: [...] }`, and no run SHALL be started. On success, run start behaves exactly as today (asynchronous `202`/queued run), only with the chosen mode.
+Run start SHALL accept an optional `permission_mode` and forward it (via `Runs::Start` → the harness `POST /runs` payload) after validating it server-side against the allowlist `plan | acceptEdits | bypassPermissions`. When omitted, the mode SHALL default to `acceptEdits` (the prior fixed behavior, so existing clients are unchanged). A value outside the allowlist — including `default`, `dontAsk`, or any ask-per-tool mode — SHALL be rejected with HTTP `422` and a JSON body of the shape `{ errors: [...] }`, and no run SHALL be started. On success, run start behaves exactly as today (asynchronous `202`/queued run), only with the chosen mode.
 
 #### Scenario: Omitted mode defaults to acceptEdits
 
 - **WHEN** a run-capable user starts a run without a `permission_mode`
-- **THEN** the run is created and the sidecar payload carries `permission_mode: acceptEdits`
+- **THEN** the run is created and the harness payload carries `permission_mode: acceptEdits`
 
 #### Scenario: An allowlisted mode is forwarded
 
 - **WHEN** a run-capable user starts a run with `permission_mode: plan`
-- **THEN** the run is created and the sidecar payload carries `permission_mode: plan`
+- **THEN** the run is created and the harness payload carries `permission_mode: plan`
 
 #### Scenario: An unsupported mode is rejected
 
@@ -45,7 +45,7 @@ Selecting a permission mode SHALL require a run-capable role (`owner` or `editor
 
 ### Requirement: Plan runs can be executed by switching mode in-session
 
-After a `plan`-mode run, a run-capable user SHALL be able to continue in `acceptEdits` without re-exploring, by switching the run's permission mode in-session. Rails SHALL expose a role-gated endpoint that forwards to the sidecar `POST /runs/:id/permission_mode`; the target mode SHALL be validated against the same allowlist and role rules (bypass owner-only). If the run is still active, the switch SHALL take effect in-session and subsequent edits SHALL ride the existing changeset-review (approve/reject) flow unchanged. If the run is no longer active (already terminal), the endpoint SHALL respond so the client can fall back to starting a fresh `acceptEdits` run that resumes the same `claude_session_id`.
+After a `plan`-mode run, a run-capable user SHALL be able to continue in `acceptEdits` without re-exploring, by switching the run's permission mode in-session. Rails SHALL expose a role-gated endpoint that forwards to the harness `POST /runs/:id/permission_mode`; the target mode SHALL be validated against the same allowlist and role rules (bypass owner-only). If the run is still active, the switch SHALL take effect in-session and subsequent edits SHALL ride the existing changeset-review (approve/reject) flow unchanged. If the run is no longer active (already terminal), the endpoint SHALL respond so the client can fall back to starting a fresh `acceptEdits` run that resumes the same `claude_session_id`.
 
 #### Scenario: Execute a finished/active plan by switching to acceptEdits
 

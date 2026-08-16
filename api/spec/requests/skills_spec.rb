@@ -6,12 +6,12 @@ RSpec.describe('Skills discovery API') do
   let(:session) { create(:session, repository_path: '/repo/app') }
 
   def stub_skills(body)
-    allow_any_instance_of(Sidecar::Client).to(receive(:list_skills)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: body)))
+    allow_any_instance_of(Harness::Client).to(receive(:list_skills)
+      .and_return(Harness::Client::Result.new(status: 200, body: body)))
   end
 
   describe 'GET /api/sessions/:id/skills' do
-    it 'returns the skill list proxied from the sidecar (name + description)' do
+    it 'returns the skill list proxied from the harness (name + description)' do
       stub_skills('skills' => [{ 'name' => 'deploy', 'description' => 'Ship it' }], 'source' => 'user')
 
       join_as(session, role: 'viewer')
@@ -33,9 +33,9 @@ RSpec.describe('Skills discovery API') do
       expect(response.parsed_body['source']).to(eq('unavailable'))
     end
 
-    it 'returns 502 when the sidecar is unreachable' do
-      allow_any_instance_of(Sidecar::Client).to(receive(:list_skills)
-        .and_raise(Sidecar::Client::TransportError, 'sidecar /skills failed: connection refused'))
+    it 'returns 502 when the harness is unreachable' do
+      allow_any_instance_of(Harness::Client).to(receive(:list_skills)
+        .and_raise(Harness::Client::TransportError, 'harness /skills failed: connection refused'))
 
       join_as(session, role: 'viewer')
       get("/api/sessions/#{session.id}/skills")

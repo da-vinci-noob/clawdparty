@@ -19,7 +19,7 @@ Rails.application.routes.draw do
     get 'directories', to: 'directories#index'
 
     # Runtime model discovery (any participant): the models available to the host's
-    # Claude/Bedrock login, proxied from the sidecar. GET /api/models
+    # provider login, proxied from the harness. GET /api/models
     get 'models', to: 'models#index'
 
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
@@ -40,7 +40,7 @@ Rails.application.routes.draw do
       # Run start: POST /api/sessions/:session_id/runs
       resources :runs, only: :create
       # Session-scoped capability discovery (any participant), proxied + cached
-      # from the sidecar against the session's repo path:
+      # from the harness against the session's repo path:
       # GET /api/sessions/:session_id/connectors|skills
       get 'connectors', to: 'connectors#index'
       get 'skills', to: 'skills#index'
@@ -67,9 +67,9 @@ Rails.application.routes.draw do
     end
   end
 
-  # Bearer-authed sidecar→Rails callbacks.
+  # Bearer-authed harness→Rails callbacks.
   namespace :internal do
     resources :events, only: :create
-    post 'sidecar/heartbeat', to: 'heartbeats#create'
+    post 'harness/heartbeat', to: 'heartbeats#create'
   end
 end

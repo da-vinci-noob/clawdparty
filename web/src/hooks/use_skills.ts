@@ -1,5 +1,5 @@
 // Fetches the skills the host has installed for a session's repo from
-// GET /api/sessions/:id/skills (proxied from the sidecar, discovered at runtime by
+// GET /api/sessions/:id/skills (proxied from the harness, discovered at runtime by
 // scanning `<repo>/.claude/skills/*/SKILL.md` + `~/.claude/skills/*/SKILL.md`).
 // Exposes `name` + `description` from each SKILL.md frontmatter.
 //

@@ -31,7 +31,7 @@ Several cooperating processes run on the host Mac under **Docker Compose** (one 
 ┌──────────────────────────────────────────────────┐
 │  [rails]    Rails 8 API + ActionCable (Puma :3000)│  ← only published port (→ LAN); serves the SPA
 │  [jobs]     Solid Queue   ·   [postgres] Postgres │
-│  [sidecar]  Node Fastify :8787 (unpublished)      │  ← wraps @anthropic-ai/claude-agent-sdk
+│  [harness]  Node Fastify :8787 (unpublished)      │  ← wraps @anthropic-ai/claude-agent-sdk
 │  [vite]     dev only :5173 (unpublished)          │  ← dev SPA + HMR, fronted by rails
 │  Git worktrees: <repo>/.clawdparty/worktrees/…    │  ← one isolated worktree per session
 └───────────────────┬──────────────────────────────┘
@@ -42,7 +42,7 @@ Several cooperating processes run on the host Mac under **Docker Compose** (one 
 ```
 
 - **Rails** owns sessions, events, auth, git, and the approval flow, and broadcasts everything over ActionCable.
-- **The sidecar** is the only process that talks to the Claude Agent SDK; it uses your existing Claude login (API key, subscription/enterprise, or Bedrock — auth-method-agnostic), normalizes every SDK message into a stable event envelope, and POSTs batches to Rails.
+- **The harness** is the only process that talks to the Claude Agent SDK; it uses your existing Claude login (API key, subscription/enterprise, or Bedrock — auth-method-agnostic), normalizes every SDK message into a stable event envelope, and POSTs batches to Rails.
 - **The web SPA** subscribes to the event stream and renders the live session.
 
 Everything Claude does lands uncommitted in a per-session git worktree behind human review — your main checkout is never touched.
@@ -54,23 +54,23 @@ See [`docs/PLAN.md`](docs/PLAN.md) for the full architecture, data model, event 
 | Layer | Choice |
 |---|---|
 | Backend | Rails 8 (API + ActionCable), PostgreSQL, Solid Queue + Solid Cable |
-| Claude integration | Node + Fastify sidecar wrapping `@anthropic-ai/claude-agent-sdk` |
+| Claude integration | Node + Fastify harness wrapping `@anthropic-ai/claude-agent-sdk` |
 | Frontend | React 19 + Vite + TypeScript + Tailwind; Zustand + TanStack Query |
 | Key web libs | `react-diff-view`, `react-arborist`, `shiki`, `@dnd-kit`, `anser`, `@rails/actioncable` |
-| Tooling | Biome (web + sidecar), RuboCop (api), Vitest + RTL, RSpec |
+| Tooling | Biome (web + harness), RuboCop (api), Vitest + RTL, RSpec |
 
 ## Getting started
 
 > Prerequisites: macOS host with **Docker** (Docker Desktop or OrbStack). The Ruby 4.0.5, Node 24 LTS, and PostgreSQL 18 toolchain is pinned inside the container images — you don't install them on the host.
 >
-> **Claude credentials:** the sidecar uses *your existing* Claude login — whatever you already have works, no app-specific key needed. It read-only mounts your `~/.claude` and `~/.aws` and inherits your Claude/AWS auth env, so a direct **API key**, a **Claude subscription / enterprise** login, or **Amazon Bedrock** all work unchanged.
+> **Claude credentials:** the harness uses *your existing* Claude login — whatever you already have works, no app-specific key needed. It read-only mounts your `~/.claude` and `~/.aws` and inherits your Claude/AWS auth env, so a direct **API key**, a **Claude subscription / enterprise** login, or **Amazon Bedrock** all work unchanged.
 > - **Bedrock:** make sure your AWS session is fresh (`aws sso login`) before `bin/start`.
-> - **Subscription / enterprise login on macOS:** that token lives in the macOS **Keychain**, which a Linux container can't read — run `claude setup-token` once and export `CLAUDE_CODE_OAUTH_TOKEN` (the sidecar picks it up).
+> - **Subscription / enterprise login on macOS:** that token lives in the macOS **Keychain**, which a Linux container can't read — run `claude setup-token` once and export `CLAUDE_CODE_OAUTH_TOKEN` (the harness picks it up).
 
 ```bash
 git clone <this-repo> && cd clawdparty
-bin/setup        # generates SIDECAR_SHARED_SECRET, prepares env
-bin/start        # docker compose build + up: Rails (Puma), the sidecar, Solid Queue, Postgres, and Vite
+bin/setup        # generates HARNESS_SHARED_SECRET, prepares env
+bin/start        # docker compose build + up: Rails (Puma), the harness, Solid Queue, Postgres, and Vite
 ```
 
 **Point it at your repos.** `TARGET_REPO_PATH` is the **absolute** host directory Claude is allowed to work in — set it to the **parent folder of your repos** so the in-app folder picker can browse them all. It's bind-mounted at the *identical* path inside the containers, so git worktrees stay valid on the host too (openable in your editor / GitHub Desktop). Set it in `.env.local` before `bin/start`:
@@ -120,22 +120,22 @@ Approve/reject is available to everyone except **viewer**; driving Claude (run /
 ```text
 clawdparty/
 ├── docs/PLAN.md          # authoritative design doc — read this first
-├── docs/contracts/       # frozen interface contracts (events, sidecar protocol, HTTP API)
+├── docs/contracts/       # frozen interface contracts (events, harness protocol, HTTP API)
 ├── packages/contracts/   # shared TS types + fixtures/sample_run.jsonl (the executable contract)
 ├── api/                  # Rails 8 API + ActionCable + PostgreSQL
-├── sidecar/              # Node + Fastify + Claude Agent SDK
+├── harness/              # Node + Fastify + Claude Agent SDK
 ├── web/                  # React 19 + Vite + TS + Tailwind SPA
 ├── docker/               # Dockerfiles + entrypoints per service
-├── docker-compose.yml    # rails · sidecar · jobs · postgres (+ vite in dev)
+├── docker-compose.yml    # rails · harness · jobs · postgres (+ vite in dev)
 ├── bin/start             # single entry point: docker compose build + up
 └── bin/setup             # one-time machine setup
 ```
 
 ## Development
 
-- **Lint/format:** Biome (`web/`, `sidecar/`) and RuboCop (`api/`).
-- **Tests:** RSpec (`api/`), Vitest + React Testing Library (`web/`), Vitest (`sidecar/`).
-- **CI:** three independent jobs — `api` (RuboCop + RSpec), `sidecar` (Biome + tsc + Vitest), `web` (Biome + tsc + Vitest).
+- **Lint/format:** Biome (`web/`, `harness/`) and RuboCop (`api/`).
+- **Tests:** RSpec (`api/`), Vitest + React Testing Library (`web/`), Vitest (`harness/`).
+- **CI:** three independent jobs — `api` (RuboCop + RSpec), `harness` (Biome + tsc + Vitest), `web` (Biome + tsc + Vitest).
 
 Larger changes are designed with [OpenSpec](https://github.com/) first — see the `/opsx:*` slash commands and `openspec/`.
 
@@ -144,12 +144,12 @@ Larger changes are designed with [OpenSpec](https://github.com/) first — see t
 - **`Worktree is dirty; cannot start a fresh run`** — a review changeset from a prior run is still pending. Approve, reject, or revise it first (a fresh run needs a clean tree).
 - **`Could not prepare the session worktree — is the target repo a git repository?`** — the folder you picked for a **review** session isn't a git repo. Pick a git repo, or use **chat mode**.
 - **Empty "Thinking" block on Amazon Bedrock** — Bedrock returns *encrypted* (signature-only) extended thinking, so there's no text to render (Claude's answer text still streams normally). A direct **API key** or **subscription/OAuth** login surfaces readable thinking.
-- **A sidecar code change didn't take effect** — the sidecar runs `tsx` without watch; reload it with `docker compose restart sidecar` (only affects new runs).
-- **Not logged in / auth errors** — make sure the host login the sidecar inherits is fresh: `aws sso login` for Bedrock, or `claude setup-token` + exported `CLAUDE_CODE_OAUTH_TOKEN` for a macOS subscription/enterprise login.
+- **A harness code change didn't take effect** — the harness runs `tsx` without watch; reload it with `docker compose restart harness` (only affects new runs).
+- **Not logged in / auth errors** — make sure the host login the harness inherits is fresh: `aws sso login` for Bedrock, or `claude setup-token` + exported `CLAUDE_CODE_OAUTH_TOKEN` for a macOS subscription/enterprise login.
 
 ## Security model (MVP)
 
-The trusted local network is the perimeter. Every endpoint still requires a valid invite-token-derived signed cookie, roles are enforced server-side, the sidecar container is unpublished (reachable only on the private compose network), and Claude runs pinned to an isolated worktree with everything landing behind human review. The file API defends against path traversal and denylists secrets. See [`docs/PLAN.md` §9](docs/PLAN.md) for the full model and accepted risks.
+The trusted local network is the perimeter. Every endpoint still requires a valid invite-token-derived signed cookie, roles are enforced server-side, the harness container is unpublished (reachable only on the private compose network), and Claude runs pinned to an isolated worktree with everything landing behind human review. The file API defends against path traversal and denylists secrets. See [`docs/PLAN.md` §9](docs/PLAN.md) for the full model and accepted risks.
 
 ## Scope
 

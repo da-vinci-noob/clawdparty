@@ -3,7 +3,7 @@
 # Client-facing run control (routed under the /api scope). Each action is
 # SessionPolicy-gated (run/interrupt/follow-up = owner+editor; approve/reject =
 # owner+editor+reviewer); status derives from events, never a bespoke cable
-# message. Start is async: respond after the sidecar accepts, do not block on
+# message. Start is async: respond after the harness accepts, do not block on
 # completion.
 class RunsController < ApplicationController
   include RunCapabilities
@@ -25,7 +25,7 @@ class RunsController < ApplicationController
   def messages
     run = find_run!
     participant = authorize_action!(:run, run.session)
-    Sidecar::Client.new.send_message(run.id, message: params.require(:message), requested_by: participant.id.to_s)
+    Harness::Client.new.send_message(run.id, message: params.require(:message), requested_by: participant.id.to_s)
     render(json: { run_id: run.id.to_s, accepted: true }, status: :ok)
   end
 
@@ -34,9 +34,9 @@ class RunsController < ApplicationController
     run = find_run!
     participant = authorize_action!(:interrupt, run.session)
     begin
-      Sidecar::Client.new.interrupt(run.id, requested_by: participant.id.to_s)
-    rescue Sidecar::Client::UnknownRun
-      # The sidecar has no such active run (it restarted / the run already ended),
+      Harness::Client.new.interrupt(run.id, requested_by: participant.id.to_s)
+    rescue Harness::Client::UnknownRun
+      # The harness has no such active run (it restarted / the run already ended),
       # but Rails still shows it active. Reconcile: synthesize run_interrupted so
       # the run finalizes and the session unblocks — never a dead-end 404.
       reconcile_interrupted(run, participant)
@@ -101,8 +101,8 @@ class RunsController < ApplicationController
     AiRun.find_by(id: params[:id]) || raise(ActiveRecord::RecordNotFound)
   end
 
-  # Sidecar-less finalize: ingest a synthetic run_interrupted (Rails owns the next
-  # seq since the sidecar is no longer emitting for this run) so it persists,
+  # Harness-less finalize: ingest a synthetic run_interrupted (Rails owns the next
+  # seq since the harness is no longer emitting for this run) so it persists,
   # broadcasts (clients drop it from active), and Runs::Finalize transitions it.
   def reconcile_interrupted(run, participant)
     return unless run.active?

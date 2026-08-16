@@ -9,7 +9,7 @@ Every live occurrence in a session SHALL be represented as a single event envelo
 
 The scalar type of each envelope field SHALL be pinned in the frozen `events.ts` now (these are freeze-now, not spike-gated — only per-type `payload` internals are deferred): `id` is an integer for durable (persisted) events — the server-assigned global cursor — and is **null for ephemeral events** (`ai_text_delta`, `presence_changed`), which are broadcast without a persisted row and therefore have no cursor; `seq` is an integer or null; `session_id` is a string id; `ai_run_id` is a string id or null; `type` is one of the frozen taxonomy names (or `ai_raw`); `ts` is an ISO-8601 UTC timestamp string with millisecond precision and a `Z` suffix (e.g. `2026-06-28T20:11:05.123Z`); `payload` is opaque JSON. Pinning `ts` as ISO-8601 with fixed millisecond precision (not epoch-ms, not variable fractional digits) avoids the classic cross-stream date-format mismatch.
 
-`session_id` SHALL be present on every event. `ai_run_id` and `seq` SHALL be present for run-scoped events (those emitted by the sidecar during a run) and SHALL be null for session-scoped non-run events (`chat_message`, `participant_joined`, `presence_changed`, `task_created`, `task_updated`). The idempotency rule below therefore binds only run-scoped events.
+`session_id` SHALL be present on every event. `ai_run_id` and `seq` SHALL be present for run-scoped events (those emitted by the harness during a run) and SHALL be null for session-scoped non-run events (`chat_message`, `participant_joined`, `presence_changed`, `task_created`, `task_updated`). The idempotency rule below therefore binds only run-scoped events.
 
 #### Scenario: Envelope fields are present on every event type
 
@@ -45,7 +45,7 @@ The contract SHALL enumerate the frozen set of event type names. The taxonomy SH
 
 #### Scenario: Unmappable SDK message degrades to ai_raw
 
-- **WHEN** the sidecar encounters an SDK message shape it cannot map to a known type
+- **WHEN** the harness encounters an SDK message shape it cannot map to a known type
 - **THEN** the contract requires it be emitted as an `ai_raw` event, never dropped and never a crash
 
 ### Requirement: Per-type actor, durability, and run-scope are frozen
@@ -90,7 +90,7 @@ Run-scoped **durable** types carry `ai_run_id` + `seq`; session-scoped types car
 
 ### Requirement: Dual cursor semantics
 
-The contract SHALL define two cursors. `seq` SHALL be a per-run monotonically increasing integer assigned by the sidecar and scoped to a single `ai_run_id`. The global `events.id` SHALL be a server-assigned monotonic identifier used as the client backfill/catch-up cursor across the whole session. Clients SHALL page and backfill on `id`; `seq` SHALL NOT be used as a cross-run cursor. `ts` SHALL be treated as **display-only**: ordering is by `id` (across the session) and by `seq` (within a run), never by `ts` — wall-clock timestamps can tie or skew and SHALL NOT determine event order.
+The contract SHALL define two cursors. `seq` SHALL be a per-run monotonically increasing integer assigned by the harness and scoped to a single `ai_run_id`. The global `events.id` SHALL be a server-assigned monotonic identifier used as the client backfill/catch-up cursor across the whole session. Clients SHALL page and backfill on `id`; `seq` SHALL NOT be used as a cross-run cursor. `ts` SHALL be treated as **display-only**: ordering is by `id` (across the session) and by `seq` (within a run), never by `ts` — wall-clock timestamps can tie or skew and SHALL NOT determine event order.
 
 #### Scenario: seq is per-run, id is global
 
@@ -105,11 +105,11 @@ The contract SHALL define two cursors. `seq` SHALL be a per-run monotonically in
 
 ### Requirement: Idempotent ingest keyed on (ai_run_id, seq)
 
-The contract SHALL specify that, for run-scoped events, the pair `(ai_run_id, seq)` uniquely identifies a persisted event, making ingestion idempotent: a duplicate `(ai_run_id, seq)` SHALL be silently skipped so that sidecar retries and replays are safe. Session-scoped non-run events (with null `ai_run_id`/`seq`) are not part of this idempotency key — they are not retry traffic — so the uniqueness constraint binds only events with a non-null `ai_run_id`. Client-side stores SHALL dedupe **durable** events by `id`. **Ephemeral events have a null `id` and SHALL NOT be deduped by `id`**: `ai_text_delta` is accumulated by `(ai_run_id, block)` into the in-progress text — where `block` is a delta-payload field identifying the text block, whose exact representation is `pending-spike` — and `presence_changed` is applied last-writer-wins per participant.
+The contract SHALL specify that, for run-scoped events, the pair `(ai_run_id, seq)` uniquely identifies a persisted event, making ingestion idempotent: a duplicate `(ai_run_id, seq)` SHALL be silently skipped so that harness retries and replays are safe. Session-scoped non-run events (with null `ai_run_id`/`seq`) are not part of this idempotency key — they are not retry traffic — so the uniqueness constraint binds only events with a non-null `ai_run_id`. Client-side stores SHALL dedupe **durable** events by `id`. **Ephemeral events have a null `id` and SHALL NOT be deduped by `id`**: `ai_text_delta` is accumulated by `(ai_run_id, block)` into the in-progress text — where `block` is a delta-payload field identifying the text block, whose exact representation is `pending-spike` — and `presence_changed` is applied last-writer-wins per participant.
 
 #### Scenario: Duplicate (run, seq) is skipped on retry
 
-- **WHEN** the sidecar re-POSTs a batch containing an event with an already-persisted `(ai_run_id, seq)`
+- **WHEN** the harness re-POSTs a batch containing an event with an already-persisted `(ai_run_id, seq)`
 - **THEN** the contract requires the duplicate be silently skipped, not inserted twice and not an error
 
 #### Scenario: Clients dedupe durable events by id
@@ -124,7 +124,7 @@ The contract SHALL specify that, for run-scoped events, the pair `(ai_run_id, se
 
 ### Requirement: Ephemeral versus durable events
 
-The contract SHALL classify each event type as ephemeral or durable. `ai_text_delta` and `presence_changed` SHALL be ephemeral — broadcast to subscribers but never persisted — and `ai_text_delta` SHALL be coalesced (~150ms) in the sidecar before broadcast. All other listed types SHALL be durable. `ai_text` SHALL be the durable record emitted on text-block stop. The classification SHALL be explicit in the contract so all streams agree without rediscovering it.
+The contract SHALL classify each event type as ephemeral or durable. `ai_text_delta` and `presence_changed` SHALL be ephemeral — broadcast to subscribers but never persisted — and `ai_text_delta` SHALL be coalesced (~150ms) in the harness before broadcast. All other listed types SHALL be durable. `ai_text` SHALL be the durable record emitted on text-block stop. The classification SHALL be explicit in the contract so all streams agree without rediscovering it.
 
 Ephemeral does not mean unordered. `ai_text_delta` is **run-scoped and ephemeral**: it carries a non-null `ai_run_id` and a **null `id`**, and SHALL NOT consume the durable per-run `seq` (so it carries a **null `seq`**; `seq` is assigned only to durable run-scoped events, and the next durable event takes the next `seq` as though the delta had not been emitted). Deltas are ordered and accumulated client-side by `(ai_run_id, block)`, not by `seq` — consistent with the idempotency requirement below. `presence_changed` is **session-scoped and ephemeral**: it carries null `ai_run_id`/`seq`/`id`. So a **null `id` marks ephemerality, and ephemeral events never consume `seq`**.
 

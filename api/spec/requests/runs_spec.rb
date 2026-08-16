@@ -6,16 +6,16 @@ RSpec.describe('Run control') do
   let(:session) { create(:session) }
 
   before do
-    # No real sidecar / git in request specs: stub the seams.
+    # No real harness / git in request specs: stub the seams.
     wt_path = "/repo/.clawdparty/worktrees/session-#{session.id}"
     allow_any_instance_of(Git::WorktreeManager)
       .to(receive_messages(ensure_worktree!: wt_path, dirty?: false))
-    allow_any_instance_of(Sidecar::Client).to(receive(:start_run)
-      .and_return(Sidecar::Client::Result.new(status: 202, body: {})))
-    allow_any_instance_of(Sidecar::Client).to(receive(:send_message)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: {})))
-    allow_any_instance_of(Sidecar::Client).to(receive(:interrupt)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: {})))
+    allow_any_instance_of(Harness::Client).to(receive(:start_run)
+      .and_return(Harness::Client::Result.new(status: 202, body: {})))
+    allow_any_instance_of(Harness::Client).to(receive(:send_message)
+      .and_return(Harness::Client::Result.new(status: 200, body: {})))
+    allow_any_instance_of(Harness::Client).to(receive(:interrupt)
+      .and_return(Harness::Client::Result.new(status: 200, body: {})))
   end
 
   def start_run
@@ -66,10 +66,10 @@ RSpec.describe('Run control') do
       expect(response.parsed_body['errors'].first['message']).to(be_present)
     end
 
-    it 'surfaces a sidecar transport failure as 502 (not an unhandled 500) and leaves no queued run' do
+    it 'surfaces a harness transport failure as 502 (not an unhandled 500) and leaves no queued run' do
       join_as(session, role: 'owner')
-      allow_any_instance_of(Sidecar::Client).to(receive(:start_run)
-        .and_raise(Sidecar::Client::TransportError, 'sidecar /runs failed: connection refused'))
+      allow_any_instance_of(Harness::Client).to(receive(:start_run)
+        .and_raise(Harness::Client::TransportError, 'harness /runs failed: connection refused'))
       expect { start_run }.not_to(change { AiRun.where(status: 'queued').count })
       expect(response).to(have_http_status(:bad_gateway))
       expect(response.parsed_body['errors']).to(be_present)
@@ -120,13 +120,13 @@ RSpec.describe('Run control') do
       expect(response).to(have_http_status(:forbidden))
     end
 
-    it 'reconciles an orphaned run when the sidecar no longer has it (no dead-end 404)' do
-      # e.g. the sidecar restarted mid-run: it returns UnknownRun, but the run is
+    it 'reconciles an orphaned run when the harness no longer has it (no dead-end 404)' do
+      # e.g. the harness restarted mid-run: it returns UnknownRun, but the run is
       # still "running" in Rails. Interrupt should finalize it (emit run_interrupted
       # → terminal) so the session unblocks, not relay a 404 that leaves it stuck.
       join_as(session, role: 'owner')
-      allow_any_instance_of(Sidecar::Client).to(receive(:interrupt)
-        .and_raise(Sidecar::Client::UnknownRun, "run #{run.id} unknown"))
+      allow_any_instance_of(Harness::Client).to(receive(:interrupt)
+        .and_raise(Harness::Client::UnknownRun, "run #{run.id} unknown"))
 
       post("/api/runs/#{run.id}/interrupt")
       expect(response).to(have_http_status(:ok))

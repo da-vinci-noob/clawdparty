@@ -14,7 +14,7 @@ require 'net/http'
 # usePolling) is owned by web-scaffold. This middleware is the Rails-side half.
 class DevSpaProxy
   # Requests Rails handles itself — never proxied to vite. `/internal` is the
-  # bearer-authed sidecar→Rails callback surface (events + heartbeat); it MUST be
+  # bearer-authed harness→Rails callback surface (events + heartbeat); it MUST be
   # served by Rails, not forwarded to vite (which would reject the compose
   # service-name Host with a 403 "blocked host").
   PASSTHROUGH_PREFIXES = ['/api', '/~cable', '/up', '/rails', '/cable', '/internal'].freeze

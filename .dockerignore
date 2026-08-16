@@ -23,7 +23,7 @@ build
 .vite
 **/.vite
 
-# Local secret env file (holds the generated SIDECAR_SHARED_SECRET) — never bake into an image layer
+# Local secret env file (holds the generated HARNESS_SHARED_SECRET) — never bake into an image layer
 .env.local
 *.env.local
 

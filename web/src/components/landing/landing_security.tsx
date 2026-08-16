@@ -23,7 +23,7 @@ const GUARDS: Guard[] = [
     body: "Every changeset lands uncommitted behind an explicit approve / reject. Nothing merges on its own.",
   },
   {
-    title: "Unpublished sidecar",
+    title: "Unpublished harness",
     body: "The process that talks to the Claude SDK is reachable only on the private compose network — never the LAN.",
   },
   {

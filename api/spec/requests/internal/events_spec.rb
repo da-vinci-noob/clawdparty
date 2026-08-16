@@ -10,7 +10,7 @@ RSpec.describe('POST /internal/events') do
   before { allow(ENV).to(receive(:fetch).and_call_original) }
 
   def with_secret
-    allow(ENV).to(receive(:fetch).with('SIDECAR_SHARED_SECRET', anything).and_return(secret))
+    allow(ENV).to(receive(:fetch).with('HARNESS_SHARED_SECRET', anything).and_return(secret))
   end
 
   def auth_headers(token = secret)

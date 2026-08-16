@@ -12,8 +12,8 @@ RSpec.describe('Stale run recovery') do
     wt_path = "/repo/.clawdparty/worktrees/session-#{session.id}"
     allow_any_instance_of(Git::WorktreeManager)
       .to(receive_messages(ensure_worktree!: wt_path, dirty?: false))
-    allow_any_instance_of(Sidecar::Client).to(receive(:start_run)
-      .and_return(Sidecar::Client::Result.new(status: 202, body: {})))
+    allow_any_instance_of(Harness::Client).to(receive(:start_run)
+      .and_return(Harness::Client::Result.new(status: 202, body: {})))
   end
 
   def start_run

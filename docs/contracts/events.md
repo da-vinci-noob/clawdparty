@@ -81,7 +81,7 @@ that keeps the normalizer total over an evolving provider surface.
 
 | cursor | assigned by | scope | used for |
 |---|---|---|---|
-| `seq` | sidecar | a single `ai_run_id` | ingest idempotency on `(ai_run_id, seq)` (§5); ordering **within a run** |
+| `seq` | harness | a single `ai_run_id` | ingest idempotency on `(ai_run_id, seq)` (§5); ordering **within a run** |
 | `id` | Rails (autoincrement) | the whole session | the client **backfill / catch-up cursor**; ordering **across the session** |
 
 - Clients page and backfill on **`id`** — `GET /api/sessions/:id/events?after=<cursor>`. `seq`
@@ -96,7 +96,7 @@ that keeps the normalizer total over an evolving provider surface.
 
 For **run-scoped durable** events, the pair `(ai_run_id, seq)` uniquely identifies a persisted
 event. Re-POSTing a batch containing an already-persisted `(ai_run_id, seq)` **silently skips**
-the duplicate — not inserted twice, not an error — so sidecar retries and replays are safe. The
+the duplicate — not inserted twice, not an error — so harness retries and replays are safe. The
 uniqueness constraint binds only events with a non-null `ai_run_id`; session-scoped events
 (null `ai_run_id`/`seq`) are not retry traffic and are not part of this key.
 

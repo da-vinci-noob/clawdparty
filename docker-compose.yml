@@ -1,8 +1,8 @@
 # clawdparty dev stack — one container per process.
 #
 # Five services, one process each: rails (Puma), jobs (Solid Queue), postgres,
-# sidecar (Fastify + Agent SDK), vite (dev SPA server). Only `rails` publishes a
-# port (3000 -> LAN); sidecar/vite are compose-network only. Run with `bin/start`
+# harness (Fastify, owns the agent loop), vite (dev SPA server). Only `rails` publishes a
+# port (3000 -> LAN); harness/vite are compose-network only. Run with `bin/start`
 # (after `bin/setup`). See docs/PLAN.md §2/§3 + CLAUDE.md for the invariants.
 
 # Pin the project name so the whole stack always comes up under `clawdparty`
@@ -46,7 +46,7 @@ services:
       RAILS_ENV: ${RAILS_ENV:-development}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_USER: ${DATABASE_USER:-postgres}
-      SIDECAR_URL: ${SIDECAR_URL:-http://sidecar:8787}
+      HARNESS_URL: ${HARNESS_URL:-http://harness:8787}
       # In-container repo root == the host path (identical-path mount below), so
       # git worktree metadata (absolute gitdir paths) is valid on BOTH host and
       # container — GitHub Desktop / host `git worktree` can open the worktrees.
@@ -93,11 +93,11 @@ services:
     # No `ports:` — jobs runs no server. restart: unless-stopped doubles as the
     # restart-until-ready posture if it boots before rails has prepared the queue DB.
 
-  # --- Node sidecar (Fastify + Agent SDK) — UNPUBLISHED --------------------
-  sidecar:
+  # --- Node harness (Fastify; owns the agent loop) — UNPUBLISHED -----------
+  harness:
     build:
       context: .
-      dockerfile: docker/sidecar.Dockerfile
+      dockerfile: docker/harness.Dockerfile
     # Independent lifecycle: its OWN restart policy, NOT a depends_on child of
     # rails — a Rails restart must never kill a live Claude run.
     restart: unless-stopped
@@ -109,7 +109,7 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - RAILS_INTERNAL_URL=${RAILS_INTERNAL_URL:-http://rails:3000}
-      # Claude / AWS auth + config (ANTHROPIC_MODEL, CLAUDE_CODE_USE_BEDROCK/VERTEX,
+      # Provider auth + config (ANTHROPIC_MODEL, CLAUDE_CODE_USE_BEDROCK/VERTEX,
       # AWS_PROFILE/AWS_REGION, or ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN /
       # CLAUDE_CODE_OAUTH_TOKEN) live in .env.local (the env_file above) — NOT as bare
       # host-shell passthroughs. A bare `- VAR` here OVERRIDES env_file, and when the
@@ -120,8 +120,8 @@ services:
     expose:
       - "8787"
     volumes:
-      - ./sidecar:/app:delegated
-      - sidecar_node_modules:/app/node_modules
+      - ./harness:/app:delegated
+      - harness_node_modules:/app/node_modules
       # Target repo READ-WRITE, mounted at the IDENTICAL host path (Claude edits
       # the worktree; reject reverts it). Same absolute path as the host + rails
       # so worktree gitdir paths resolve everywhere and the run cwd (a host path
@@ -168,5 +168,5 @@ services:
 volumes:
   pg_data:
   bundle:
-  sidecar_node_modules:
+  harness_node_modules:
   web_node_modules:

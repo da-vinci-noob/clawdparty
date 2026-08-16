@@ -23,7 +23,7 @@
 # Node deps (live in named volumes; ignore defensively if installed host-side)
 node_modules/
 
-# Local env files holding generated secrets (e.g. SIDECAR_SHARED_SECRET).
+# Local env files holding generated secrets (e.g. HARNESS_SHARED_SECRET).
 # Committed template is .env.example; per-developer secrets live in .env.local.
 .env
 .env.local

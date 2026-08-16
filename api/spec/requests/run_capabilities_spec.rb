@@ -12,9 +12,9 @@ RSpec.describe('Run start capability selection') do
       .to(receive_messages(ensure_worktree!: wt_path, dirty?: false))
 
     captured = posted
-    allow_any_instance_of(Sidecar::Client).to(receive(:start_run)) do |_client, payload|
+    allow_any_instance_of(Harness::Client).to(receive(:start_run)) do |_client, payload|
       captured << payload
-      Sidecar::Client::Result.new(status: 202, body: {})
+      Harness::Client::Result.new(status: 202, body: {})
     end
 
     stub_connectors('connectors' => [{ 'name' => 'github', 'transport' => 'stdio' }], 'source' => 'project')
@@ -22,13 +22,13 @@ RSpec.describe('Run start capability selection') do
   end
 
   def stub_connectors(body)
-    allow_any_instance_of(Sidecar::Client).to(receive(:list_connectors)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: body)))
+    allow_any_instance_of(Harness::Client).to(receive(:list_connectors)
+      .and_return(Harness::Client::Result.new(status: 200, body: body)))
   end
 
   def stub_skills(body)
-    allow_any_instance_of(Sidecar::Client).to(receive(:list_skills)
-      .and_return(Sidecar::Client::Result.new(status: 200, body: body)))
+    allow_any_instance_of(Harness::Client).to(receive(:list_skills)
+      .and_return(Harness::Client::Result.new(status: 200, body: body)))
   end
 
   def start_run(role: 'editor', **caps)
@@ -37,7 +37,7 @@ RSpec.describe('Run start capability selection') do
   end
 
   describe 'a valid selection' do
-    it 'accepts it (202) and threads it to the sidecar' do
+    it 'accepts it (202) and threads it to the harness' do
       expect do
         start_run(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
       end.to(change(AiRun, :count).by(1))
@@ -85,9 +85,9 @@ RSpec.describe('Run start capability selection') do
       expect(posted.last[:connectors]).to(eq(['anything']))
     end
 
-    it 'passes an unvalidated skill through when the sidecar is unreachable (202)' do
-      allow_any_instance_of(Sidecar::Client).to(receive(:list_skills)
-        .and_raise(Sidecar::Client::TransportError, 'sidecar /skills failed: connection refused'))
+    it 'passes an unvalidated skill through when the harness is unreachable (202)' do
+      allow_any_instance_of(Harness::Client).to(receive(:list_skills)
+        .and_raise(Harness::Client::TransportError, 'harness /skills failed: connection refused'))
       start_run(skills: ['whatever'])
       expect(response).to(have_http_status(:accepted))
       expect(posted.last[:skills]).to(eq(['whatever']))

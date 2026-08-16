@@ -3,10 +3,10 @@
 require 'open3'
 
 module Git
-  # Rails owns worktree creation (the frozen sidecar-protocol convention): the
+  # Rails owns worktree creation (the frozen harness-protocol convention): the
   # per-session worktree lives at <repo>/.clawdparty/worktrees/session-<id> on
   # branch clawd/session-<id>, created against the bind-mounted target repo. The
-  # sidecar only uses it as `cwd`; it never creates or relocates it.
+  # harness only uses it as `cwd`; it never creates or relocates it.
   class WorktreeManager
     class GitError < StandardError; end
 

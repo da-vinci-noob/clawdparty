@@ -1,34 +1,34 @@
 # claude-auth-passthrough Specification
 
 ## Purpose
-TBD - created by archiving change sidecar-foundation. Update Purpose after archive.
+TBD - created by archiving change harness-foundation. Update Purpose after archive.
 ## Requirements
-### Requirement: Sidecar relies on the host's existing Claude login and owns no credential
+### Requirement: Harness relies on the host's existing Claude login and owns no credential
 
-The sidecar SHALL use the host developer's existing Claude login to authenticate to Anthropic and SHALL NOT contain, store, or ship any app-owned Anthropic API key or credential. Authentication SHALL be inherited from the host's process/container environment and mounted credentials (wired by the `dev-docker-compose` change), never embedded in sidecar code or configuration committed to the repo.
+The harness SHALL use the host developer's existing Claude login to authenticate to Anthropic and SHALL NOT contain, store, or ship any app-owned Anthropic API key or credential. Authentication SHALL be inherited from the host's process/container environment and mounted credentials (wired by the `dev-docker-compose` change), never embedded in harness code or configuration committed to the repo.
 
-#### Scenario: No app-owned credential exists in the sidecar
+#### Scenario: No app-owned credential exists in the harness
 
-- **WHEN** the sidecar authenticates to Anthropic
-- **THEN** it uses the host developer's inherited login, and there is no app-owned key stored in sidecar code or repo configuration
+- **WHEN** the harness authenticates to Anthropic
+- **THEN** it uses the host developer's inherited login, and there is no app-owned key stored in harness code or repo configuration
 
 ### Requirement: Auth-method-agnostic — no credential or method selection in code
 
-The sidecar SHALL be agnostic to which Claude auth method the host uses — direct API key, Claude subscription/enterprise OAuth, or Amazon Bedrock — and SHALL contain **no code that selects, prioritizes, or stores** a credential or auth method. The SDK SHALL auto-detect the method in its own precedence order (cloud-provider flag, then `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then `~/.claude` credentials) from the inherited environment. The authoritative list of passed-through auth environment variables SHALL be the set enumerated by the `dev-docker-compose` change's `claude-credential-mounts` capability (its "Auth-method-agnostic env passthrough, only-when-set" requirement); this spec defers to that capability as the single source of truth for the variable list to avoid duplication-drift, and SHALL NOT re-enumerate or contradict it.
+The harness SHALL be agnostic to which Claude auth method the host uses — direct API key, Claude subscription/enterprise OAuth, or Amazon Bedrock — and SHALL contain **no code that selects, prioritizes, or stores** a credential or auth method. The SDK SHALL auto-detect the method in its own precedence order (cloud-provider flag, then `ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then `~/.claude` credentials) from the inherited environment. The authoritative list of passed-through auth environment variables SHALL be the set enumerated by the `dev-docker-compose` change's `claude-credential-mounts` capability (its "Auth-method-agnostic env passthrough, only-when-set" requirement); this spec defers to that capability as the single source of truth for the variable list to avoid duplication-drift, and SHALL NOT re-enumerate or contradict it.
 
-#### Scenario: Any host login mode works without sidecar changes
+#### Scenario: Any host login mode works without harness changes
 
 - **WHEN** the host uses a direct API key, subscription/enterprise OAuth, or Bedrock
-- **THEN** the SDK auto-detects the method from the inherited environment and the run authenticates, with no method-selection code in the sidecar
+- **THEN** the SDK auto-detects the method from the inherited environment and the run authenticates, with no method-selection code in the harness
 
-#### Scenario: Sidecar does not pick or store a credential
+#### Scenario: Harness does not pick or store a credential
 
 - **WHEN** multiple auth-related environment variables are present
-- **THEN** the sidecar defers entirely to the SDK's precedence order and does not itself choose, reorder, or persist any of them
+- **THEN** the harness defers entirely to the SDK's precedence order and does not itself choose, reorder, or persist any of them
 
 ### Requirement: Documented host auth caveats
 
-The change SHALL document two host-side auth caveats that the sidecar cannot solve in code (because solving them would mean owning or selecting a credential): (a) on macOS, subscription/enterprise OAuth lives in the **Keychain with no file**, invisible to a Linux container, so the host runs `claude setup-token` once and exports `CLAUDE_CODE_OAUTH_TOKEN`; (b) Bedrock-via-AWS-SSO tokens **expire**, so the host must stay `aws sso login`-fresh — the read-only mount reflects the refreshed token but the container cannot refresh it itself.
+The change SHALL document two host-side auth caveats that the harness cannot solve in code (because solving them would mean owning or selecting a credential): (a) on macOS, subscription/enterprise OAuth lives in the **Keychain with no file**, invisible to a Linux container, so the host runs `claude setup-token` once and exports `CLAUDE_CODE_OAUTH_TOKEN`; (b) Bedrock-via-AWS-SSO tokens **expire**, so the host must stay `aws sso login`-fresh — the read-only mount reflects the refreshed token but the container cannot refresh it itself.
 
 #### Scenario: macOS Keychain OAuth caveat is documented
 
@@ -42,7 +42,7 @@ The change SHALL document two host-side auth caveats that the sidecar cannot sol
 
 ### Requirement: canUseTool is an allow-all MVP stub
 
-`sidecar/src/permissions.ts` SHALL implement `canUseTool` as an allow-all stub for the MVP and SHALL be the documented single-file seam for later per-tool Bash gating. It SHALL NOT introduce any shell input path; the terminal pane remains a read-only replay of Claude's Bash events.
+`harness/src/permissions.ts` SHALL implement `canUseTool` as an allow-all stub for the MVP and SHALL be the documented single-file seam for later per-tool Bash gating. It SHALL NOT introduce any shell input path; the terminal pane remains a read-only replay of Claude's Bash events.
 
 #### Scenario: canUseTool allows every tool in the MVP
 

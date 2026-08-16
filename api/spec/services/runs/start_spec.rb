@@ -15,14 +15,14 @@ RSpec.describe(Runs::Start) do
     )
   end
 
-  # A fake sidecar client that records the start_run payload and returns 202.
+  # A fake harness client that records the start_run payload and returns 202.
   let(:posted) { [] }
   let(:client) do
     p = posted
     Class.new do
       define_method(:start_run) do |payload|
         p << payload
-        Sidecar::Client::Result.new(status: 202, body: { 'run_id' => payload[:run_id], 'status' => 'running' })
+        Harness::Client::Result.new(status: 202, body: { 'run_id' => payload[:run_id], 'status' => 'running' })
       end
     end.new
   end
@@ -38,7 +38,7 @@ RSpec.describe(Runs::Start) do
 
     expect(run.status).to(eq('queued'))
     expect(run.requested_by).to(eq(owner))
-    # Rails does NOT emit run_started — the sidecar does (no run_started event here).
+    # Rails does NOT emit run_started — the harness does (no run_started event here).
     expect(Event.where(ai_run_id: run.id, event_type: 'run_started').count).to(eq(0))
 
     payload = posted.last
@@ -74,7 +74,7 @@ RSpec.describe(Runs::Start) do
       expect(payload).not_to(have_key(:skills))
     end
 
-    it 'threads a selection into the sidecar payload' do
+    it 'threads a selection into the harness payload' do
       start_with(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
       payload = posted.last
       expect(payload[:disallowed_tools]).to(eq(['Bash']))
@@ -216,37 +216,37 @@ RSpec.describe(Runs::Start) do
     end
   end
 
-  describe 'sidecar rejects the start (must not orphan a queued run)' do
+  describe 'harness rejects the start (must not orphan a queued run)' do
     let(:client) do
       Class.new do
         def start_run(_payload)
-          raise(Sidecar::Client::ActiveRunConflict, 'sidecar reports a run already active')
+          raise(Harness::Client::ActiveRunConflict, 'harness reports a run already active')
         end
       end.new
     end
 
-    it 'does not leave a queued run behind when the sidecar returns 409' do
-      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+    it 'does not leave a queued run behind when the harness returns 409' do
+      expect { start }.to(raise_error(Harness::Client::ActiveRunConflict))
       expect(session.ai_runs.where(status: 'queued')).to(be_empty)
     end
 
-    it 'frees the session so a later start can succeed once the sidecar is free' do
-      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+    it 'frees the session so a later start can succeed once the harness is free' do
+      expect { start }.to(raise_error(Harness::Client::ActiveRunConflict))
       expect(session.reload.ai_runs.active).to(be_empty)
     end
   end
 
-  context 'when the sidecar is unreachable (transport error)' do
+  context 'when the harness is unreachable (transport error)' do
     let(:client) do
       Class.new do
         def start_run(_payload)
-          raise(Sidecar::Client::TransportError, 'sidecar /runs failed: connection refused')
+          raise(Harness::Client::TransportError, 'harness /runs failed: connection refused')
         end
       end.new
     end
 
     it 'does not orphan a queued run' do
-      expect { start }.to(raise_error(Sidecar::Client::TransportError))
+      expect { start }.to(raise_error(Harness::Client::TransportError))
       expect(session.ai_runs.where(status: 'queued')).to(be_empty)
     end
   end

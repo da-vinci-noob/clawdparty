@@ -211,7 +211,7 @@ export interface RunStartedPayload {
 // --- Run capability selection (additive since v1.4) --------------------------
 // Shared shapes for the per-run tool/connector/skill surface. Tools are a FIXED
 // constant (they never vary by host/repo); connectors + skills are discovered
-// per session by the sidecar and proxied by Rails.
+// per session by the harness and proxied by Rails.
 
 export interface ToolInfo {
   id: string;
@@ -232,7 +232,7 @@ export interface SkillInfo {
 
 /** The canonical built-in tools offered in the picker (all default-ON). The web
  *  picker and Rails validation both read this — there is no /api/tools endpoint.
- *  Turning one OFF sends it in `disallowed_tools`, which the sidecar maps to the
+ *  Turning one OFF sends it in `disallowed_tools`, which the harness maps to the
  *  SDK `disallowedTools` (a bare name genuinely removes the tool, even under
  *  bypassPermissions — `allowedTools` only pre-approves). */
 export const BUILTIN_TOOLS: readonly ToolInfo[] = [
@@ -249,7 +249,7 @@ export const BUILTIN_TOOLS: readonly ToolInfo[] = [
 /** The bare tool ids, for validating a `disallowed_tools` selection. */
 export const BUILTIN_TOOL_IDS: readonly string[] = BUILTIN_TOOLS.map((t) => t.id);
 /** The human's prompt that drives a run — the initial prompt and each follow-up.
- *  Run-scoped + durable; emitted by the sidecar (it owns the per-run seq space).
+ *  Run-scoped + durable; emitted by the harness (it owns the per-run seq space).
  *  Attribution is on the envelope `actor` ({ kind: "user", id }), not the payload. */
 export interface UserPromptPayload {
   text: string;

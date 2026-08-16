@@ -76,7 +76,7 @@ RSpec/MultipleMemoizedHelpers:
 # Request/integration specs legitimately describe a route string, not a class.
 RSpec/DescribeClass:
   Enabled: false
-# Stubbing the sidecar/git seams via any-instance is the cleanest way to keep
+# Stubbing the harness/git seams via any-instance is the cleanest way to keep
 # request specs server/git-free; the around-block throwaway repo uses @repo.
 RSpec/AnyInstance:
   Enabled: false

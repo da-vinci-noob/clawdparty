@@ -1,0 +1,41 @@
+{
+  "name": "@clawdparty/harness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node + Fastify harness that OWNS the agent loop: the Messages-API loop, the durable per-session record, tool dispatch, recovery, and the extension points. Vendor SDKs are interchangeable adapters behind one contract.",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:crash": "vitest run test/crash",
+    "test:reconstruction": "vitest run test/reconstruction",
+    "test:adapters": "vitest run test/adapters",
+    "test:extensions": "vitest run test/extensions",
+    "test:plugin-adversarial": "vitest run test/plugins/adversarial"
+  },
+  "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.32.4",
+    "@anthropic-ai/claude-agent-sdk": "0.3.195",
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@aws-sdk/client-bedrock": "^3.1090.0",
+    "@clawdparty/contracts": "file:../packages/contracts",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.9.0",
+    "openai": "^7.4.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

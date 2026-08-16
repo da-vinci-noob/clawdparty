@@ -231,7 +231,7 @@ export interface ContextUsage {
 }
 
 // The latest completed run's token usage, an approximate "context filled" gauge.
-// `usage` rides run_finished/run_failed (sidecar-populated) and lands in durableList.
+// `usage` rides run_finished/run_failed (harness-populated) and lands in durableList.
 // Returns null before any run completes. NOTE: the SDK only reports usage on the
 // result message, so this reflects the LAST COMPLETED run — it updates at run end,
 // not live mid-stream. run_interrupted carries no usage and is ignored here.

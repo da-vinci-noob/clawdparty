@@ -1,10 +1,10 @@
 # SDK → Contract-1 mapping (derived from the spike)
 
 > **Status: derived from the real Tuesday-equivalent SDK spike** (`sdk-message-spike`). The raw input lives at
-> `sidecar/test/fixtures/raw_run.jsonl` (captured from `@anthropic-ai/claude-agent-sdk@0.3.195` `query()` against
+> `harness/test/fixtures/raw_run.jsonl` (captured from `@anthropic-ai/claude-agent-sdk@0.3.195` `query()` against
 > a throwaway repo over Bedrock); the post-normalization output is
 > `packages/contracts/fixtures/sample_run.jsonl`. This doc is the **single source** for how `normalizer.ts`
-> (`sidecar-runner`) maps each raw SDK message to a Contract-1 envelope. It finalizes the payload schemas that
+> (`harness-runner`) maps each raw SDK message to a Contract-1 envelope. It finalizes the payload schemas that
 > were `pending-spike` in `events.md §8` — an **additive** `CONTRACT_VERSION` minor bump (`1.0 → 1.1`).
 
 ## Raw SDK message types observed in the spike
@@ -42,7 +42,7 @@ runner, not from the SDK message).
 ```jsonc
 { "text": string }
 ```
-The human's prompt that drives the run. There is **no raw SDK message** for this — the sidecar synthesizes a
+The human's prompt that drives the run. There is **no raw SDK message** for this — the harness synthesizes a
 `user_prompt` envelope immediately **before** it pushes each user message into the SDK streaming-input iterable:
 once for the initial prompt (`runner.startRun`) and once per follow-up (`runner.sendMessage`). Run-scoped +
 durable; `actor` is `{ kind: "user", id: <requested_by> }`; `seq` is the next per-run monotonic value (so on a
@@ -66,7 +66,7 @@ no event (no `ai_raw`).
 **Block key = `"<message.id>:<block_type>"`** (`block_type` ∈ `text` \| `thinking`). The key is NOT built from the
 top-level `uuid`: the real SDK gives **every** streamed message and delta a **unique** top-level `uuid`, and it
 splits one assistant turn across several messages that share `message.id` but each carry a different `uuid`
-(see `sidecar/test/fixtures/raw_run.jsonl:2-4` — three messages, one `message.id`, three `uuid`s). Keying by
+(see `harness/test/fixtures/raw_run.jsonl:2-4` — three messages, one `message.id`, three `uuid`s). Keying by
 `uuid` therefore fragments every delta into its own block and orphans the durable-block reconstruction. The
 stable per-turn id is `message.id` (carried on `message_start`; the `content_block_delta`s do NOT carry it — the
 normalizer latches it as `currentMessageId`); within a message, a `thinking` and a `text` block are told apart by
@@ -158,9 +158,9 @@ Emitted by the runner on `POST /runs/:id/interrupt`; `actor` is `{ kind: "user",
 ```jsonc
 { "raw": <redacted, ≤8KB>, "truncated": boolean }
 ```
-Redact-credentials-FIRST-then-truncate (8KB), per `sidecar-normalizer-v1`.
+Redact-credentials-FIRST-then-truncate (8KB), per `harness-normalizer-v1`.
 
-## Notes carried into the implementation (`sidecar-runner`)
+## Notes carried into the implementation (`harness-runner`)
 
 - The raw `tool_use.input` carries full content (the spike's `Write` included the whole file body) — confirming
   the **summarization obligation**: `input_summary`, never `input`.

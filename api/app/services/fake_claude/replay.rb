@@ -4,7 +4,7 @@ require 'json'
 
 module FakeClaude
   # Replays the executable-contract fixture (sample_run.jsonl) through the REAL
-  # Events::Ingest path, in-process — no Puma, no SIDECAR_SHARED_SECRET. Powers
+  # Events::Ingest path, in-process — no Puma, no HARNESS_SHARED_SECRET. Powers
   # both session seeding and the happy-path system test. Per contracts Decision 9,
   # "real ingest" holds because broadcast lives inside Events::Ingest.
   class Replay

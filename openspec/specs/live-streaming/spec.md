@@ -9,12 +9,12 @@ The contract SHALL add `ai_thinking_delta` as an **ephemeral** event type (broad
 `id` and null `seq`), payload `{ block: string, text: string }` mirroring `ai_text_delta`. The addition MUST be
 additive: `CONTRACT_VERSION` bumps `minor` only (`{1,2}` → `{1,3}`), the taxonomy count guard goes `21 → 22`,
 and a `CHANGELOG` entry records it. `ai_thinking_delta` MUST be registered ephemeral everywhere ephemerality is
-decided (the contracts package, the sidecar normalizer, and Rails `Event`). `ai_text_delta` and every other
+decided (the contracts package, the harness normalizer, and Rails `Event`). `ai_text_delta` and every other
 type are unchanged.
 
 #### Scenario: The type is ephemeral across the stack
 
-- **WHEN** the contract, sidecar, and Rails are built
+- **WHEN** the contract, harness, and Rails are built
 - **THEN** `ai_thinking_delta` is in the taxonomy (count 22) with payload `{ block, text }`, and each
   layer classifies it ephemeral (carries null `id`/`seq`, never persisted)
 
@@ -24,9 +24,9 @@ type are unchanged.
 - **THEN** `CONTRACT_VERSION` is `{ major: 1, minor: 3 }` with a `CHANGELOG` entry, and a consumer requiring
   `major === 1` and `minor >= 1` still passes
 
-### Requirement: The sidecar enables partial streaming and maps content-block deltas
+### Requirement: The harness enables partial streaming and maps content-block deltas
 
-The sidecar SHALL start runs with `includePartialMessages: true` and adaptive thinking enabled, and SHALL map
+The harness SHALL start runs with `includePartialMessages: true` and adaptive thinking enabled, and SHALL map
 each `stream_event` whose `event.type` is `content_block_delta` to an ephemeral delta keyed
 `"<uuid>:<index>"` (the partial message `uuid` + the block `index`): a `text_delta` → `ai_text_delta` (payload
 `{ block, text }`) and a `thinking_delta` → `ai_thinking_delta` (payload `{ block, text }` from the thinking
@@ -38,25 +38,25 @@ SHALL still be normalized to the durable `ai_text`/`ai_thinking`/`run_finished` 
 
 - **WHEN** the SDK emits `content_block_delta` events with `text_delta` chunks for block index `i` of message
   `uuid`
-- **THEN** the sidecar emits `ai_text_delta` events with `block = "<uuid>:<i>"` and the chunk text, on the
+- **THEN** the harness emits `ai_text_delta` events with `block = "<uuid>:<i>"` and the chunk text, on the
   ephemeral path
 
 #### Scenario: Thinking deltas stream
 
 - **WHEN** the SDK emits `content_block_delta` events with `thinking_delta` chunks for block index `t`
-- **THEN** the sidecar emits `ai_thinking_delta` events with `block = "<uuid>:<t>"` and the thinking chunk, on
+- **THEN** the harness emits `ai_thinking_delta` events with `block = "<uuid>:<t>"` and the thinking chunk, on
   the ephemeral path
 
 #### Scenario: Non-delta stream events are ignored
 
 - **WHEN** the SDK emits `message_start`, `content_block_start`, `content_block_stop`, `message_delta`, or
   `message_stop` stream events
-- **THEN** the sidecar emits no envelope for them (no `ai_raw` noise)
+- **THEN** the harness emits no envelope for them (no `ai_raw` noise)
 
 #### Scenario: The durable block still arrives and shares the delta's key
 
 - **WHEN** a streamed block completes and the final `assistant` message arrives
-- **THEN** the sidecar emits the durable `ai_text` (or `ai_thinking`) with the SAME `block = "<uuid>:<index>"`
+- **THEN** the harness emits the durable `ai_text` (or `ai_thinking`) with the SAME `block = "<uuid>:<index>"`
   key the deltas used
 
 ### Requirement: Rails broadcasts `ai_thinking_delta` without persisting it

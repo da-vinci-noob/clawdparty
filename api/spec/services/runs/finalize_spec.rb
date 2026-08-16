@@ -8,7 +8,7 @@ RSpec.describe(Runs::Finalize) do
 
   let(:participant) { create(:participant, session: session, role: 'owner') }
 
-  # Ingest a run-lifecycle event for `run` (the sidecar-emitted path). A user
+  # Ingest a run-lifecycle event for `run` (the harness-emitted path). A user
   # actor carries the participant id (the DB check constraint requires it).
   def ingest(type, seq:, actor_kind: 'system', payload: {})
     actor = actor_kind == 'user' ? { 'kind' => 'user', 'id' => participant.id } : { 'kind' => actor_kind }
@@ -26,7 +26,7 @@ RSpec.describe(Runs::Finalize) do
     run.events.where(event_type: 'changeset_ready').count
   end
 
-  it "transitions queued → running on the sidecar's run_started" do
+  it "transitions queued → running on the harness's run_started" do
     ingest('run_started', seq: 1, actor_kind: 'user')
     expect(run.reload.status).to(eq('running'))
   end

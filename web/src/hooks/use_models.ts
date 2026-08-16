@@ -1,9 +1,9 @@
 // Fetches the models available to the host's Claude/Bedrock login from
-// GET /api/models (proxied from the sidecar, discovered at runtime). On Bedrock the
+// GET /api/models (proxied from the harness, discovered at runtime). On Bedrock the
 // ids are inference-profile ids (e.g. "global.anthropic.claude-opus-4-8") — exactly
 // what run start needs.
 //
-// IMPORTANT: only models the sidecar actually DISCOVERED (source "bedrock" or
+// IMPORTANT: only models the harness actually DISCOVERED (source "bedrock" or
 // "anthropic") are safe to run. A hardcoded plain id like "claude-opus-4-8" is
 // invalid on Bedrock (which requires the inference-profile id), so we never offer a
 // static fallback in the picker — until discovery resolves (and if it fails), the

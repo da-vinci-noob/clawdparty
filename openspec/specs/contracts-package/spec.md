@@ -9,7 +9,7 @@ The repository SHALL contain a `packages/contracts/` TypeScript package that is 
 
 #### Scenario: Envelope and type names are importable
 
-- **WHEN** the `sidecar/` or `web/` stream imports from `packages/contracts`
+- **WHEN** the `harness/` or `web/` stream imports from `packages/contracts`
 - **THEN** it receives the envelope type, the frozen type-name union, and the `CONTRACT_VERSION` constant as TypeScript exports
 
 #### Scenario: Payload interfaces may be stubbed pre-spike
@@ -19,7 +19,7 @@ The repository SHALL contain a `packages/contracts/` TypeScript package that is 
 
 ### Requirement: Executable contract fixture
 
-The package SHALL contain `fixtures/sample_run.jsonl` as the executable contract: a sequence of **post-normalization** contract events (envelopes), captured from the real Tuesday SDK spike. The fixture SHALL be consumable by all three streams — the web renders it, a Rails fake-Claude rake task replays it through real ingest, and the sidecar normalizer tests assert producing it. The fixture SHALL NOT contain raw SDK message shapes; raw SDK logs are a separate fixture set owned by the sidecar stream.
+The package SHALL contain `fixtures/sample_run.jsonl` as the executable contract: a sequence of **post-normalization** contract events (envelopes), captured from the real Tuesday SDK spike. The fixture SHALL be consumable by all three streams — the web renders it, a Rails fake-Claude rake task replays it through real ingest, and the harness normalizer tests assert producing it. The fixture SHALL NOT contain raw SDK message shapes; raw SDK logs are a separate fixture set owned by the harness stream.
 
 #### Scenario: Fixture is normalized contract events
 

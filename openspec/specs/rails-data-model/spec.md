@@ -76,9 +76,9 @@ There SHALL be a partial unique index on `ai_runs.session_id` scoped to `status 
 
 ### Requirement: Idempotent event identity enforced at the database
 
-There SHALL be a unique index on `events [ai_run_id, seq]` so that the pair `(ai_run_id, seq)` uniquely identifies a persisted event and duplicate inserts are rejected at the database. This realizes the idempotency rule defined by the frozen event-envelope capability. Because `ai_run_id` and `seq` are nullable, this unique index constrains only run-scoped events (rows with a non-null `ai_run_id`); Postgres treats nulls as distinct, which is correct because only sidecar run-events are idempotent-retry traffic. The global `events.id` SHALL be a server-assigned monotonic identifier used as the client backfill cursor for ALL events.
+There SHALL be a unique index on `events [ai_run_id, seq]` so that the pair `(ai_run_id, seq)` uniquely identifies a persisted event and duplicate inserts are rejected at the database. This realizes the idempotency rule defined by the frozen event-envelope capability. Because `ai_run_id` and `seq` are nullable, this unique index constrains only run-scoped events (rows with a non-null `ai_run_id`); Postgres treats nulls as distinct, which is correct because only harness run-events are idempotent-retry traffic. The global `events.id` SHALL be a server-assigned monotonic identifier used as the client backfill cursor for ALL events.
 
-`events.session_id` SHALL be non-null and indexed — every event is session-scoped, enabling session-scoped backfill and broadcast. `events.ai_run_id` and `events.seq` SHALL be nullable: present for run-scoped events emitted by the sidecar, and null for session-scoped non-run events (chat, participant, presence, task).
+`events.session_id` SHALL be non-null and indexed — every event is session-scoped, enabling session-scoped backfill and broadcast. `events.ai_run_id` and `events.seq` SHALL be nullable: present for run-scoped events emitted by the harness, and null for session-scoped non-run events (chat, participant, presence, task).
 
 The frozen event-envelope's first-class `ts` field SHALL be derived from `events.created_at` when an event row is serialized to the envelope, and SHALL NOT be stuffed into `payload`. `events.created_at` SHALL be serialized to the envelope `ts` as an ISO-8601 UTC timestamp with **millisecond precision and a `Z` suffix** (e.g. `2026-06-28T20:11:05.123Z`), matching the frozen event-envelope scalar contract exactly — NOT Rails' default timestamp JSON, which can emit a different fractional-second precision or a numeric offset and would produce the cross-stream mismatch the frozen contract guards against. There is no separate `ts` column; `events.created_at` is the single source of truth for the envelope `ts`.
 
@@ -118,7 +118,7 @@ The `events` and `messages` tables SHALL be append-only (no update/delete in nor
 #### Scenario: Persisted event_type is a frozen taxonomy member or ai_raw
 
 - **WHEN** a durable event is persisted
-- **THEN** its `event_type` is one of the 20 frozen type names in the event-envelope capability's taxonomy or `ai_raw` (the sidecar's normalizer fallback for unknown SDK message shapes)
+- **THEN** its `event_type` is one of the 20 frozen type names in the event-envelope capability's taxonomy or `ai_raw` (the harness's normalizer fallback for unknown SDK message shapes)
 
 ### Requirement: Id fields serialize to the envelope as strings
 

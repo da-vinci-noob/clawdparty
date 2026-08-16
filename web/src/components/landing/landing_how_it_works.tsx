@@ -10,7 +10,7 @@ const STEPS: Step[] = [
   {
     n: "01",
     chip: "$ bin/start",
-    body: "One Mac boots the whole stack — Rails, the Claude sidecar, jobs, and Postgres — under Docker Compose.",
+    body: "One Mac boots the whole stack — Rails, the Claude harness, jobs, and Postgres — under Docker Compose.",
   },
   {
     n: "02",
@@ -26,7 +26,7 @@ const STEPS: Step[] = [
 
 const STACK = [
   "rails · puma :3000",
-  "sidecar · claude sdk",
+  "harness · claude sdk",
   "jobs · solid queue",
   "postgres",
   "git worktrees",
