@@ -1,4 +1,4 @@
-import type { ConverseStreamOutput } from "@aws-sdk/client-bedrock-runtime";
+import type { ConverseCommandOutput, ConverseStreamOutput } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { inferContextWindow } from "../models.js";
 import { isAnthropicProfileId } from "./bedrock_routing.js";
@@ -17,6 +17,7 @@ import {
   toolUseWhileStreaming,
 } from "./converse_capabilities.js";
 import { toConverseInput } from "./converse_request.js";
+import { responseToStreamEvents } from "./converse_response.js";
 import { mapConverseStream } from "./converse_stream.js";
 import { type Discovery, discoverAwsCredential } from "./credentials/discover.js";
 
@@ -33,11 +34,12 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
  *
  * Only `anthropic_bedrock.ts` and this file import an AWS runtime SDK.
  *
- * What it deliberately does NOT do yet: run a streaming-limited model (every Llama, Mistral
- * Pixtral, both Writer Palmyra) WITH tools. The loop refuses that combination,
- * because `ConverseStream` rejects a `toolConfig` for those models. The non-streaming
- * `Converse` fallback that would make them fully tool-capable is deferred; until it lands they
- * are usable for chat-style turns and appear labelled in the picker.
+ * A streaming-limited model (every Llama, Mistral Pixtral, both Writer Palmyra) reaches
+ * `ConverseStream`'s tool-use limit only when it would STREAM with tools. `stream()` serves a
+ * tools turn on such a model over non-streaming `Converse` instead (which does accept a
+ * toolConfig) and replays the single response as the same event vocabulary. The only
+ * cost is no live `ai_text_delta` on that turn — declared by `toolUseWhileStreaming: false` and
+ * labelled in the picker.
  */
 
 /**
@@ -54,11 +56,15 @@ const MAX_OUTPUT_TOKENS = 8192;
  *  adapter's translation and mapping run without an AWS account. */
 export type ConverseRunner = (input: unknown) => AsyncIterable<ConverseStreamOutput>;
 
+/** A single NON-streaming Converse call (the fallback path for streaming-limited models). */
+export type ConverseNonStreamingRunner = (input: unknown) => Promise<ConverseCommandOutput>;
+
 /** The candidate profiles this host can serve, before capability gating. Injected in tests. */
 export type ListConverseProfiles = () => Promise<Array<{ id: string; displayName: string }>>;
 
 export interface BedrockConverseOptions {
   runner?: ConverseRunner;
+  nonStreamingRunner?: ConverseNonStreamingRunner;
   listProfiles?: ListConverseProfiles;
   discovery?: Discovery;
   env?: Record<string, string | undefined>;
@@ -80,6 +86,7 @@ export class BedrockConverseAdapter implements ProviderAdapter {
   };
 
   private readonly injectedRunner?: ConverseRunner;
+  private readonly injectedNonStreamingRunner?: ConverseNonStreamingRunner;
   private readonly injectedListProfiles?: ListConverseProfiles;
   private readonly injectedDiscovery?: Discovery;
   private readonly env: Record<string, string | undefined>;
@@ -87,6 +94,7 @@ export class BedrockConverseAdapter implements ProviderAdapter {
 
   constructor(opts: BedrockConverseOptions = {}) {
     this.injectedRunner = opts.runner;
+    this.injectedNonStreamingRunner = opts.nonStreamingRunner;
     this.injectedListProfiles = opts.listProfiles;
     this.injectedDiscovery = opts.discovery;
     this.env = opts.env ?? process.env;
@@ -147,12 +155,32 @@ export class BedrockConverseAdapter implements ProviderAdapter {
 
   async *stream(req: ProviderRequest): AsyncIterable<ProviderEvent> {
     const input = toConverseInput(req);
-    yield* mapConverseStream(this.run(input, req.signal), req.model);
+    // The one place the streaming-vs-not decision lives: a model that cannot use tools WHILE
+    // streaming, asked to use tools, is served over NON-streaming `Converse` — which it
+    // DOES accept a toolConfig on — and its single response is replayed as the same event
+    // vocabulary the stream produces. The cost is no live `ai_text_delta` for that turn,
+    // which `toolUseWhileStreaming: false` in the capability table already declares and the
+    // picker already labels. Everything else streams.
+    const raw =
+      req.tools.length > 0 && !toolUseWhileStreaming(req.model)
+        ? this.runNonStreaming(input, req.signal)
+        : this.run(input, req.signal);
+    yield* mapConverseStream(raw, req.model);
   }
 
   private run(input: unknown, signal: AbortSignal): AsyncIterable<ConverseStreamOutput> {
     if (this.injectedRunner) return this.injectedRunner(input);
     return this.liveRun(input, signal);
+  }
+
+  private async *runNonStreaming(
+    input: unknown,
+    signal: AbortSignal,
+  ): AsyncIterable<ConverseStreamOutput> {
+    const output = this.injectedNonStreamingRunner
+      ? await this.injectedNonStreamingRunner(input)
+      : await this.liveConverse(input, signal);
+    yield* responseToStreamEvents(output, "");
   }
 
   private async *liveRun(input: unknown, signal: AbortSignal): AsyncIterable<ConverseStreamOutput> {
@@ -171,6 +199,17 @@ export class BedrockConverseAdapter implements ProviderAdapter {
     for await (const event of res.stream ?? []) {
       yield event;
     }
+  }
+
+  private async liveConverse(input: unknown, signal: AbortSignal): Promise<ConverseCommandOutput> {
+    const { BedrockRuntimeClient, ConverseCommand } = await import(
+      "@aws-sdk/client-bedrock-runtime"
+    );
+    const client = new BedrockRuntimeClient({
+      region: this.region(),
+      ...(this.awsProfile ? { credentials: fromIni({ profile: this.awsProfile }) } : {}),
+    });
+    return client.send(new ConverseCommand(input as never), { abortSignal: signal });
   }
 
   /** Exposed for the same reason as the Anthropic adapter: assert the RESOLVED profile without

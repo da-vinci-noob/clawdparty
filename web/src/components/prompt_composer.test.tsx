@@ -258,7 +258,7 @@ describe("PromptComposer permission modes", () => {
     );
   });
 
-  it("MARKS a model that cannot use tools while streaming", async () => {
+  it("MARKS a streaming-limited model as tools-without-live-streaming", async () => {
     server.use(
       http.get("/api/models", () =>
         HttpResponse.json({
@@ -286,10 +286,10 @@ describe("PromptComposer permission modes", () => {
     setRole("owner");
     renderComposer(<PromptComposer sessionId="s" />);
 
-    // Measured on Bedrock: 8 of 18 non-Anthropic models refuse a toolConfig on a streaming
-    // request. The loop refuses such a run rather than sending it, so a participant who picks
-    // one from an unmarked list learns about the limit from a failure — which reads as the
-    // product being broken.
+    // Measured on Bedrock: 8 of 18 non-Anthropic models reject a toolConfig on a STREAMING
+    // request but accept it on non-streaming Converse. The adapter falls back, so a
+    // tools turn works — the only cost is no live token streaming, which the label states so
+    // the pause reads as expected rather than the product being broken.
     const option = await waitFor(() => {
       const el = screen
         .getByTestId("model")
@@ -297,7 +297,7 @@ describe("PromptComposer permission modes", () => {
       if (!el) throw new Error("option not rendered yet");
       return el;
     });
-    expect(option.textContent).toMatch(/no tools/i);
+    expect(option.textContent).toMatch(/no live streaming/i);
   });
 
   it("does NOT mark a model whose capability is simply capable", async () => {

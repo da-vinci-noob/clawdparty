@@ -155,27 +155,6 @@ export class RunLoop {
         signal: spec.signal,
       });
 
-      // A model that cannot use tools WHILE streaming, asked to do exactly that.
-      //
-      // Refused HERE rather than sent, because the provider would reject it anyway (Bedrock
-      // answers with `ValidationException: This model doesn't support tool use in streaming
-      // mode`) and a knowable capability limit should not reach a participant as an opaque
-      // provider error. The two quiet alternatives are both worse: dropping the tools yields
-      // an agent that says it edited a file and did not, and dropping the streaming yields a
-      // turn that appears only once it settles — the defect removed later.
-      if (!capabilities.toolUseWhileStreaming && built.tools.length > 0) {
-        return this.refuse(spec, normalizer, totalUsage, {
-          provider: adapter.id,
-          kind: "api_error",
-          message:
-            `${spec.model} cannot use tools while streaming: the provider accepts a tool ` +
-            "request or a streamed response, not both in one turn.",
-          remedy:
-            "Choose a model that supports both (the picker reports it), or start this run " +
-            "with every tool disabled to use it for chat only.",
-        });
-      }
-
       // request:before — may rewrite what is claimed, or refuse the turn outright.
       // Dispatched AFTER the request is built so a handler sees the real assembled
       // messages rather than a promise of them.

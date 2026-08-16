@@ -84,11 +84,15 @@ function translateBlock(block: unknown): ContentBlock | null {
     return { text: b.text } as ContentBlock;
   }
   if (b.type === "tool_result") {
+    // NO `status` field. Some Converse models (Writer Palmyra measured) reject it outright —
+    // `ValidationException: This model doesn't support the status field` — and Converse treats
+    // an absent status as success, so omitting it is universal and lossless for the common
+    // case. A failed result is instead marked in the TEXT, so every model still sees the tool
+    // errored even without the structured flag.
     return {
       toolResult: {
         toolUseId: String(b.tool_use_id ?? ""),
-        content: anthropicToolResultContent(b.content),
-        status: b.is_error ? "error" : "success",
+        content: anthropicToolResultContent(b.content, b.is_error === true),
       },
     } as ContentBlock;
   }
@@ -142,10 +146,17 @@ function converseToolJson(tool: ToolSchema): Record<string, unknown> | null {
   return converseSchemaFor(tool.name);
 }
 
-function anthropicToolResultContent(content: unknown): Array<{ text: string }> {
-  if (!Array.isArray(content)) return [{ text: "" }];
-  return content.map((part) => {
-    const p = part as { text?: unknown };
-    return { text: typeof p.text === "string" ? p.text : JSON.stringify(part) };
-  });
+function anthropicToolResultContent(content: unknown, isError: boolean): Array<{ text: string }> {
+  const parts = Array.isArray(content)
+    ? content.map((part) => {
+        const p = part as { text?: unknown };
+        return { text: typeof p.text === "string" ? p.text : JSON.stringify(part) };
+      })
+    : [{ text: "" }];
+  // The error signal moves from the (unsupported) status field into the text. Prefix the
+  // FIRST part only, so the marker is not repeated across a multi-part result.
+  if (isError && parts[0]) {
+    parts[0] = { text: `[tool error] ${parts[0].text}` };
+  }
+  return parts;
 }

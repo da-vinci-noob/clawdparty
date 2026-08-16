@@ -221,12 +221,12 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 <optgroup key={providerId} label={group[0]?.providerLabel ?? providerId}>
                   {group.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {/* A run with tools is REFUSED for these, so the limit belongs in the
-                          label rather than in the failure a participant gets after choosing.
-                          Only an EXPLICIT false earns the warning — an absent field is version
-                          skew, not a known limitation, and labelling it flags every model. */}
+                      {/* These models DO run with tools (the adapter falls back to non-streaming
+                          Converse) — the only cost is no live token streaming on a tools
+                          turn, which the label states so the pause is expected, not alarming.
+                          Only an EXPLICIT false earns it; an absent field is version skew. */}
                       {m.toolUseWhileStreaming === false
-                        ? `${m.label} — no tools while streaming`
+                        ? `${m.label} — tools, no live streaming`
                         : m.label}
                     </option>
                   ))}

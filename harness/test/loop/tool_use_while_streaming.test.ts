@@ -162,57 +162,33 @@ describe("a model that streams AND uses tools", () => {
   });
 });
 
-describe("a model that cannot use tools WHILE streaming", () => {
+describe("a model that cannot use tools WHILE streaming is NOT refused by the loop", () => {
   const limited: Capabilities = { ...BASE, toolUseWhileStreaming: false };
 
-  it("refuses the run rather than sending a request that would be rejected", async () => {
+  it("does not refuse a tools turn — the ADAPTER owns how it serves it", async () => {
+    // An interim loop-level refusal shipped first and was then removed, because bedrock-converse
+    // now transparently falls back to non-streaming Converse for these models. The loop is
+    // provider-neutral and must NOT reason about toolUseWhileStreaming: it hands the request to
+    // the adapter, which decides stream-vs-not. This scripted adapter streams regardless, and
+    // the loop lets it.
     const { adapter, outcome } = await run(limited);
 
-    // Bedrock would answer this request with a ValidationException. Sending it anyway turns a
-    // known capability limit into an opaque provider error.
-    expect(outcome).toBe("failed");
-    expect(adapter.sent).toHaveLength(0);
+    expect(outcome).toBe("finished");
+    expect(adapter.sent).toHaveLength(1);
   });
 
-  it("names the constraint and what to do about it", async () => {
+  it("emits no provider_error for the capability — it is not an error", async () => {
     const { events } = await run(limited);
-    const error = events.find((e) => e.type === "provider_error");
-    const payload = error?.payload as { message?: string; remedy?: string } | undefined;
-
-    expect(error).toBeDefined();
-    // an unusable configuration must name itself and its fix. "ValidationException"
-    // tells a participant nothing they can act on.
-    expect(payload?.message).toMatch(/tool/i);
-    expect(payload?.message).toMatch(/stream/i);
-    expect(payload?.remedy).toBeTruthy();
-  });
-
-  it("does NOT silently drop the tools instead", async () => {
-    const { adapter } = await run(limited);
-
-    // The quiet alternative: send the request with an empty tool list. The model then answers
-    // "I would edit that file" and edits nothing, which reads as the model being useless
-    // rather than the configuration being wrong.
-    expect(adapter.sent.every((r) => r.tools.length > 0)).toBe(true);
+    // The old refusal wrote a provider_error naming the limit. There is nothing to name now:
+    // the adapter handles it, so a clean run has no error at all.
+    expect(events.some((e) => e.type === "provider_error")).toBe(false);
   });
 
   it("still runs when no tools are offered at all", async () => {
-    // The limit is on the COMBINATION. A chat-style turn with no tools streams normally, and
-    // refusing it would discard half the Bedrock catalogue for no reason.
     const { events, adapter, outcome } = await run(limited, { withTools: false });
 
     expect(outcome).toBe("finished");
     expect(adapter.sent).toHaveLength(1);
     expect(events.some((e) => e.type === "ai_text_delta")).toBe(true);
-  });
-
-  it("records the refusal in the RECORD, not only in the return value", async () => {
-    await run(limited);
-    const types = store.projectionFrom(0).map((e) => e.type);
-
-    // A run that failed for a knowable reason must be explainable after a restart, from the
-    // log alone.
-    expect(types).toContain("provider_error");
-    expect(types).toContain("run_failed");
   });
 });

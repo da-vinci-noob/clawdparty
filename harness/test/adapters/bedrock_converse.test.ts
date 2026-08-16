@@ -216,6 +216,103 @@ describe("stream — real translation and mapping over a replayed capture", () =
   });
 });
 
+describe("streaming-limited models fall back to non-streaming Converse", () => {
+  const LIMITED = "us.meta.llama3-3-70b-instruct-v1:0";
+
+  function nonStreamingResponse(content: unknown[], stopReason = "end_turn") {
+    return {
+      output: { message: { role: "assistant", content } },
+      stopReason,
+      usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
+      $metadata: {},
+    } as never;
+  }
+
+  it("uses the NON-streaming runner for a tools turn on a limited model", async () => {
+    let streamed = false;
+    let nonStreamed = false;
+    const a = adapter({
+      runner: () => {
+        streamed = true;
+        return replayRunner("nova-text")();
+      },
+      nonStreamingRunner: async () => {
+        nonStreamed = true;
+        return nonStreamingResponse([{ text: "42 files." }]);
+      },
+    });
+
+    await collect(
+      a.stream(
+        request({ model: LIMITED, tools: [{ name: "bash", input_schema: { type: "object" } }] }),
+      ),
+    );
+
+    // ConverseStream rejects a toolConfig for this model; the adapter must NOT call it.
+    expect(nonStreamed).toBe(true);
+    expect(streamed).toBe(false);
+  });
+
+  it("completes a tools turn on a limited model, tool call and all", async () => {
+    const a = adapter({
+      nonStreamingRunner: async () =>
+        nonStreamingResponse(
+          [{ toolUse: { toolUseId: "call_1", name: "bash", input: { command: "ls" } } }],
+          "tool_use",
+        ),
+    });
+
+    const events = await collect(
+      a.stream(
+        request({ model: LIMITED, tools: [{ name: "bash", input_schema: { type: "object" } }] }),
+      ),
+    );
+    const stop = events.find(
+      (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
+    );
+
+    // Canonical tool_use with a real id — the whole point: the loop extracts it, the
+    // tool_result pairs, the turn works. This run used to be REFUSED outright.
+    expect(stop?.block).toMatchObject({ type: "tool_use", id: "call_1", name: "bash" });
+  });
+
+  it("STILL streams a limited model when NO tools are offered (chat-only)", async () => {
+    let streamed = false;
+    const a = adapter({
+      runner: () => {
+        streamed = true;
+        return replayRunner("nova-text")();
+      },
+      nonStreamingRunner: async () => nonStreamingResponse([{ text: "x" }]),
+    });
+
+    await collect(a.stream(request({ model: LIMITED, tools: [] })));
+    // The limit is on the COMBINATION; a tool-less turn streams live as normal.
+    expect(streamed).toBe(true);
+  });
+
+  it("streams a tool-CAPABLE model normally even with tools", async () => {
+    let streamed = false;
+    const a = adapter({
+      runner: () => {
+        streamed = true;
+        return replayRunner("openai-tool-use")();
+      },
+      nonStreamingRunner: async () => nonStreamingResponse([{ text: "no" }]),
+    });
+
+    await collect(
+      a.stream(
+        request({
+          model: "us.openai.gpt-5.6-sol",
+          tools: [{ name: "bash", input_schema: { type: "object" } }],
+        }),
+      ),
+    );
+    expect(streamed).toBe(true);
+  });
+});
+
 describe("live enumeration wiring", () => {
   // The injected path is exercised above; this just guards that the REAL path is only reached
   // when nothing is injected, so a test never silently hits AWS.

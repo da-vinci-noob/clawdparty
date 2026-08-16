@@ -148,7 +148,11 @@ describe("the human's turn (Anthropic-shaped blocks)", () => {
     expect(messagesOf(input)).toEqual([{ role: "user", content: [{ text: "hi" }] }]);
   });
 
-  it("translates a tool_result block, mapping is_error to a status", () => {
+  it("translates a tool_result WITHOUT a status field", () => {
+    // Some Converse models (Writer Palmyra measured) reject `toolResult.status` outright —
+    // `ValidationException: This model doesn't support the status field`. Converse treats an
+    // absent status as success, so omitting it is both universal and lossless for the common
+    // case. Error-ness is conveyed in the content text instead (below).
     const input = toConverseInput(
       req({
         messages: [
@@ -167,12 +171,12 @@ describe("the human's turn (Anthropic-shaped blocks)", () => {
       }),
     );
 
-    expect(messagesOf(input)[0]?.content).toEqual([
-      { toolResult: { toolUseId: "t1", content: [{ text: "file contents" }], status: "success" } },
-    ]);
+    const block = messagesOf(input)[0]?.content?.[0] as { toolResult: Record<string, unknown> };
+    expect(block.toolResult).toEqual({ toolUseId: "t1", content: [{ text: "file contents" }] });
+    expect(block.toolResult).not.toHaveProperty("status");
   });
 
-  it("marks a failed tool_result as an error status", () => {
+  it("conveys a failed tool_result in the TEXT, since status is unavailable", () => {
     const input = toConverseInput(
       req({
         messages: [
@@ -190,9 +194,15 @@ describe("the human's turn (Anthropic-shaped blocks)", () => {
         ],
       }),
     );
-    expect(
-      (messagesOf(input)[0]?.content?.[0] as { toolResult: { status: string } }).toolResult.status,
-    ).toBe("error");
+    const block = messagesOf(input)[0]?.content?.[0] as {
+      toolResult: { content: Array<{ text: string }>; status?: string };
+    };
+
+    // No status field (a status-rejecting model would 400), and the error is marked in the
+    // text so every model still sees that the call failed.
+    expect(block.toolResult).not.toHaveProperty("status");
+    expect(block.toolResult.content[0]?.text).toMatch(/error/i);
+    expect(block.toolResult.content[0]?.text).toContain("boom");
   });
 });
 
@@ -267,9 +277,7 @@ describe("a full multi-turn exchange", () => {
       },
       {
         role: "user",
-        content: [
-          { toolResult: { toolUseId: "t1", content: [{ text: "ok" }], status: "success" } },
-        ],
+        content: [{ toolResult: { toolUseId: "t1", content: [{ text: "ok" }] } }],
       },
     ]);
   });
