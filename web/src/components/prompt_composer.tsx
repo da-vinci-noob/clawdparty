@@ -1,3 +1,4 @@
+import { BUILTIN_TOOL_IDS } from "@clawdparty/contracts";
 import { type FC, type FormEvent, useState } from "react";
 import { useConnectors } from "../hooks/use_connectors";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
@@ -57,7 +58,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   // Derived, never a second dropdown: the participant picks a MODEL, and the provider is
   // whichever one listed it. Two independent selectors would let them disagree.
-  const selectedProvider = models.find((m) => m.id === model)?.provider ?? "";
+  const selected = models.find((m) => m.id === model);
+  const selectedProvider = selected?.provider ?? "";
+  // Only an EXPLICIT false. An absent field is version skew, and reading it as "no tools" would
+  // strip every tool from a model that has them.
+  const toolLess = selected?.toolUse === false;
 
   // One group per provider, in discovery order. `Map` rather than an object so the order the
   // harness reported is preserved — it is the host's preference order, not alphabetical.
@@ -86,10 +91,15 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         // only means something relative to the provider that listed it.
         ...(selectedProvider ? { provider: selectedProvider } : {}),
         ...(revising ? { mode: "revise" } : {}),
-        // No per-item toggles: every discovered connector + skill is enabled (all
-        // tools stay on, so no disallowed_tools). Omitted when the host has none →
+        // A model that cannot use tools at all (DeepSeek R1) gets a run with every tool
+        // DISALLOWED and no connectors — the harness refuses a run that offers it tools, because
+        // a model that cannot act would otherwise narrate actions it never took. Skills are
+        // prompt text, not tools, so they stay.
+        ...(toolLess ? { disallowed_tools: BUILTIN_TOOL_IDS } : {}),
+        // Otherwise no per-item toggles: every discovered connector + skill is enabled
+        // (all tools stay on, so no disallowed_tools). Omitted when the host has none →
         // today's behavior.
-        ...(connectors.length ? { connectors: connectors.map((c) => c.name) } : {}),
+        ...(!toolLess && connectors.length ? { connectors: connectors.map((c) => c.name) } : {}),
         ...(skills.length ? { skills: "all" as const } : {}),
       }),
     });
@@ -232,13 +242,18 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 <optgroup key={providerId} label={group[0]?.providerLabel ?? providerId}>
                   {group.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {/* These models DO run with tools (the adapter falls back to non-streaming
-                          Converse) — the only cost is no live token streaming on a tools
-                          turn, which the label states so the pause is expected, not alarming.
-                          Only an EXPLICIT false earns it; an absent field is version skew. */}
-                      {m.toolUseWhileStreaming === false
-                        ? `${m.label} — tools, no live streaming`
-                        : m.label}
+                      {/* Two different limits, so two different labels. "no tools" means the
+                          model cannot act at all — it answers, and every tool is withheld from
+                          the run. "tools, no live streaming" means it DOES run with tools
+                          via the non-streaming fallback, and the only cost is no live
+                          token streaming on a tools turn — stated so the pause is expected
+                          rather than alarming. Only an EXPLICIT false earns either label; an
+                          absent field is version skew, not a limitation. */}
+                      {m.toolUse === false
+                        ? `${m.label} — no tools (answers only)`
+                        : m.toolUseWhileStreaming === false
+                          ? `${m.label} — tools, no live streaming`
+                          : m.label}
                     </option>
                   ))}
                 </optgroup>

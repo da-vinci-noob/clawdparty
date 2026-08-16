@@ -1,3 +1,4 @@
+import { BUILTIN_TOOL_IDS } from "@clawdparty/contracts";
 import type { ProviderStatus } from "@clawdparty/contracts";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
@@ -342,6 +343,114 @@ describe("PromptComposer permission modes", () => {
       return el;
     });
     expect(option.textContent).toBe("Opus 5");
+  });
+
+  describe("a model that cannot use tools at all", () => {
+    const noToolsModels = () => ({
+      providers: [
+        {
+          ...providersResponse([], {
+            id: "bedrock-converse",
+            displayName: "Amazon Bedrock (Converse)",
+          }).providers[0],
+          models: [
+            {
+              id: "us.deepseek.r1-v1:0",
+              displayName: "DeepSeek R1",
+              capabilities: { ...MODEL_CAPS, toolUse: false, toolUseWhileStreaming: false },
+            },
+          ],
+        },
+      ],
+    });
+
+    async function pickDeepSeek() {
+      setRole("owner");
+      renderComposer(<PromptComposer sessionId="s" />);
+      const option = await waitFor(() => {
+        const el = screen.getByTestId("model").querySelector('option[value="us.deepseek.r1-v1:0"]');
+        if (!el) throw new Error("option not rendered yet");
+        return el;
+      });
+      fireEvent.change(screen.getByTestId("model"), { target: { value: "us.deepseek.r1-v1:0" } });
+      return option;
+    }
+
+    beforeEach(() => {
+      server.use(http.get("/api/models", () => HttpResponse.json(noToolsModels())));
+    });
+
+    it("is OFFERED, labelled as answering only", async () => {
+      // It used to be missing from the picker entirely, which is indistinguishable from the host
+      // not having Bedrock access. A limit stated is a limit a participant can work with.
+      const option = await pickDeepSeek();
+      expect(option.textContent).toMatch(/no tools/i);
+      expect(option.textContent).toMatch(/answers only/i);
+    });
+
+    it("starts the run with every built-in tool disallowed", async () => {
+      // The harness REFUSES a run that offers tools to such a model (there is no transport that
+      // works), so the composer has to declare none — otherwise selecting it always fails.
+      const cap = captureRunStart();
+      await pickDeepSeek();
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "why is 17*3 51?" } });
+      fireEvent.submit(screen.getByTestId("prompt-composer"));
+
+      await waitFor(() => expect(cap.last()).not.toBeNull());
+      expect(cap.last()?.disallowed_tools).toEqual([...BUILTIN_TOOL_IDS]);
+    });
+
+    it("does not disallow anything for a tool-capable model", async () => {
+      server.use(
+        http.get("/api/models", () =>
+          HttpResponse.json(providersResponse([{ id: "claude-opus-5", label: "Opus 5" }])),
+        ),
+      );
+      const cap = captureRunStart();
+      setRole("owner");
+      renderComposer(<PromptComposer sessionId="s" />);
+      await waitFor(() => {
+        if (!screen.getByTestId("model").querySelector('option[value="claude-opus-5"]')) {
+          throw new Error("not yet");
+        }
+      });
+      fireEvent.change(screen.getByTestId("model"), { target: { value: "claude-opus-5" } });
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "hello" } });
+      fireEvent.submit(screen.getByTestId("prompt-composer"));
+
+      await waitFor(() => expect(cap.last()).not.toBeNull());
+      expect(cap.last()).not.toHaveProperty("disallowed_tools");
+    });
+
+    it("treats an ABSENT toolUse as capable, not as no-tools", async () => {
+      // Version skew again: a pre-1.8 harness omits the field. Reading absent as `false` would
+      // strip every tool from a model that has them — the mirror of the v1.6 mistake, and worse,
+      // because it would break working models rather than just mislabel them.
+      server.use(
+        http.get("/api/models", () => {
+          const body = providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]);
+          for (const m of body.providers[0]?.models ?? []) {
+            (m.capabilities as { toolUse?: boolean }).toolUse = undefined;
+          }
+          return HttpResponse.json(body);
+        }),
+      );
+      const cap = captureRunStart();
+      setRole("owner");
+      renderComposer(<PromptComposer sessionId="s" />);
+      const option = await waitFor(() => {
+        const el = screen.getByTestId("model").querySelector('option[value="claude-opus-5"]');
+        if (!el) throw new Error("not yet");
+        return el;
+      });
+      expect(option.textContent).toBe("Opus 5");
+
+      fireEvent.change(screen.getByTestId("model"), { target: { value: "claude-opus-5" } });
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "hello" } });
+      fireEvent.submit(screen.getByTestId("prompt-composer"));
+      await waitFor(() => expect(cap.last()).not.toBeNull());
+      expect(cap.last()).not.toHaveProperty("disallowed_tools");
+    });
   });
 
   it("offers only 'Default model' until discovery resolves (no invalid fallback ids)", () => {

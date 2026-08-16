@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 7 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 8 } as const;
 
 /**
  * The 30 frozen event type names. Adding or removing a name is a CONTRACT
@@ -228,20 +228,33 @@ export interface SkillInfo {
   description: string;
 }
 
-/** The canonical built-in tools offered in the picker (all default-ON). The web
- *  picker and Rails validation both read this — there is no /api/tools endpoint.
- *  Turning one OFF sends it in `disallowed_tools`, which the harness maps to the
- *  SDK `disallowedTools` (a bare name genuinely removes the tool, even under
- *  bypassPermissions — `allowedTools` only pre-approves). */
+/**
+ * The canonical built-in tools offered in the picker (all default-ON). The web picker and Rails
+ * validation both read this — there is no /api/tools endpoint. Turning one OFF sends it in
+ * `disallowed_tools`, and the harness DROPS the declaration (an allow-list only pre-approves; a
+ * tool left declared can still be called).
+ *
+ * **`id` is the harness's registry name, verbatim** — `read`, not `Read`. At v1.8 these were the
+ * Agent SDK's names, which no longer existed anywhere: the harness registers provider-native
+ * tools, `schemasFor` filters by exact name, and so `disallowed_tools` matched nothing and
+ * disabling a tool per run did NOTHING. `harness/test/tools/builtin_vocabulary.test.ts` now
+ * asserts this list against the live registry in both directions.
+ *
+ * There is ONE editor tool, which both creates and edits, so `Write` and `Edit` collapse into it:
+ * two ids for one tool could never be honoured separately.
+ */
 export const BUILTIN_TOOLS: readonly ToolInfo[] = [
-  { id: "Read", label: "Read", description: "Read files" },
-  { id: "Write", label: "Write", description: "Create & overwrite files" },
-  { id: "Edit", label: "Edit", description: "Edit files in place" },
-  { id: "Bash", label: "Bash", description: "Run shell commands" },
-  { id: "Glob", label: "Glob", description: "Find files by pattern" },
-  { id: "Grep", label: "Grep", description: "Search file contents" },
-  { id: "WebSearch", label: "WebSearch", description: "Search the web" },
-  { id: "WebFetch", label: "WebFetch", description: "Fetch & read web pages" },
+  { id: "read", label: "Read", description: "Read files" },
+  {
+    id: "str_replace_based_edit_tool",
+    label: "Edit",
+    description: "Create, overwrite & edit files",
+  },
+  { id: "bash", label: "Bash", description: "Run shell commands" },
+  { id: "glob", label: "Glob", description: "Find files by pattern" },
+  { id: "grep", label: "Grep", description: "Search file contents" },
+  { id: "web_search", label: "Web search", description: "Search the web" },
+  { id: "web_fetch", label: "Web fetch", description: "Fetch & read web pages" },
 ] as const;
 
 /** The bare tool ids, for validating a `disallowed_tools` selection. */
@@ -595,15 +608,28 @@ export const CREDENTIAL_PRECEDENCE: readonly CredentialSourceId[] = [
  */
 export interface ProviderCapabilities {
   streaming: true;
-  toolUse: true;
   /**
-   * Whether tools may be offered ON A STREAMING request. Both of the literals above stay
-   * true when this is false — the model streams, and it uses tools, just not at the same
-   * time.
+   * Whether the model can use tools AT ALL — in any transport, with any request shape.
+   *
+   * Widened from a literal `true` at v1.8. It was a literal because every model worth serving
+   * a coding agent uses tools, and that is still true of every model this host offers except
+   * one: `deepseek.r1` on Bedrock answers `ValidationException: This model doesn't support tool
+   * use` to a `toolConfig` on both `Converse` and `ConverseStream`. A capability the contract
+   * cannot state is a capability the harness has to encode as an exclusion, which is how R1
+   * ended up simply missing from the picker with no way to learn why.
+   *
+   * `false` means the run must carry NO tool declarations. It does not mean "degrade quietly":
+   * a request that offers tools to such a model is refused with the reason, because a model
+   * that cannot act will otherwise narrate actions it never took.
+   */
+  toolUse: boolean;
+  /**
+   * Whether tools may be offered ON A STREAMING request. `streaming` stays true when this is
+   * false — the model streams, and it uses tools, just not at the same time.
    *
    * Added at v1.6 because the two capabilities are INDEPENDENT on Amazon Bedrock and the
-   * contract could not say so: `streaming: true` and `toolUse: true` are literal types, so
-   * every provider asserted both unconditionally. Measured against 18 text-capable
+   * contract could not say so: both were literal `true` then, so every provider asserted
+   * both unconditionally. Measured against 18 text-capable
    * non-Anthropic Bedrock models, 8 refuse a `toolConfig` on `ConverseStream` with "This
    * model doesn't support tool use in streaming mode" while accepting it on `Converse` —
    * every Llama, plus Mistral Pixtral and both Writer Palmyra models, two of which return a

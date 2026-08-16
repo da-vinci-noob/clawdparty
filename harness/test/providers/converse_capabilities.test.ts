@@ -5,6 +5,7 @@ import {
   TABLE_MEASURED_AT,
   converseCapabilities,
   isInvocable,
+  toolUse,
   toolUseWhileStreaming,
 } from "../../src/providers/converse_capabilities.js";
 import { assertTotalCapabilities } from "../adapters/conformance.js";
@@ -50,21 +51,40 @@ describe("the table agrees with the probe, row by row", () => {
     expect(streaming).toHaveLength(7);
   });
 
-  it("counts exactly 8 that are offerable but cannot stream tools", () => {
+  it("counts exactly 8 tool-capable models that cannot stream tools", () => {
     const limited = rows.filter(
-      (r) => isInvocable(r.profile_id) && !toolUseWhileStreaming(r.profile_id),
+      (r) => isInvocable(r.profile_id) && toolUse(r.profile_id) && !toolUseWhileStreaming(r.profile_id),
     );
     // Every Llama, mistral pixtral, both writer palmyra. These are the models the rule exists for:
-    // offered, usable, and declared honestly as unable to do both at once.
+    // offered, usable, and declared honestly as unable to do both at once. The `toolUse` filter
+    // is load-bearing: R1 is offerable too, and it fails the streaming predicate for a
+    // completely different reason — it has no tools to stream.
     expect(limited).toHaveLength(8);
   });
 });
 
-describe("models that cannot be served at all", () => {
-  it("excludes the one with no tool support in either transport", () => {
-    // An agent loop cannot read or edit a file without tools, so offering it would be offering
-    // a model that fails the first thing anyone asks of it.
-    expect(isInvocable("us.deepseek.r1-v1:0")).toBe(false);
+describe("a model with no tool support in either transport", () => {
+  it("is OFFERED, and declares the limit instead of being hidden", () => {
+    // It used to be excluded, on the argument that an agent loop cannot read or edit a file
+    // without tools. True, and it made R1 vanish from the picker with nothing to explain why —
+    // while a reasoning model with no tools is still worth asking a question. So it is offered
+    // and the capability states what it cannot do.
+    expect(isInvocable("us.deepseek.r1-v1:0")).toBe(true);
+    expect(toolUse("us.deepseek.r1-v1:0")).toBe(false);
+  });
+
+  it("never claims tools-while-streaming, which would be nonsense", () => {
+    expect(toolUseWhileStreaming("us.deepseek.r1-v1:0")).toBe(false);
+    expect(converseCapabilities("us.deepseek.r1-v1:0", 128_000, 8_192)).toMatchObject({
+      toolUse: false,
+      toolUseWhileStreaming: false,
+    });
+  });
+
+  it("leaves every other model tool-capable", () => {
+    for (const row of rows.filter((r) => !r.profile_id.includes("deepseek"))) {
+      expect(toolUse(row.profile_id), `${row.profile_id} should use tools`).toBe(true);
+    }
   });
 
   it("excludes an entitlement gap and a model Converse does not serve", () => {

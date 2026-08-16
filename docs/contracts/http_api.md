@@ -98,7 +98,9 @@ A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delive
 `permission_mode`, each defaulting to today's behavior when omitted:
 
 - `disallowed_tools: string[]` — built-in tool ids to turn OFF (validated ⊆ the shared
-  `BUILTIN_TOOLS` constant),
+  `BUILTIN_TOOLS` constant, whose ids are the harness's own registry names — `read`, `bash`,
+  `str_replace_based_edit_tool` — never the Agent SDK's `Read`/`Bash`, which nothing answers to; see
+  CHANGELOG 1.8.0),
 - `connectors: string[]` — host-configured MCP server names to enable (validated ⊆ the session's
   discovered connectors),
 - `skills: "all" | string[]` — skills to enable (`"all"` or validated ⊆ discovered skills).

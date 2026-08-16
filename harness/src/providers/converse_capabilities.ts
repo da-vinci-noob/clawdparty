@@ -33,7 +33,13 @@ const STREAMS_TOOLS = [
   "amazon.nova-2-lite",
 ];
 
-/** Model-id fragments that reject a `toolConfig` outright, in either transport. */
+/**
+ * Model-id fragments that reject a `toolConfig` outright, in either transport.
+ *
+ * These models ARE offered — a declared `toolUse: false` is what makes them
+ * representable, where an exclusion made R1 simply absent from the picker with no way to learn
+ * why. They run answer-only; the loop refuses a run that offers them tools.
+ */
 const NO_TOOLS = ["deepseek.r1"];
 
 /**
@@ -48,7 +54,19 @@ const has = (modelId: string, fragments: readonly string[]): boolean =>
   fragments.some((fragment) => modelId.includes(fragment));
 
 export function isInvocable(modelId: string): boolean {
-  return !has(modelId, NOT_INVOCABLE) && !has(modelId, NO_TOOLS);
+  return !has(modelId, NOT_INVOCABLE);
+}
+
+/**
+ * Whether this model can use tools at all.
+ *
+ * Defaults to TRUE for anything unmeasured, the opposite direction from
+ * `toolUseWhileStreaming`, and deliberately: tool use is the norm — one model out of 18 lacks it
+ * — so a wrong `false` would silently turn a capable model into a chat toy, while a wrong `true`
+ * produces one refused run that names the model and the constraint.
+ */
+export function toolUse(modelId: string): boolean {
+  return !has(modelId, NO_TOOLS);
 }
 
 /**
@@ -75,8 +93,11 @@ export function converseCapabilities(
 ): Capabilities {
   return {
     streaming: true,
-    toolUse: true,
-    toolUseWhileStreaming: toolUseWhileStreaming(modelId),
+    toolUse: toolUse(modelId),
+    // A model with no tool use cannot have tools while streaming either; `toolUseWhileStreaming`
+    // is measured per family and would say false anyway, but the `&&` makes the two consistent
+    // by construction rather than by the table staying in step with itself.
+    toolUseWhileStreaming: toolUse(modelId) && toolUseWhileStreaming(modelId),
     contextWindow,
     maxOutputTokens,
     // Converse exposes no thinking-budget parameter; models that reason do it on their own and

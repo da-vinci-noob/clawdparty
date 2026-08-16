@@ -39,12 +39,12 @@ RSpec.describe('Run start capability selection') do
   describe 'a valid selection' do
     it 'accepts it (202) and threads it to the harness' do
       expect do
-        start_run(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
+        start_run(disallowed_tools: ['bash'], connectors: ['github'], skills: ['deploy'])
       end.to(change(AiRun, :count).by(1))
 
       expect(response).to(have_http_status(:accepted))
       payload = posted.last
-      expect(payload[:disallowed_tools]).to(eq(['Bash']))
+      expect(payload[:disallowed_tools]).to(eq(['bash']))
       expect(payload[:connectors]).to(eq(['github']))
       expect(payload[:skills]).to(eq(['deploy']))
     end
@@ -98,7 +98,7 @@ RSpec.describe('Run start capability selection') do
     %w[reviewer viewer].each do |role|
       it "denies #{role} with 403 even with capability fields (no discovery, no run)" do
         expect do
-          start_run(role: role, disallowed_tools: ['Bash'], connectors: ['github'])
+          start_run(role: role, disallowed_tools: ['bash'], connectors: ['github'])
         end.not_to(change(AiRun, :count))
         expect(response).to(have_http_status(:forbidden))
         expect(posted).to(be_empty)
@@ -108,9 +108,9 @@ RSpec.describe('Run start capability selection') do
     # The bypassPermissions pair went with the parameter. The capability surface
     # itself is still gated, which is what these two now assert without it.
     it 'lets an owner set capabilities (202) and forwards them' do
-      start_run(role: 'owner', disallowed_tools: ['Bash'])
+      start_run(role: 'owner', disallowed_tools: ['bash'])
       expect(response).to(have_http_status(:accepted))
-      expect(posted.last[:disallowed_tools]).to(eq(['Bash']))
+      expect(posted.last[:disallowed_tools]).to(eq(['bash']))
     end
   end
 end

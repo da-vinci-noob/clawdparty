@@ -285,13 +285,22 @@ export function assertTotalCapabilities(caps: Capabilities, label: string): void
   expect(caps.maxOutputTokens).toBeGreaterThan(0);
   expect(Array.isArray(caps.effortLevels)).toBe(true);
 
-  // An EXPLICIT boolean, never inferred. `streaming` and `toolUse` are literal `true`, so an
-  // adapter that omitted this would be read as "supports both together" — the one reading that
-  // is wrong for 8 of the 18 non-Anthropic Bedrock models measured.
-  expect(
-    typeof caps.toolUseWhileStreaming,
-    `${label}.toolUseWhileStreaming must be an explicit boolean`,
-  ).toBe("boolean");
+  // EXPLICIT booleans, never inferred. An omitted `toolUseWhileStreaming` reads as "supports
+  // both together", the one reading that is wrong for 8 of the 18 non-Anthropic Bedrock models
+  // that were measured; an omitted `toolUse` reads as "can act", which for a model that cannot is
+  // how you get an agent narrating edits it never made.
+  for (const field of ["toolUse", "toolUseWhileStreaming"] as const) {
+    expect(typeof caps[field], `${label}.${field} must be an explicit boolean`).toBe("boolean");
+  }
+
+  // Not a contradiction to catch, but a NONSENSE combination: tools-while-streaming can only be
+  // true of a model that uses tools at all, and a table that says otherwise has a stale row.
+  if (!caps.toolUse) {
+    expect(
+      caps.toolUseWhileStreaming,
+      `${label} claims tools while streaming but no tool use at all`,
+    ).toBe(false);
+  }
 
   for (const tool of ["webSearch", "webFetch", "codeExecution"] as const) {
     expect(

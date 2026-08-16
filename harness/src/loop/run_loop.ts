@@ -107,7 +107,18 @@ export class RunLoop {
     // so a crash in the very first request still leaves a run a reader can explain.
     const opening = [
       normalizer.userPrompt(spec.prompt, this.now()),
-      normalizer.runStarted({ model: spec.model, cwd: spec.cwd }, this.now()),
+      // `disallowed_tools` is echoed because the contract says `run_started` carries the scope a
+      // run ACTUALLY applied — and because it is the only place a late joiner, arriving by
+      // backfill with no live events, can learn that a run cannot act. Omitted when nothing was
+      // withheld, which is what "omitted means today's defaults" means.
+      normalizer.runStarted(
+        {
+          model: spec.model,
+          cwd: spec.cwd,
+          ...(spec.disallowedTools?.length ? { disallowed_tools: spec.disallowedTools } : {}),
+        },
+        this.now(),
+      ),
     ];
     store.commit({
       writes: [
@@ -154,6 +165,18 @@ export class RunLoop {
         effort: spec.effort,
         signal: spec.signal,
       });
+
+      // A model that cannot use tools at all — no transport makes this work, so unlike
+      // `toolUseWhileStreaming` there is nothing for the adapter to choose. Dropping the tools
+      // instead would leave a model that narrates edits it never made.
+      if (!capabilities.toolUse && built.tools.length > 0) {
+        return this.refuse(spec, normalizer, totalUsage, {
+          provider: adapter.id,
+          kind: "api_error",
+          message: `${spec.model} does not support tool use; the run offered ${built.tools.length} tool(s)`,
+          remedy: "Start the run with every tool disallowed, or pick a model that uses tools.",
+        });
+      }
 
       // request:before — may rewrite what is claimed, or refuse the turn outright.
       // Dispatched AFTER the request is built so a handler sees the real assembled

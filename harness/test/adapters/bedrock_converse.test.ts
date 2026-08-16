@@ -106,18 +106,30 @@ describe("listModels — the capability gate", () => {
     for (const model of models) assertTotalCapabilities(model.capabilities, model.id);
   });
 
-  it("drops a model this host cannot invoke (entitlement / not-servable / no tools)", async () => {
+  it("drops a model this host cannot invoke (entitlement / not-servable)", async () => {
     const a = adapter({
       listProfiles: async () => [
         { id: "us.amazon.nova-lite-v1:0", displayName: "Nova Lite" },
-        { id: "us.deepseek.r1-v1:0", displayName: "DeepSeek R1" }, // no tool support at all
         { id: "us.amazon.nova-premier-v1:0", displayName: "Nova Premier" }, // access denied
         { id: "us.twelvelabs.pegasus-1-2-v1:0", displayName: "Pegasus" }, // Converse won't serve
       ],
     });
     const ids = (await a.listModels()).map((m) => m.id);
 
+    // Not-invocable is now the ONLY exclusion. A capability limit is declared, not hidden —
+    // hiding one is what left DeepSeek absent with no way to learn why.
     expect(ids).toEqual(["us.amazon.nova-lite-v1:0"]);
+  });
+
+  it("offers a no-tools model, declaring the limit", async () => {
+    const a = adapter({
+      listProfiles: async () => [{ id: "us.deepseek.r1-v1:0", displayName: "DeepSeek R1" }],
+    });
+    const [model] = await a.listModels();
+
+    expect(model?.id).toBe("us.deepseek.r1-v1:0");
+    expect(model?.capabilities.toolUse).toBe(false);
+    assertTotalCapabilities(model?.capabilities as never, "deepseek");
   });
 
   it("de-duplicates the us./global. profiles of one model", async () => {

@@ -233,6 +233,63 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.8.0] — `toolUse` is a boolean, and `BUILTIN_TOOLS` ids are the harness's real tool names
+
+**`CONTRACT_VERSION = { major: 1, minor: 8 }`.** Two changes, both from the same finding, and the second is a
+**breaking value change inside the open migration window** rather than an additive one.
+
+```ts
+interface ProviderCapabilities {
+  streaming: true;
+  toolUse: boolean;   // was: literal `true`
+  ...
+}
+```
+
+**Why `toolUse` widens.** Same shape problem `toolUseWhileStreaming` fixed at v1.6, one level up:
+the literal asserted that every model uses tools. `us.deepseek.r1-v1:0` on Bedrock answers
+`ValidationException: This model doesn't support tool use` in BOTH transports, so unlike the
+streaming case there is no fallback an adapter could pick. A capability the contract cannot state
+becomes an exclusion in code, which is how R1 ended up simply absent from the picker with nothing
+to explain why. Widening it is additive for consumers (a `boolean` reads where `true` did) and for
+producers (every adapter already passes `true`), so nothing broke — which also means **no compile
+error forced adapters to reconsider**, unlike the v1.6 field addition. `assertTotalCapabilities`
+now requires an explicit boolean and rejects the nonsense combination
+`toolUse: false, toolUseWhileStreaming: true`.
+
+A `false` model runs **answer-only**: the run carries no tool declarations, the picker labels it
+"no tools (answers only)", and the run banner says so from the run's own `run_started` payload so a
+late joiner learns it too. A run that DOES offer such a model tools is refused with the reason —
+dropping them quietly would leave a model that narrates edits it never made.
+
+**Why the tool ids change (breaking).**
+
+| before | after |
+|---|---|
+| `Read` `Write` `Edit` `Bash` `Glob` `Grep` `WebSearch` `WebFetch` | `read` `str_replace_based_edit_tool` `bash` `glob` `grep` `web_search` `web_fetch` |
+
+Those were the **Agent SDK's** names, and nothing has answered to them since the SDK was removed:
+the harness registers provider-native tools and `ToolRegistry.schemasFor` filters `disallowed_tools`
+by EXACT name. So the per-run tool disable did **nothing** — measured, not inferred: disallowing all
+eight advertised ids left every registered tool declared. Both suites were green throughout, because
+the web asserted the request body it sent and the harness asserted the filter it applied, and no
+test compared the two vocabularies — the same both-sides-green shape as earlier defects.
+
+`Write` and `Edit` collapse into one entry: there is ONE editor tool that both creates and edits, so
+two ids for it could never be honoured separately. `label` is what the UI renders — `id` is a
+registry name, and one of them is `str_replace_based_edit_tool`.
+
+**What consumers must do.** Send tool ids from `BUILTIN_TOOL_IDS`, never a hardcoded string. Rails'
+`Runs::Start::DEFAULT_ALLOWED_TOOLS` is the Ruby copy and matches.
+`harness/test/tools/builtin_vocabulary.test.ts` asserts the list against the live registry in BOTH
+directions, so a tool added to one side and not the other now fails the build.
+
+**Recovery / migration.** Nothing stored changes. A run recorded before this bump has
+`disallowed_tools` in the old vocabulary in its `run_started` payload; it had no effect then and it
+has none now, so no re-derivation is possible or needed. Note that `allowed_tools` is still ACCEPTED
+and still unused by the harness — a genuine SDK leftover, filed separately rather than quietly
+dropped here.
+
 ## [1.7.0] — `total_cost_usd` is nullable (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 7 }`.** Additive `minor` bump: `total_cost_usd` on

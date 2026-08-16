@@ -46,7 +46,7 @@ RSpec.describe(Runs::Start) do
     expect(payload[:repo_path]).to(eq("/repo/.clawdparty/worktrees/session-#{session.id}"))
     expect(payload[:lane]).to(eq('main'))
     expect(payload[:provider]).to(eq('anthropic-direct'))
-    expect(payload[:allowed_tools]).to(include('Bash', 'Write'))
+    expect(payload[:allowed_tools]).to(include('bash', 'str_replace_based_edit_tool'))
     # Both are gone from the protocol: permission_mode was an Agent SDK concept,
     # and resumption is now by harness session + lane (CHANGELOG B1/B2).
     expect(payload).not_to(have_key(:permission_mode))
@@ -59,11 +59,14 @@ RSpec.describe(Runs::Start) do
                            model: 'claude-opus-4-8', client: client, worktree: worktree, **caps)
     end
 
-    it 'pre-approves all 8 advertised built-in tools by default' do
-      expect(described_class::DEFAULT_ALLOWED_TOOLS)
-        .to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
+    it 'pre-approves every advertised built-in tool by default, under its HARNESS name' do
+      # The names have to be the harness's registry names (`read`, not `Read`): it filters
+      # `disallowed_tools` by exact name, so the SDK-era capitalized list disabled nothing.
+      # packages/contracts BUILTIN_TOOLS is the shared list; this is the Ruby copy of it.
+      tools = %w[read str_replace_based_edit_tool bash glob grep web_search web_fetch]
+      expect(described_class::DEFAULT_ALLOWED_TOOLS).to(eq(tools))
       start
-      expect(posted.last[:allowed_tools]).to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
+      expect(posted.last[:allowed_tools]).to(eq(tools))
     end
 
     it 'omits the capability keys entirely when nothing is selected (prior behavior)' do
@@ -75,9 +78,9 @@ RSpec.describe(Runs::Start) do
     end
 
     it 'threads a selection into the harness payload' do
-      start_with(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
+      start_with(disallowed_tools: ['bash'], connectors: ['github'], skills: ['deploy'])
       payload = posted.last
-      expect(payload[:disallowed_tools]).to(eq(['Bash']))
+      expect(payload[:disallowed_tools]).to(eq(['bash']))
       expect(payload[:connectors]).to(eq(['github']))
       expect(payload[:skills]).to(eq(['deploy']))
     end

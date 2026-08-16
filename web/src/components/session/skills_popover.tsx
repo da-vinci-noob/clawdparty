@@ -33,7 +33,9 @@ export const SkillsPopover: FC<{ sessionId: string; onClose: () => void }> = ({
 
   const items: Item[] =
     tab === "Tools"
-      ? BUILTIN_TOOLS.map((t) => ({ name: t.id, desc: t.description }))
+      ? // `label`, not `id`: the ids are the harness's registry names, and one of them is
+        // `str_replace_based_edit_tool` — correct, and not something to show a participant.
+        BUILTIN_TOOLS.map((t) => ({ name: t.label, desc: t.description }))
       : tab === "Connectors"
         ? connectors.map((c) => ({ name: c.name, desc: `${c.transport} connector` }))
         : skills.map((s) => ({ name: s.name, desc: s.description }));

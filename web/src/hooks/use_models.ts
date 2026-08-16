@@ -34,6 +34,15 @@ export interface ModelInfo {
    * absent as false labelled every Anthropic model "no tools while streaming".
    */
   toolUseWhileStreaming: boolean | undefined;
+  /**
+   * Whether the model uses tools AT ALL. False for `deepseek.r1` on Bedrock, which rejects a
+   * tool request in every transport — it can answer, not act.
+   *
+   * The composer must send such a run with every tool disallowed; the harness refuses a run that
+   * offers tools to it. `undefined` is version skew (pre-1.8) and must be read as "capable",
+   * because tool use is the norm and a wrong `false` would strip tools from a model that has them.
+   */
+  toolUse: boolean | undefined;
 }
 
 interface ProviderList {
@@ -73,6 +82,7 @@ function toModels(providers: ProviderStatus[]): ModelInfo[] {
           provider: provider.id,
           providerLabel: provider.displayName,
           toolUseWhileStreaming: model.capabilities.toolUseWhileStreaming,
+          toolUse: model.capabilities.toolUse,
         })),
       )
   );
