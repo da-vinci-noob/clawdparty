@@ -26,22 +26,7 @@ function pairs(entries: Awaited<ReturnType<typeof recover>>["entries"]) {
 }
 
 describe("every tool_use has a tool_result", () => {
-  // ⚠️ SKIPPED PENDING A FIX — this assertion FAILS today and the failure is real.
-  //
-  // The loop holds completed tool results in MEMORY and writes them to the surface as one
-  // combined entry only after EVERY call finishes (measured: a clean run puts both
-  // tool_result blocks in a single `ai_raw` entry at seq 9, while the per-call
-  // `tool_finished` entries are off-surface). So a crash after some calls completed but
-  // before that combined write loses those results for good: recovery sees the calls as
-  // `completed`, so it neither re-runs nor synthesizes them, and the surface never gains
-  // a tool_result. That is precisely the "effect happened, outcome lost" case the effect
-  // sandwich exists to prevent.
-  //
-  // Not fixed here because the repair changes WHERE tool results are written, which moves
-  // the fixture's durable type sequence and therefore the frozen parity baseline — a
-  // contract decision, not a bug fix. The related defects are fixed, which is why the rest of this
-  // file now passes.
-  it.skip.each(boundaries)("kill at commit %i, then recover: no unanswered call", async (at) => {
+  it.each(boundaries)("kill at commit %i, then recover: no unanswered call", async (at) => {
     const state = await recover(runToCrash(at));
     const { uses, results } = pairs(state.entries);
 
@@ -49,15 +34,26 @@ describe("every tool_use has a tool_result", () => {
     expect(unanswered, `unanswered tool_use after a kill at commit ${at}`).toEqual([]);
   });
 
-  it.skip("answers a `never` call with an explicit interrupted result, not silence", async () => {
-    const state = await recover(runToCrash(5));
-    const { uses, results } = pairs(state.entries);
+  it("answers a `never` call with an explicit interrupted result, not silence", async () => {
+    // Finds the boundary where recovery actually SYNTHESIZED rather than hardcoding a
+    // commit index. The loop settles each result as it completes, so a call
+    // that finished before the crash is answered by its REAL result — the interrupted
+    // text only appears where a call was caught mid-effect, and which commit that is
+    // moves whenever the narrative changes.
+    // Must be a boundary that synthesized AND already has tool_use blocks. The earliest
+    // synthesizing boundary is the request-window uncertainty, which happens before any
+    // tool_use exists — a `.find(synthesized > 0)` picks that one and tests nothing about
+    // tool calls.
+    const states = await Promise.all(boundaries.map(async (at) => recover(runToCrash(at))));
+    const synthesized = states.find((s) => s.synthesized > 0 && pairs(s.entries).uses.size > 0);
+    if (!synthesized) throw new Error("no boundary caught a `never` TOOL CALL mid-effect");
 
+    const { uses, results } = pairs(synthesized.entries);
     // Silence and an interrupted result are both "not re-run", but only one of them
     // leaves a conversation the model can continue.
     expect(uses.size).toBeGreaterThan(0);
     expect([...uses].every((id) => results.has(id))).toBe(true);
-    expect(JSON.stringify(state.entries)).toContain("interrupted");
+    expect(JSON.stringify(synthesized.entries)).toContain("interrupted");
   });
 
   it("finds tool_use blocks at all, so the sweep is not vacuously true", async () => {

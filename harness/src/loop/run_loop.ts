@@ -402,7 +402,6 @@ export class RunLoop {
     calls: Array<{ id: string; name: string; input: unknown }>,
   ): Promise<void> {
     const { store, emit, extensions } = this.deps;
-    const resultBlocks: unknown[] = [];
     let position = planned;
 
     for (const call of planned.calls) {
@@ -430,10 +429,20 @@ export class RunLoop {
         );
         position = checkpoint.withCallStatus(position, call.index, "completed");
         store.commit({
-          writes: [this.entryFor(refused, null), checkpoint.positionWrite(spec.runId, position)],
+          writes: [
+            this.entryFor(refused, null),
+            // A refusal is an OUTCOME, so it settles on the surface like any other. Held
+            // in memory it would vanish on a crash and leave the call unanswered.
+            this.toolResultWrite(
+              normalizer,
+              spec,
+              call,
+              toolResultBlock(call.toolUseId, gated.outcome.reason, true),
+            ),
+            checkpoint.positionWrite(spec.runId, position),
+          ],
         });
         emit([refused]);
-        resultBlocks.push(toolResultBlock(call.toolUseId, gated.outcome.reason, true));
         continue;
       }
 
@@ -488,34 +497,64 @@ export class RunLoop {
       store.commit({
         writes: [
           ...events.map((e) => this.entryFor(e, null)),
+          this.toolResultWrite(
+            normalizer,
+            spec,
+            call,
+            toolResultBlock(call.toolUseId, text, finalResult.isError),
+          ),
           checkpoint.positionWrite(spec.runId, position),
         ],
       });
       emit(events);
-      resultBlocks.push(toolResultBlock(call.toolUseId, text, finalResult.isError));
     }
 
-    // ONE user message carrying every result. Splitting these silently trains the
-    // model to stop making parallel calls.
+    // Every result is already durable and on the surface, so this only advances the
+    // marker. There is nothing left to flush.
     store.commit({
-      writes: [
-        {
-          kind: "entry",
-          entry: {
-            run_id: spec.runId,
-            seq: store.nextSeq(spec.runId),
-            type: "ai_raw",
-            actor_kind: "user",
-            actor_id: spec.requestedBy,
-            ts_ms: this.now(),
-            payload: { raw: { tool_results: resultBlocks.length }, truncated: false },
-            blocks: resultBlocks,
-            on_surface: 1,
-          },
-        },
-        checkpoint.positionWrite(spec.runId, { phase: "checkpoint" }),
-      ],
+      writes: [checkpoint.positionWrite(spec.runId, { phase: "checkpoint" })],
     });
+  }
+
+  /**
+   * ONE surface entry per tool result, written in the SAME commit that marks the call
+   * completed.
+   *
+   * It used to be one combined entry after EVERY call finished, with the results held in
+   * memory until then. A crash in between lost them for good: recovery reads the position,
+   * sees the call `completed`, and so neither re-runs nor synthesizes — the effect had
+   * happened and its outcome was gone. That is the exact failure the effect sandwich
+   * exists to prevent, and the crash sweep caught it at kill points 5, 6 and 7.
+   *
+   * Splitting them does NOT split the request message: `request_builder` merges
+   * consecutive same-role surface entries, and every tool result folds to the `user` role,
+   * so they still arrive as one user message. That merge is load-bearing — separate
+   * messages per result silently train the model to stop making parallel calls.
+   *
+   * Carries the call's `settlementKey` so a settlement can only ever land once, matching
+   * what recovery writes for the same call.
+   */
+  private toolResultWrite(
+    normalizer: LoopNormalizer,
+    spec: RunSpec,
+    call: checkpoint.ToolCallPosition,
+    block: unknown,
+  ): Write {
+    return {
+      kind: "entry",
+      entry: {
+        run_id: spec.runId,
+        seq: normalizer.takeSeqs(1)[0] as number,
+        settlement_key: call.settlementKey,
+        type: "ai_raw",
+        actor_kind: "user",
+        actor_id: spec.requestedBy,
+        ts_ms: this.now(),
+        payload: { raw: { tool_results: 1 }, truncated: false },
+        blocks: [block],
+        on_surface: 1,
+      },
+    };
   }
 
   private async runTool(

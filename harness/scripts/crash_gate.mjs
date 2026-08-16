@@ -18,12 +18,11 @@ import { spawnSync } from "node:child_process";
  * removed; the gate insists on it.
  */
 const BUDGET = {
-  max: 12,
+  max: 0,
   reason:
-    "The loop batches tool results into one surface entry at the end of the turn, " +
-    "so a crash between calls loses them. The kill-point sweep and the interrupted-result " +
-    "example in every_call_settled.test.ts assert the property it breaks. Fixing it moves " +
-    "the frozen fixture's type sequence, so it needs a contract decision, not a patch.",
+    "nothing — every assertion runs. Raising this above zero needs a " +
+    "reason written here and reviewed — the gate exists because a skipped assertion in a " +
+    "required step is indistinguishable from a passing one.",
 };
 
 const result = spawnSync("npx", ["vitest", "run", "test/crash_injection"], {

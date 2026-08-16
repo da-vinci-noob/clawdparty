@@ -365,6 +365,34 @@ describe("behaviour parity — the executable contract still holds", () => {
   });
 
   it("returns every tool result in a SINGLE user message", async () => {
+    const { adapter } = await runScripted(
+      [
+        turn(
+          [toolUse(0, "toolu_1", "always_fails", {}), toolUse(1, "toolu_2", "always_fails", {})],
+          "tool_use",
+        ),
+        turn([block(0, "text", "done")], "end_turn"),
+      ],
+      worktree,
+    );
+
+    // Asserted on the assembled REQUEST, not on how the results are stored. The property
+    // that matters is what the provider receives — splitting results across messages
+    // silently trains the model to stop making parallel calls — and the storage later moved to
+    // one entry PER result so a crash between calls cannot lose them. Asserting the entry shape
+    // would have pinned the storage detail and failed on a change that preserves the requirement.
+    const followUp = adapter.requests.at(-1) as {
+      messages: Array<{ role: string; content: Array<{ type?: string }> }>;
+    };
+    const withResults = followUp.messages.filter(
+      (m) => m.role === "user" && m.content.some((b) => b.type === "tool_result"),
+    );
+
+    expect(withResults).toHaveLength(1);
+    expect(withResults[0]?.content.filter((b) => b.type === "tool_result")).toHaveLength(2);
+  });
+
+  it("stores each tool result as its OWN durable surface entry", async () => {
     await runScripted(
       [
         turn(
@@ -376,15 +404,21 @@ describe("behaviour parity — the executable contract still holds", () => {
       worktree,
     );
 
-    const userMessages = store
+    const resultEntries = store
       .surfaceFrom(0)
-      .filter((e) => e.actor_kind === "user")
       .filter((e) => (e.blocks ?? []).some((b) => (b as { type?: string }).type === "tool_result"));
 
-    // Splitting results across messages silently trains the model to stop making
-    // parallel calls, so two results must arrive as ONE entry with two blocks.
-    expect(userMessages).toHaveLength(1);
-    expect(userMessages[0]?.blocks).toHaveLength(2);
+    // The durability half of the same requirement. Batched into one entry written after
+    // every call finished, a crash in between lost the completed results for good:
+    // recovery reads the position, sees `completed`, and neither re-runs nor synthesizes.
+    expect(resultEntries).toHaveLength(2);
+    for (const entry of resultEntries) {
+      expect(entry.blocks).toHaveLength(1);
+      // Settlement-keyed, so a result can only ever land once — the same identity
+      // recovery would settle under.
+      expect(entry.settlement_key).toBeTruthy();
+    }
+    expect(new Set(resultEntries.map((e) => e.settlement_key)).size).toBe(2);
   });
 
   it("leaves the run terminal with no run.* registers", async () => {
