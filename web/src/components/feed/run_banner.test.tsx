@@ -47,6 +47,57 @@ describe("RunBanner has no capability echo", () => {
   });
 });
 
+describe("a connector the run could not load", () => {
+  const names = new Map([["p1", "Alice"]]);
+
+  it("names it and why, rather than leaving the participant with silent absence", () => {
+    // Measured live: `linear` on this host fails with an auth error, the run completes normally,
+    // and without this the person who enabled it sees no tools from it and no explanation.
+    render(
+      <RunBanner
+        event={evt("run_started", {
+          model: "m",
+          cwd: "/r",
+          connectors_failed: [{ name: "linear", kind: "failed" }],
+        })}
+        names={names}
+      />,
+    );
+    expect(screen.getByTestId("run-connector-failed-linear")).toHaveTextContent(
+      /failed to connect/i,
+    );
+  });
+
+  it("distinguishes a name the host never configured from one that timed out", () => {
+    render(
+      <RunBanner
+        event={evt("run_started", {
+          model: "m",
+          cwd: "/r",
+          connectors_failed: [
+            { name: "ghost", kind: "not_configured" },
+            { name: "slow", kind: "timeout" },
+          ],
+        })}
+        names={names}
+      />,
+    );
+    // Three kinds because three remedies: configure it, retry, or fix the server.
+    expect(screen.getByTestId("run-connector-failed-ghost")).toHaveTextContent(/not configured/i);
+    expect(screen.getByTestId("run-connector-failed-slow")).toHaveTextContent(/did not respond/i);
+  });
+
+  it("says nothing when every connector loaded", () => {
+    render(
+      <RunBanner
+        event={evt("run_started", { model: "m", cwd: "/r", connectors: ["slack-local"] })}
+        names={names}
+      />,
+    );
+    expect(screen.queryByTestId("run-connector-failed-slack-local")).not.toBeInTheDocument();
+  });
+});
+
 describe("a run that withheld every tool", () => {
   const names = new Map([["p1", "Alice"]]);
 

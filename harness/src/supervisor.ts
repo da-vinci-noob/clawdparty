@@ -3,6 +3,8 @@ import type { EventEnvelope } from "@clawdparty/contracts";
 import { ExtensionRegistry } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
+import { attachConnectors } from "./mcp/connectors.js";
+import type { McpConnect } from "./mcp/client.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
 import { ADAPTER_IDS, adapterById, buildAdapters } from "./providers/index.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
@@ -12,7 +14,7 @@ import { BashTool } from "./tools/bash.js";
 import * as glob from "./tools/glob.js";
 import * as grep from "./tools/grep.js";
 import * as read from "./tools/read.js";
-import { ToolRegistry } from "./tools/registry.js";
+import { type ToolDefinition, ToolRegistry } from "./tools/registry.js";
 import * as textEditor from "./tools/text_editor.js";
 import * as web from "./tools/web.js";
 import type { Transport } from "./transport.js";
@@ -80,6 +82,8 @@ interface LiveRun {
 export interface SupervisorOptions {
   storeDir: string;
   systemPrompt?: string;
+  /** Injected in tests so connector selection runs without spawning a real MCP server. */
+  mcpConnect?: McpConnect;
   adapters?: Record<string, ProviderAdapter>;
   extensions?: ExtensionRegistry;
   /** Injected in tests so a run does not need a live provider. */
@@ -190,9 +194,28 @@ export class Supervisor {
     const adapter = this.adapterFor(input.provider, input.aws_profile);
     const abort = new AbortController();
     const emit = (events: EventEnvelope[]) => this.ship(events, store);
+
+    // MCP servers the run selected, connected BEFORE the first request because their tools have
+    // to be declared in it. A per-run registry, not the shared one: MCP tools belong to
+    // the run that enabled them, and registering into `this.tools` would leak them into every
+    // later run on this harness — including runs that enabled nothing.
+    const mcp = await attachConnectors({
+      cwd: input.repo_path,
+      names: input.connectors ?? [],
+      connect: this.opts.mcpConnect,
+    });
+    for (const failure of mcp.failed) {
+      // The RAW reason goes here and nowhere else. It is a message from a transport we do not
+      // control, so it could carry a URL with a token in it; the event stream gets a
+      // classification instead, the same way the connector listing withholds every server's
+      // command/url/headers.
+      process.stderr.write(`connector ${failure.server} not loaded: ${failure.reason}\n`);
+    }
+    const tools = mcp.tools.length === 0 ? this.tools : registryWith(mcp.tools);
+
     const loop = this.opts.buildLoop
       ? this.opts.buildLoop({ store, adapter, emit })
-      : new RunLoop({ store, adapter, tools: this.tools, emit, extensions: this.extensions });
+      : new RunLoop({ store, adapter, tools, emit, extensions: this.extensions });
 
     const spec: RunSpec = {
       runId: input.run_id,
@@ -209,14 +232,23 @@ export class Supervisor {
       systemPrompt: this.opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       effort: input.effort,
       disallowedTools: input.disallowed_tools,
+      // Only the servers whose tools actually LOADED. A connector that failed to start is absent
+      // from the echo, which is the honest record: the run does not have it.
+      connectors: mcp.loaded,
+      connectorsFailed: mcp.failed.map((failure) => ({
+        name: failure.server,
+        kind: classifyConnectorFailure(failure.reason),
+      })),
       signal: abort.signal,
     };
 
     const done = loop
       .run(spec)
       .then(() => undefined)
-      .finally(() => {
+      .finally(async () => {
         this.runs.delete(input.run_id);
+        // Before releasing the store, so a stdio server never outlives the run that spawned it.
+        await mcp.close();
         void this.releaseStore(input.session_id);
       });
 
@@ -372,6 +404,26 @@ export function buildExtensions(): ExtensionRegistry {
   const registry = new ExtensionRegistry();
   for (const rule of bundledRules) registry.register(rule);
   return registry;
+}
+
+/** The base registry plus this run's MCP tools. A COPY, so nothing leaks into the next run. */
+function registryWith(extra: readonly ToolDefinition[]): ToolRegistry {
+  const registry = buildRegistry();
+  for (const tool of extra) registry.register(tool);
+  return registry;
+}
+
+/**
+ * A connect failure, classified for the record.
+ *
+ * Three kinds because three things need different remedies: the host never configured it, it is
+ * there but did not answer in time, or it answered with a refusal. Anything else is `failed` —
+ * a classification that says "we do not know why" beats inventing a reason.
+ */
+function classifyConnectorFailure(reason: string): "not_configured" | "timeout" | "failed" {
+  if (reason.includes("not configured")) return "not_configured";
+  if (reason.includes("did not respond")) return "timeout";
+  return "failed";
 }
 
 export function buildRegistry(): ToolRegistry {

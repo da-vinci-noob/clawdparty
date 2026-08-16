@@ -505,7 +505,11 @@ describe("PromptComposer capability selection", () => {
     expect(screen.queryByTestId("skills-toggle")).not.toBeInTheDocument();
   });
 
-  it("auto-enables all discovered connectors + skills on run start (no toggles)", async () => {
+  it("enables all skills but NO connectors by default", async () => {
+    // Connectors used to be auto-enabled, which was free while the harness ignored them. With a
+    // real MCP client it is not: measured on this host, all 8 servers declare 77 tools and
+    // ~37,500 tokens of schema, spent on every turn. So they are opt-in; skills are prompt text
+    // and stay automatic.
     discovery(
       [
         { name: "github", transport: "stdio" },
@@ -524,9 +528,80 @@ describe("PromptComposer capability selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => expect(cap.last()).not.toBeNull());
-    // All connectors enabled by name; all skills enabled; all tools stay on.
-    expect(cap.last()).toMatchObject({ connectors: ["github", "linear"], skills: "all" });
+    expect(cap.last()).toMatchObject({ skills: "all" });
+    expect(cap.last()).not.toHaveProperty("connectors");
     expect(cap.last()).not.toHaveProperty("disallowed_tools");
+  });
+
+  it("sends exactly the connectors that were toggled ON", async () => {
+    discovery(
+      [
+        { name: "github", transport: "stdio" },
+        { name: "linear", transport: "http" },
+      ],
+      [],
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.click(screen.getByTestId("skills-toggle"));
+    fireEvent.click(await screen.findByRole("button", { name: "Connectors" }));
+    fireEvent.click(await screen.findByTestId("cap-toggle-linear"));
+
+    // Visible without opening the panel, because it is a per-turn cost.
+    await waitFor(() => expect(screen.getByTestId("connectors-count")).toHaveTextContent("1 mcp"));
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()?.connectors).toEqual(["linear"]);
+  });
+
+  it("does not send connectors to a model that cannot use tools", async () => {
+    // Enabling one and then picking DeepSeek must not produce a run the harness refuses.
+    discovery([{ name: "github", transport: "stdio" }], []);
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          providers: [
+            {
+              ...providersResponse([], { id: "bedrock-converse", displayName: "Bedrock" })
+                .providers[0],
+              models: [
+                {
+                  id: "us.deepseek.r1-v1:0",
+                  displayName: "DeepSeek R1",
+                  capabilities: { ...MODEL_CAPS, toolUse: false, toolUseWhileStreaming: false },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.click(screen.getByTestId("skills-toggle"));
+    fireEvent.click(await screen.findByRole("button", { name: "Connectors" }));
+    fireEvent.click(await screen.findByTestId("cap-toggle-github"));
+    fireEvent.click(screen.getByTestId("skills-toggle"));
+
+    await waitFor(() => {
+      if (!screen.getByTestId("model").querySelector('option[value="us.deepseek.r1-v1:0"]')) {
+        throw new Error("not yet");
+      }
+    });
+    fireEvent.change(screen.getByTestId("model"), { target: { value: "us.deepseek.r1-v1:0" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).not.toHaveProperty("connectors");
+    expect(cap.last()?.disallowed_tools).toEqual([...BUILTIN_TOOL_IDS]);
   });
 
   it("omits the capability fields on run start when the host has none", async () => {

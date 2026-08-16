@@ -33,6 +33,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.1111.0",
     "@aws-sdk/credential-provider-ini": "^3.973.14",
     "@clawdparty/contracts": "file:../packages/contracts",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
     "fastify": "^5.9.0",
     "openai": "^7.4.0",

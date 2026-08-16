@@ -31,6 +31,27 @@ function isAnswerOnly(event: EventEnvelope): boolean {
   return BUILTIN_TOOL_IDS.every((tool) => disallowed.includes(tool));
 }
 
+/**
+ * Connectors the run enabled but could not load.
+ *
+ * Read from the event so a late joiner learns it too. Without this the participant who enabled a
+ * connector sees no tools from it and no reason — and the reason is knowable: the harness
+ * classified it (`not_configured` / `timeout` / `failed`) at run start.
+ */
+function failedConnectors(event: EventEnvelope): Array<{ name: string; kind: string }> {
+  if (event.type !== "run_started") {
+    return [];
+  }
+  const failed = (event.payload as { connectors_failed?: unknown }).connectors_failed;
+  return Array.isArray(failed) ? (failed as Array<{ name: string; kind: string }>) : [];
+}
+
+const FAILURE_TEXT: Record<string, string> = {
+  not_configured: "not configured on the host",
+  timeout: "did not respond",
+  failed: "failed to connect",
+};
+
 export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = ({
   event,
   names,
@@ -38,6 +59,7 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   const label = LABELS[event.type] ?? event.type;
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const answerOnly = isAnswerOnly(event);
+  const failed = failedConnectors(event);
   return (
     <div
       data-testid="feed-run-banner"
@@ -57,6 +79,16 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
             · no tools, answers only
           </span>
         )}
+        {failed.map((connector) => (
+          <span
+            key={connector.name}
+            data-testid={`run-connector-failed-${connector.name}`}
+            className="text-[#c9a227]"
+          >
+            {" "}
+            · {connector.name} {FAILURE_TEXT[connector.kind] ?? "unavailable"}
+          </span>
+        ))}
       </span>
     </div>
   );

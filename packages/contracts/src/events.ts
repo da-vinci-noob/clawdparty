@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 8 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 9 } as const;
 
 /**
  * The 30 frozen event type names. Adding or removing a name is a CONTRACT
@@ -204,6 +204,20 @@ export interface RunStartedPayload {
   disallowed_tools?: string[];
   connectors?: string[];
   skills?: string[];
+  /**
+   * Connectors the run SELECTED but could not use (additive since v1.9).
+   *
+   * A run enables MCP servers by name; one can be missing from host config, refuse a connection,
+   * or hang. The run continues without it — a broken server is not a broken run — but the
+   * participant who enabled it needs to know, and `connectors` above lists only what loaded, so
+   * absence alone is not an explanation.
+   *
+   * `kind` is a CLASSIFICATION, never the transport's own error text: a message we do not control
+   * could carry a URL with a token in it, and the connector listing already withholds every
+   * server's command/url/headers for the same reason. The full message goes to the harness's
+   * stderr, which is host-side and outside the record.
+   */
+  connectors_failed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
 }
 
 // --- Run capability selection (additive since v1.4) --------------------------

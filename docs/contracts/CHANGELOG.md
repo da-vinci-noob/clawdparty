@@ -233,6 +233,50 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.9.0] — the harness is an MCP client; `run_started` reports failed connectors (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 9 }`.** Additive `minor` bump: one new OPTIONAL field on
+`RunStartedPayload`.
+
+```ts
+connectors_failed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
+```
+
+**Why.** `connectors` was accepted, validated by Rails, forwarded to the harness, and dropped —
+`capabilities.ts` still held a resolver that turned selected names into SDK `mcpServers` and nothing
+called it — while the composer sent every discovered connector on every run and the popover showed
+the host's live server count. The room advertised capabilities no run had. The harness
+now IS the MCP client: it connects (stdio / streamable HTTP / SSE), calls `tools/list`, and registers
+each tool as `mcp__<server>__<tool>` in that run's own registry, so MCP tools go through the same
+`tool:before` gate, the same `tool_started`/`tool_finished` events, and the same `disallowed_tools`
+filter as the built-ins.
+
+Once connectors are real, failing to load one has to be **sayable**. `connectors` already carried the
+resolved list, so absence alone was the only signal — indistinguishable from "the server returned no
+tools". `connectors_failed` names the server and classifies why, and the run continues: a broken
+server is not a broken run.
+
+**`kind` is a classification, never the transport's error text.** A message from a server we do not
+control could carry a URL with a token in it, and the connector listing already withholds every
+server's command/url/headers for that reason. The raw message goes to the harness's stderr, which is
+host-side and outside the record. Verified live: `linear` on this host fails with
+`invalid_token`, the event records `{name: "linear", kind: "failed"}`, and the string `invalid_token`
+appears nowhere in the payload.
+
+**What consumers should do.** Render it — the participant who enabled a connector needs to know it
+did not load, and `run_started` is the only place a late joiner arriving by backfill can learn it.
+The three kinds map to three different remedies (configure it / retry / fix the server).
+
+**A behaviour change that is not a contract change, and matters more than the field.** Connectors are
+now **opt-in per run**, default OFF, with a toggle per server in the capabilities panel. Auto-enabling
+them was free while the harness ignored them; measured against this host's 8 servers it is not —
+**77 tools and ~150KB of schema, about 37,500 tokens, on every turn**, plus ~5s of connect time. One
+server (`drawio`) is 2 tools and 60KB by itself, so the cost does not track the tool count.
+
+**Recovery / migration.** Nothing stored changes. Runs recorded before this bump listed connectors in
+`run_started` that were never actually loaded; that is a historical claim the projection cannot
+repair, and the field's meaning is unchanged going forward (it lists what loaded).
+
 ## [1.8.0] — `toolUse` is a boolean, and `BUILTIN_TOOLS` ids are the harness's real tool names
 
 **`CONTRACT_VERSION = { major: 1, minor: 8 }`.** Two changes, both from the same finding, and the second is a

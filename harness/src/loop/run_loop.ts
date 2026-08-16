@@ -56,6 +56,10 @@ export interface RunSpec {
   surfaceFrom?: number;
   effort?: import("../providers/contract.js").EffortLevel;
   disallowedTools?: string[];
+  /** MCP servers whose tools this run actually loaded — echoed, so the room knows what it has. */
+  connectors?: string[];
+  /** Selected servers that did not load, CLASSIFIED (never the transport's own message). */
+  connectorsFailed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
   signal: AbortSignal;
 }
 
@@ -116,6 +120,8 @@ export class RunLoop {
           model: spec.model,
           cwd: spec.cwd,
           ...(spec.disallowedTools?.length ? { disallowed_tools: spec.disallowedTools } : {}),
+          ...(spec.connectors?.length ? { connectors: spec.connectors } : {}),
+          ...(spec.connectorsFailed?.length ? { connectors_failed: spec.connectorsFailed } : {}),
         },
         this.now(),
       ),

@@ -30,9 +30,10 @@ const tokensToK = (n: number): string =>
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const models = useModels();
-  // Capabilities have no per-item toggle: every host connector + installed skill is
-  // available to the run (all tools stay on). The composer sends that enablement on
-  // run start; these are the real discovered lists (for the badge + what to send).
+  // Tools and skills have no per-item toggle — every built-in tool and every installed skill is
+  // available. CONNECTORS do, and default to off: enabling one connects to that MCP server and
+  // declares every tool it advertises. These are the discovered lists (the badge + validation of
+  // what can be sent).
   const connectors = useConnectors(sessionId);
   const skills = useSkills(sessionId);
   const activeRunId = useEventStore(selectActiveRunId);
@@ -47,6 +48,10 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   // Set once the user chooses; the option list itself comes from runtime discovery.
   const [model, setModel] = useState("");
   const [skillOpen, setSkillOpen] = useState(false);
+  // Connectors are OPT-IN per run and default to none. Enabling one makes the harness connect to
+  // that MCP server and declare every tool it advertises, which on this host measured ~37,500
+  // tokens of schema across all 8 servers — a cost worth choosing rather than inheriting.
+  const [connectorNames, setConnectorNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +68,16 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   // Only an EXPLICIT false. An absent field is version skew, and reading it as "no tools" would
   // strip every tool from a model that has them.
   const toolLess = selected?.toolUse === false;
+
+  // Filtered against DISCOVERY, so a name that vanished from host config cannot be sent (Rails
+  // validates the same thing, and a stale selection would 422 the whole run start).
+  const enabledConnectors = connectorNames.filter((name) =>
+    connectors.some((c) => c.name === name),
+  );
+  const toggleConnector = (name: string): void =>
+    setConnectorNames((current) =>
+      current.includes(name) ? current.filter((n) => n !== name) : [...current, name],
+    );
 
   // One group per provider, in discovery order. `Map` rather than an object so the order the
   // harness reported is preserved — it is the host's preference order, not alphabetical.
@@ -96,10 +111,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         // a model that cannot act would otherwise narrate actions it never took. Skills are
         // prompt text, not tools, so they stay.
         ...(toolLess ? { disallowed_tools: BUILTIN_TOOL_IDS } : {}),
-        // Otherwise no per-item toggles: every discovered connector + skill is enabled
-        // (all tools stay on, so no disallowed_tools). Omitted when the host has none →
-        // today's behavior.
-        ...(!toolLess && connectors.length ? { connectors: connectors.map((c) => c.name) } : {}),
+        // Only the connectors the participant ENABLED, and never on a model that cannot use tools
+        // at all. Omitted when none are on, which is the default.
+        ...(!toolLess && enabledConnectors.length ? { connectors: enabledConnectors } : {}),
         ...(skills.length ? { skills: "all" as const } : {}),
       }),
     });
@@ -166,7 +180,12 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   return (
     <div className="relative z-[2] px-[18px] pb-4">
       {skillOpen && showModeControl && (
-        <SkillsPopover sessionId={sessionId} onClose={() => setSkillOpen(false)} />
+        <SkillsPopover
+          sessionId={sessionId}
+          onClose={() => setSkillOpen(false)}
+          enabledConnectors={enabledConnectors}
+          onToggleConnector={toggleConnector}
+        />
       )}
 
       <form
@@ -283,6 +302,16 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
               >
                 {skills.length}
               </span>
+              {/* Only when something is ON: a "0 connectors" badge is noise, while an enabled
+                  one is a cost the participant should see without opening the panel. */}
+              {enabledConnectors.length > 0 && (
+                <span
+                  data-testid="connectors-count"
+                  className="rounded-full bg-[#0a1826] px-[6px] py-px text-[10px] font-semibold text-[#7cd992]"
+                >
+                  {enabledConnectors.length} mcp
+                </span>
+              )}
             </button>
           )}
 

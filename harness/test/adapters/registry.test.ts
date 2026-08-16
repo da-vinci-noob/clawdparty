@@ -129,6 +129,19 @@ describe("no adapter id appears outside providers/", () => {
     expect(offenders.map((p) => p.slice(SRC.length))).toEqual([]);
   });
 
+  it("confines the MCP SDK to ONE file, the way the provider SDKs are confined", () => {
+    // Same rule, different vendor. One importer means one place a server is spawned, one
+    // place a transport is chosen, and one place to look when a server misbehaves — and it keeps
+    // MCP types out of `tools/` and `loop/`, which must not know that a tool came from a
+    // subprocess. Matched as an IMPORT so a comment naming the rule is not a breach of it.
+    const importers = sourceFiles(SRC)
+      .filter((path) => /from "@modelcontextprotocol\/sdk|import\(\s*"@modelcontextprotocol\/sdk/.test(read(path)))
+      .map((path) => path.slice(SRC.length))
+      .sort();
+
+    expect(importers).toEqual(["mcp/client.ts"]);
+  });
+
   it("confines each vendor SDK to ONE adapter file", () => {
     const providerFiles = sourceFiles(join(SRC, "providers"));
     const importers = (pattern: RegExp) =>

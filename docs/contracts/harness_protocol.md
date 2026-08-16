@@ -207,22 +207,28 @@ the realpath path rules, and human review.
 `POST /runs` additionally accepts three optional, additive fields, each defaulting to today's
 behavior when omitted:
 
-- **`disallowed_tools`** — built-in tool ids the user turned OFF. Because `allowed_tools` only
-  *pre-approves* (an omitted tool still falls through to the permission mode / `canUseTool`), the
-  **only true disable** is the SDK `disallowedTools` with a **bare** name, which removes the tool
-  from context and applies **even under `bypassPermissions`** (deny rules always win). The harness
-  maps `disallowed_tools` straight to `disallowedTools`.
-- **`connectors`** — host-configured MCP **server names** to enable. The harness resolves each name
-  against host-owned config (the session repo's `.mcp.json` + `~/.claude`) into an `mcpServers`
-  entry and appends `mcp__<name>__*` to `allowed_tools`. The client **never** supplies a server's
-  command/url/headers — only names; an unknown name is rejected by Rails (`422`).
-- **`skills`** — `"all"` or discovered skill names. When non-empty the harness sets
-  `settingSources: ["user", "project"]` + `skills` (which auto-adds the `Skill` tool). Note this
-  also loads other host-owned user/project settings; the harness's explicitly-built
-  `mcpServers`/`disallowedTools`/`allowed_tools` take precedence.
+- **`disallowed_tools`** — built-in tool ids the user turned OFF. An allow-list only *pre-approves*,
+  so the **only true disable** is dropping the declaration, which is what the harness does: the
+  registry withholds those tools from the request entirely. **Ids are the harness's own registry
+  names** (`read`, `bash`, `str_replace_based_edit_tool`) — see CHANGELOG 1.8.0, where they were the
+  Agent SDK's capitalized names that nothing answered to, making the whole field a no-op.
+- **`connectors`** — host-configured MCP **server names** to enable. The harness IS the MCP client
+  (CHANGELOG 1.9.0): it resolves each name against host-owned config (the session repo's `.mcp.json`
+  + `~/.claude.json`), connects (stdio / streamable HTTP / SSE), calls `tools/list`, and registers
+  each tool as `mcp__<server>__<tool>` in that RUN's registry — so MCP tools flow through the same
+  `tool:before` gate, `tool_started`/`tool_finished` events, and `disallowed_tools` filter as the
+  built-ins. The client **never** supplies a server's command/url/headers — only names; an unknown
+  name is rejected by Rails (`422`) and, if it reaches the harness, reported as `not_configured`.
+  A server that fails or hangs (bounded at 10s) does **not** fail the run.
+- **`skills`** — `"all"` or discovered skill names. **Currently accepted and NOT applied** — see
+  below. The SDK's `settingSources` mechanism is gone with the SDK, and the harness does not yet
+  compose skill content into the system prompt.
 
 The `run_started` event echoes the **resolved** `disallowed_tools` / `connectors` / `skills`
-(additive optional payload fields, `CONTRACT_VERSION` 1.4) so the UI reflects a run's real scope.
+(additive optional payload fields, `CONTRACT_VERSION` 1.4) so the UI reflects a run's real scope,
+plus **`connectors_failed`** (`1.9`) — the selected servers that did not load, each with a
+CLASSIFICATION (`not_configured` / `timeout` / `failed`) rather than the transport's own message,
+which could carry a URL with a token in it. `connectors` lists only what actually loaded.
 
 ### Discovery (read-only, `cwd`-scoped)
 
