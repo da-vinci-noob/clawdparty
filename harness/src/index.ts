@@ -247,6 +247,20 @@ postgres stay containerized. See docs/contracts/harness_protocol.md.
 
   const app0 = Fastify({ logger: true });
   const { supervisor, transport } = buildSupervisor(config, app0.log);
+
+  // RECOVER BEFORE SERVING. Rails reconciles against GET /runs at boot
+  // and treats an empty answer as "nothing active", so answering before recovery would
+  // have it fail the very runs about to be recovered.
+  const recovered = await supervisor.recoverAll();
+  for (const { sessionId, outcome } of recovered) {
+    app0.log.info(
+      { sessionId, from: outcome.fromPhase, action: outcome.action, uncertain: outcome.uncertain },
+      outcome.uncertain
+        ? "recovered a run with an UNKNOWN outcome (request in flight at crash)"
+        : "recovered a run",
+    );
+  }
+
   const app = buildServer(supervisor, config);
 
   const heartbeat = startHeartbeat(config, app.log, supervisor);

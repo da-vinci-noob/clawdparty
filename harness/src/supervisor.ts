@@ -1,9 +1,11 @@
+import { readdir } from "node:fs/promises";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { ExtensionRegistry } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
 import { AnthropicDirectAdapter } from "./providers/anthropic_direct.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
+import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
 import { openStore } from "./store/store.js";
 import type { HarnessStoreApi } from "./store/types.js";
 import { BashTool } from "./tools/bash.js";
@@ -234,6 +236,44 @@ export class Supervisor {
     return opened.store;
   }
 
+  /**
+   * BOOT RECOVERY. Scan every session store and recover each run that
+   * still holds a live `run.position`, BEFORE the server starts serving.
+   *
+   * Ordering is the point. Rails reconciles against `GET /runs` at boot  and an
+   * unreachable-or-empty answer reconciles nothing, so serving first would let Rails
+   * see zero active runs and fail runs the harness was about to recover.
+   *
+   * A store held by another live harness is SKIPPED, not forced: the lock means someone
+   * else owns that record, and stealing it would give one run two writers.
+   */
+  async recoverAll(): Promise<Array<{ sessionId: string; outcome: RecoveryOutcome }>> {
+    const results: Array<{ sessionId: string; outcome: RecoveryOutcome }> = [];
+    for (const sessionId of await listSessionIds(this.opts.storeDir)) {
+      let store: HarnessStoreApi;
+      try {
+        store = await this.storeFor(sessionId);
+      } catch {
+        // Locked or corrupt. Reported by the caller's log, never fatal — one bad store
+        // must not stop the rest of the sessions from recovering.
+        continue;
+      }
+      try {
+        for (const outcome of await recoverSession(store, { now: () => Date.now() })) {
+          // recovery.ts does not know the session; stamp it so the envelope is routable.
+          this.ship(
+            outcome.events.map((event) => ({ ...event, session_id: sessionId })),
+            store,
+          );
+          results.push({ sessionId, outcome });
+        }
+      } finally {
+        await this.releaseStore(sessionId);
+      }
+    }
+    return results;
+  }
+
   /** Close only when the LAST lane in the session is done. */
   private async releaseStore(sessionId: string): Promise<void> {
     const entry = this.stores.get(sessionId);
@@ -295,4 +335,20 @@ export function buildRegistry(): ToolRegistry {
     .register(grep.definition);
   for (const tool of web.definitions) registry.register(tool);
   return registry;
+}
+
+/**
+ * Session ids from the store directory. Stores are `session-<id>.sqlite3`, so the
+ * filesystem IS the session index — there is no registry to fall out of sync with it.
+ * A missing directory means a first-ever boot, not an error.
+ */
+async function listSessionIds(dir: string): Promise<string[]> {
+  try {
+    const names = await readdir(dir);
+    return names
+      .filter((name) => name.startsWith("session-") && name.endsWith(".sqlite3"))
+      .map((name) => name.slice("session-".length, -".sqlite3".length));
+  } catch {
+    return [];
+  }
 }

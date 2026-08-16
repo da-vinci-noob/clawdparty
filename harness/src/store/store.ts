@@ -381,8 +381,26 @@ class HarnessStore implements HarnessStoreApi {
     };
   }
 
+  /**
+   * A CLEAN close RELEASES the session lock. This writer is voluntarily giving up the
+   * record, so leaving the lock behind made a graceful restart wait out the 15s
+   * staleness window before it could reopen its own store — and during that window boot
+   * recovery skips every session while every run start fails "store unavailable".
+   *
+   * Crash detection is unaffected, and this is what sharpens it: a CRASH leaves the lock
+   * (there was no close), so staleness now means "the writer died" rather than "the
+   * writer died OR shut down recently".
+   */
   async close(): Promise<void> {
     if (this.closed) return;
+    try {
+      this.db
+        .prepare("DELETE FROM registers WHERE namespace = 'session.lock' AND key = 'session'")
+        .run();
+    } catch {
+      // A failed release must not stop the close: the lock ages out either way, and a
+      // half-closed store with a live handle is worse than a stale lock.
+    }
     this.closed = true;
     this.db.close();
   }

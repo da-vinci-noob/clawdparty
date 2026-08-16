@@ -514,6 +514,41 @@ describe("one writer per session (session.lock)", () => {
   });
 });
 
+describe("the session lock and a CLEAN close", () => {
+  it("releases the lock on close, so a restart can reopen its own store", async () => {
+    // Its OWN directory: the shared fixture already holds the lock, which would make
+    // this pass or fail for the wrong reason.
+    const own = mkdtempSync(join(tmpdir(), "harness-lock-"));
+    const first = await openStore(SESSION, { dir: own });
+    if (!first.ok) throw new Error(`first open failed: ${first.reason}`);
+    await first.store.close();
+
+    const second = await openStore(SESSION, { dir: own });
+
+    // A clean close means this writer VOLUNTARILY gave up the record, so the lock must
+    // go with it. Leaving it behind made a graceful restart wait out the 15s staleness
+    // window before it could reopen — during which boot recovery skips every session
+    // and every run start fails "store unavailable". Crash detection is unaffected: a
+    // CRASH leaves the lock, and staleness is what reclaims that.
+    expect(second.ok, `reopen after clean close: ${second.ok ? "ok" : second.reason}`).toBe(true);
+    if (second.ok) await second.store.close();
+  });
+
+  it("still refuses a store held by a LIVE writer", async () => {
+    const own = mkdtempSync(join(tmpdir(), "harness-lock-"));
+    const first = await openStore(SESSION, { dir: own });
+    if (!first.ok) throw new Error(`first open failed: ${first.reason}`);
+
+    const second = await openStore(SESSION, { dir: own });
+
+    // The release must be tied to close, not to opening — otherwise two live harnesses
+    // would both write the same record.
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toBe("locked");
+    await first.store.close();
+  });
+});
+
 describe("surface and projection reads", () => {
   it("surfaceFrom returns only on-surface entries, in order", () => {
     store.commit(
