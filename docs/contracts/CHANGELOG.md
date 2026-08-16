@@ -207,6 +207,32 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [ephemeral-ordering] — delivery order and settled-block terminality (clarifying)
+
+**No version bump: no type, field, or endpoint changed.** This records two obligations that were
+always implied by "ephemeral events carry no cursor" and were being violated by all three
+streams, so they are now stated in [`events.md §6`](./events.md) rather than left to inference.
+
+1. **The producer delivers ephemerals single-file.** They have no `seq` and no `id`, so a
+   consumer concatenates them in ARRIVAL order — order therefore has to be a property of
+   delivery. The harness sent one unawaited POST per delta, and under ordinary latency variance
+   a sentence arrived with its words permuted ("The so add a contributions section" as "a
+   section so contributions add The"). It now coalesces into ~150ms batches per
+   `(type, session_id, ai_run_id, block)` and keeps one request in flight. Only the accumulating
+   types may be merged; `presence_changed` and `context_usage` are whole values.
+
+2. **Settling a block is terminal for its deltas.** Ephemeral and durable events travel over two
+   independent channels, so `ai_text` routinely lands before the tail of its own delta stream
+   (observed in production). A consumer that re-creates the live accumulator on a late delta
+   renders the block twice — once settled, once as a fragment. Consumers must DROP deltas for a
+   settled block, not merely clear the accumulator when it settles.
+
+Also fixed alongside, in the harness rather than the contract: deltas were accumulated and
+emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information than the
+`ai_text` beside it and 's two-tier streaming delivered nothing incremental. Deltas now
+leave as they are produced. Neither of these was detectable by reading the contract — both were
+found by generating a real run and reading what arrived.
+
 ## [1.5.0] — harness event taxonomy (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 5 }`.** Additive `minor` bump

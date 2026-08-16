@@ -203,7 +203,10 @@ export function startHeartbeat(
 // this only concerns the projection channel.
 export async function flushWithTimeout(transport: Transport, timeoutMs: number): Promise<void> {
   await Promise.race([
-    transport.flush(),
+    // The ephemeral queue holds up to one coalescing window of streamed text. On a SIGTERM
+    // mid-turn no `ai_text` block-stop will ever follow it, so this drain is the only thing
+    // that gets the last partial sentence to the room.
+    Promise.all([transport.flush(), transport.flushEphemeral()]),
     new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
   ]);
 }

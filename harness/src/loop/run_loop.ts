@@ -229,12 +229,11 @@ export class RunLoop {
 
       // ── settlement ──────────────────────────────────────────────────────────
       const action = decide(stopReason, resumeAttempt);
-      // DURABLE events only. `turn.events` interleaves the deltas, which are broadcast and
-      // never persisted (events.md, two-tier streaming) — they carry no seq, so storing one
-      // also puts a row in the log that no client can order.
-      const durable = turn.events.filter((event) => !normalizer.isEphemeral(event.type));
-      const carrier = blockCarrier(durable);
-      const assistantWrites = durable.map((event, index) =>
+      // `streamTurn` already withheld the deltas (broadcast live, never persisted — they
+      // carry no seq, so a stored row would sit in the log with nothing to order it by), so
+      // everything here is durable and every entry is a write.
+      const carrier = blockCarrier(turn.durableEvents);
+      const assistantWrites = turn.durableEvents.map((event, index) =>
         this.entryFor(event, index === carrier ? turn.blocks : null),
       );
 
@@ -256,7 +255,7 @@ export class RunLoop {
           ],
           planned,
         );
-        emit(turn.events);
+        emit(turn.durableEvents);
 
         await this.dispatchTools(spec, normalizer, planned, turn.toolCalls);
         resumeAttempt = 0;
@@ -272,7 +271,7 @@ export class RunLoop {
         ],
         { phase: "checkpoint" },
       );
-      emit(turn.events);
+      emit(turn.durableEvents);
 
       if (action.kind === "resume") {
         resumeAttempt = action.attempt;
@@ -338,7 +337,12 @@ export class RunLoop {
     normalizer: LoopNormalizer,
     capabilities: { contextWindow: number },
   ): Promise<{
-    events: EventEnvelope[];
+    /**
+     * The turn's DURABLE events only. Ephemeral deltas are emitted as they stream (that is
+     * what makes streaming live) and are deliberately absent here, so the turn-boundary
+     * emit cannot send them a second time.
+     */
+    durableEvents: EventEnvelope[];
     blocks: unknown[];
     toolCalls: Array<{ id: string; name: string; input: unknown }>;
     usage: Usage;
@@ -353,7 +357,7 @@ export class RunLoop {
     stopReason: StopReason | null;
     error?: { event: EventEnvelope; stopReason: string };
   }> {
-    const events: EventEnvelope[] = [];
+    const durableEvents: EventEnvelope[] = [];
     const blocks: unknown[] = [];
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
     let usage = zeroUsage();
@@ -380,12 +384,21 @@ export class RunLoop {
           // Ephemeral, so it costs no seq — the durable figure is on the ledger.
           this.deps.emit([normalizer.contextUsage(usage, capabilities.contextWindow, this.now())]);
         }
-        events.push(...normalizer.map(event, this.now()));
+        for (const mapped of normalizer.map(event, this.now())) {
+          // Deltas go out NOW. This is the only thing that makes streaming live: everything
+          // else settles at the turn boundary, and a delta that waits for it tells the room
+          // nothing the durable `ai_text` beside it would not.
+          //
+          // They must NOT also enter `durableEvents`, which the boundary emits — the client
+          // accumulates deltas, so a second copy doubles the paragraph rather than deduping.
+          if (normalizer.isEphemeral(mapped.type)) this.deps.emit([mapped]);
+          else durableEvents.push(mapped);
+        }
       }
     } catch (err) {
       const classified = classifyStreamError(err);
       return {
-        events,
+        durableEvents,
         blocks,
         toolCalls,
         usage,
@@ -401,7 +414,7 @@ export class RunLoop {
       };
     }
 
-    return { events, blocks, toolCalls, usage, usageReported, stopReason };
+    return { durableEvents, blocks, toolCalls, usage, usageReported, stopReason };
   }
 
   /**

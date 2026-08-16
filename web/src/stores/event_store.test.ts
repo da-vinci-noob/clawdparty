@@ -102,6 +102,69 @@ describe("event_store", () => {
     expect(selectDurableEvents(state).length).toBe(2); // rendered once, from the durable log
   });
 
+  // Deltas and durable events travel over two INDEPENDENT channels: deltas are coalesced
+  // into a ~150ms window in the harness while durable batches POST immediately, so an
+  // `ai_text` routinely lands before the tail of its own delta stream. Without this guard
+  // the late delta re-creates the accumulator for a block that already settled, and
+  // `activity_feed.tsx` renders every accumulator — the paragraph appears TWICE, once
+  // settled and once as a partial fragment below it. No transport ordering can fix this;
+  // the two channels are independent by design, so the client has to be the one that knows.
+  describe("a delta that arrives after its block settled", () => {
+    const settled = (type: string, block: string, id: number): EventEnvelope => ({
+      id,
+      session_id: "s",
+      ai_run_id: "run_1",
+      seq: id,
+      type: type as EventEnvelope["type"],
+      actor: { kind: "claude" },
+      ts: "2026-06-28T20:11:01.000Z",
+      payload: { block, text: "the whole settled paragraph" },
+    });
+
+    it("is dropped rather than re-creating the live block", () => {
+      const store = useEventStore.getState();
+      store.apply(delta("run_1", "m:1", "the whole settled "));
+      store.apply(settled("ai_text", "m:1", 1));
+      store.apply(delta("run_1", "m:1", "paragraph"));
+
+      const state = useEventStore.getState();
+      expect(state.textByBlock.has("run_1::m:1")).toBe(false);
+      expect(selectDurableEvents(state).length).toBe(1);
+    });
+
+    it("is dropped for thinking blocks too", () => {
+      const store = useEventStore.getState();
+      store.apply(settled("ai_thinking", "m:0", 1));
+      store.apply({ ...delta("run_1", "m:0", "late reasoning"), type: "ai_thinking_delta" });
+
+      expect(useEventStore.getState().thinkingByBlock.has("run_1::m:0")).toBe(false);
+    });
+
+    it("does not block a DIFFERENT block on the same run", () => {
+      const store = useEventStore.getState();
+      store.apply(settled("ai_text", "m:1", 1));
+      store.apply(delta("run_1", "m:2", "the next paragraph, still streaming"));
+
+      // Settling one block must not stop the block that starts right after it — a turn
+      // emits several, and the next one is live the moment the previous settles.
+      expect(useEventStore.getState().textByBlock.get("run_1::m:2")).toBe(
+        "the next paragraph, still streaming",
+      );
+    });
+
+    it("does not leak settled keys across runs", () => {
+      const store = useEventStore.getState();
+      store.apply(settled("ai_text", "m:1", 1));
+      store.apply({ ...delta("run_2", "m:1", "different run, same block name") });
+
+      // Block keys are per-message-uuid in production, but nothing in the envelope
+      // guarantees a fresh run cannot reuse one.
+      expect(useEventStore.getState().textByBlock.get("run_2::m:1")).toBe(
+        "different run, same block name",
+      );
+    });
+  });
+
   it("sweeps a run's live blocks on a terminal run event (safety net)", () => {
     const store = useEventStore.getState();
     store.apply(delta("run_1", "m:1", "partial"));

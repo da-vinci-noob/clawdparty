@@ -120,7 +120,8 @@ describe("ephemeral fire-and-forget", () => {
       logger: noopLogger,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
-    await t.deliverEphemeral(ephemeral());
+    void t.deliverEphemeral(ephemeral());
+    await t.flushEphemeral();
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(t.bufferLength).toBe(0); // never buffered even though the POST failed
   });

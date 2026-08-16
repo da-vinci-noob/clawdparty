@@ -23,31 +23,49 @@ interface PresencePayload {
   online?: boolean;
 }
 
+type LiveFields = Pick<EventStoreState, "textByBlock" | "thinkingByBlock" | "settledBlocks">;
+
 // When a durable block settles (ai_text/ai_thinking), drop its live accumulator so
-// the block is not rendered twice (live + durable). On a terminal run event, sweep
-// every live block for that run as a safety net (in case a block event was missed).
-function reconcileLive(
-  state: EventStoreState,
-  event: EventEnvelope,
-): Partial<Pick<EventStoreState, "textByBlock" | "thinkingByBlock">> {
+// the block is not rendered twice (live + durable), and REMEMBER that it settled so a
+// late delta cannot re-create it. Deltas and durable events travel over two independent
+// channels — deltas are coalesced into a ~150ms window in the harness while durable
+// batches POST immediately — so `ai_text` routinely lands before the tail of its own
+// delta stream. Deleting the accumulator without remembering left the late delta free to
+// rebuild it, and `activity_feed.tsx` renders every accumulator: the paragraph appeared
+// twice, once settled and once as a fragment below it.
+//
+// On a terminal run event, sweep every live block for that run as a safety net (in case
+// a block event was missed) and forget its settled keys, which is what bounds the set.
+function reconcileLive(state: EventStoreState, event: EventEnvelope): Partial<LiveFields> {
   if (event.type === "ai_text" || event.type === "ai_thinking") {
     const key = deltaKey(event.ai_run_id, (event.payload as DeltaPayload).block ?? "");
     const field = event.type === "ai_text" ? "textByBlock" : "thinkingByBlock";
+    const settledBlocks = new Set(state.settledBlocks).add(settledKey(field, key));
     if (!state[field].has(key)) {
-      return {};
+      return { settledBlocks };
     }
     const next = new Map(state[field]);
     next.delete(key);
-    return { [field]: next };
+    return { [field]: next, settledBlocks };
   }
   if (TERMINAL_RUN_TYPES.has(event.type) && event.ai_run_id) {
     const prefix = `${event.ai_run_id}::`;
     return {
       textByBlock: withoutPrefix(state.textByBlock, prefix),
       thinkingByBlock: withoutPrefix(state.thinkingByBlock, prefix),
+      settledBlocks: new Set(
+        [...state.settledBlocks].filter(
+          (key) => !key.slice(key.indexOf(":") + 1).startsWith(prefix),
+        ),
+      ),
     };
   }
   return {};
+}
+
+/** Namespaced so a text block and a thinking block of the same name settle independently. */
+function settledKey(field: "textByBlock" | "thinkingByBlock", key: string): string {
+  return `${field === "textByBlock" ? "t" : "k"}:${key}`;
 }
 
 function withoutPrefix(map: Map<string, string>, prefix: string): Map<string, string> {
@@ -71,6 +89,9 @@ export interface EventStoreState {
   textByBlock: Map<string, string>;
   // In-progress streamed thinking, keyed by (ai_run_id, block).
   thinkingByBlock: Map<string, string>;
+  // Blocks whose durable ai_text/ai_thinking has already been applied — deltas for these
+  // are ignored. Cleared per run on its terminal event.
+  settledBlocks: Set<string>;
   // Presence, last-writer-wins per participant id.
   presenceByParticipant: Map<string, boolean>;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
@@ -86,6 +107,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   seenIds: new Set(),
   textByBlock: new Map(),
   thinkingByBlock: new Map(),
+  settledBlocks: new Set(),
   presenceByParticipant: new Map(),
   maxAppliedId: 0,
 
@@ -96,6 +118,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         const payload = (event.payload ?? {}) as DeltaPayload;
         const key = deltaKey(event.ai_run_id, payload.block ?? "");
         const field = event.type === "ai_text_delta" ? "textByBlock" : "thinkingByBlock";
+        if (get().settledBlocks.has(settledKey(field, key))) {
+          return;
+        }
         const next = new Map(get()[field]);
         next.set(key, (next.get(key) ?? "") + (payload.text ?? ""));
         set({ [field]: next } as Pick<EventStoreState, "textByBlock" | "thinkingByBlock">);
@@ -145,6 +170,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       seenIds: new Set(),
       textByBlock: new Map(),
       thinkingByBlock: new Map(),
+      settledBlocks: new Set(),
       presenceByParticipant: new Map(),
       maxAppliedId: 0,
     }),

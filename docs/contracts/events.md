@@ -118,6 +118,22 @@ independent places must agree on it: the harness (what to broadcast without a `s
 type missing from the Rails list is **persisted and handed a durable `id`**, silently violating the
 rule below. Do not re-declare the list in a fourth place; import it.
 
+**Because ephemerals carry no cursor, ORDER IS A PROPERTY OF DELIVERY.** A client cannot sort
+what has no sort key, so it concatenates deltas in arrival order and the two obligations below
+are not optional:
+
+- **The harness sends ephemerals single-file** — coalesced into ~150ms batches per
+  `(type, session_id, ai_run_id, block)` and one request in flight at a time
+  (`harness/src/transport.ts`). One unawaited POST per delta reordered the words of a sentence
+  under ordinary latency variance. Only the accumulating types (`ai_text_delta`,
+  `ai_thinking_delta`) may be merged: `presence_changed` and `context_usage` are whole values
+  where the newest reading is the truth.
+- **A client MUST drop a delta for a block that already settled.** Ephemeral and durable events
+  travel over two independent channels, so `ai_text` routinely arrives before the tail of its own
+  delta stream. A client that re-creates the live accumulator on a late delta renders the block
+  twice — once settled, once as a fragment. Settling a block is therefore terminal for its
+  deltas, not merely a signal to clear the accumulator.
+
 **Ephemeral ≠ unordered, and ephemeral never consumes `seq`:**
 
 - `ai_text_delta` is **run-scoped & ephemeral** — carries its `ai_run_id`, but a **null `seq`**

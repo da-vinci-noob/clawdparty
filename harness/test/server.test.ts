@@ -408,6 +408,7 @@ describe("SIGTERM flush is bounded", () => {
   it("returns within the timeout even if the flush hangs", async () => {
     const transport = {
       flush: () => new Promise<never>(() => {}),
+      flushEphemeral: () => new Promise<never>(() => {}),
     } as unknown as Transport;
 
     const started = Date.now();
