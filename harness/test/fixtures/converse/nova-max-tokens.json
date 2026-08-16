@@ -1,0 +1,126 @@
+{
+  "provenance": {
+    "model_id": "us.amazon.nova-lite-v1:0",
+    "region": "us-west-2",
+    "captured_at": "2026-08-16T17:47:06.383Z",
+    "scenario": "nova-max-tokens",
+    "note": "Captured live via ConverseStreamCommand. Text content varies per capture; the event vocabulary and ordering are what tests assert."
+  },
+  "events": [
+    {
+      "messageStart": {
+        "role": "assistant"
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "The"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " sea"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " is"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " a vast and"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " mysterious"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " body"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " of saltwater"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " that covers"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " more"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " than 70%"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " of the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "messageStop": {
+        "stopReason": "max_tokens"
+      }
+    },
+    {
+      "metadata": {
+        "usage": {
+          "inputTokens": 8,
+          "outputTokens": 20,
+          "totalTokens": 28
+        },
+        "metrics": {
+          "latencyMs": 483
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,382 @@
+{
+  "provenance": {
+    "model_id": "us.amazon.nova-lite-v1:0",
+    "region": "us-west-2",
+    "captured_at": "2026-08-16T17:47:04.925Z",
+    "scenario": "nova-text",
+    "note": "Captured live via ConverseStreamCommand. Text content varies per capture; the event vocabulary and ordering are what tests assert."
+  },
+  "events": [
+    {
+      "messageStart": {
+        "role": "assistant"
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "Red"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ", blue, yellow"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ". \n\n"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "Primary"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " colors are the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " base colors"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " from"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " which all"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " other colors can be created."
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " In the traditional"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " color wheel"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " used"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " in art"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " and"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " design, the primary colors are"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " red, blue, and yellow"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ". When"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " mixed"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " in"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " equal"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " proportions, these"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " colors"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " can create"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " secondary"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " colors such"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " as green"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ", orange, and purple"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ". Primary"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " colors are"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " a"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " fundamental aspect"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " of color"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " theory and"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " are"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " used"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " in a"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " variety"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " of applications"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ", including painting"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ", printing, and digital"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " media"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " design"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "."
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "messageStop": {
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "metadata": {
+        "usage": {
+          "inputTokens": 8,
+          "outputTokens": 94,
+          "totalTokens": 102
+        },
+        "metrics": {
+          "latencyMs": 849
+        }
+      }
+    }
+  ]
+}
