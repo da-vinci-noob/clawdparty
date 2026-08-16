@@ -115,7 +115,8 @@ module Runs
       run = create_run!
       status = post_to_harness(run, cwd, resume)
       Result.new(ai_run: run, harness_status: status)
-    rescue Harness::Client::ActiveRunConflict, Harness::Client::TransportError
+    rescue Harness::Client::ActiveRunConflict, Harness::Client::TransportError,
+           Harness::Client::Refused
       run&.destroy
       raise
     end
@@ -130,6 +131,8 @@ module Runs
       )
     end
 
+    # `start_run` raises on anything but 202 (Harness::Client), so reaching the next line
+    # means the harness accepted it.
     def post_to_harness(run, cwd, resume)
       @client.start_run(base_payload(run, cwd, resume).merge(optional_payload)).status
     end

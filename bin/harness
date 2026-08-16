@@ -2,6 +2,8 @@
 # bin/harness — manage the host harness process.
 #
 #   bin/harness start|stop|restart|status|logs|foreground
+#   bin/harness sessions                 — list session stores and their schema versions
+#   bin/harness reset-session <id>       — move a REFUSED store aside so the session can run
 #
 # The harness is deliberately NOT a container: it needs the host filesystem, the
 # host toolchain (mise/asdf shims), the SSH agent, and credential locations a
@@ -160,6 +162,72 @@ cmd_status() {
   echo "harness: OK (pid ${pid}) ${HARNESS_BIND_HOST}:${HARNESS_PORT} ${body}"
 }
 
+# Session stores and their schema versions.
+#
+# Exists because a version mismatch is otherwise invisible until a run fails: the harness
+# refuses an incompatible store (invariant 11 — refusal, never migration, because misreading
+# an older layout is how a record silently lies), and before this there was no way to see
+# which stores were refusable short of opening each file in sqlite3.
+cmd_sessions() {
+  local dir="${HARNESS_STORE_DIR:-${state_dir}/sessions}"
+  local expected
+  expected="$(grep -oE 'STORE_SCHEMA_VERSION = [0-9]+' harness/src/store/types.ts | grep -oE '[0-9]+')"
+  echo "store dir: ${dir}"
+  echo "harness expects schema_version ${expected}"
+
+  if ! compgen -G "${dir}/session-*.sqlite3" >/dev/null 2>&1; then
+    echo "(no session stores)"
+    return
+  fi
+
+  local file id version note
+  for file in "${dir}"/session-*.sqlite3; do
+    id="$(basename "${file}" .sqlite3)"
+    id="${id#session-}"
+    version="$(sqlite3 "${file}" "select value from meta where key='schema_version';" 2>/dev/null || echo "?")"
+    if [[ "${version}" == "${expected}" ]]; then
+      note="ok"
+    else
+      note="REFUSED — run: bin/harness reset-session ${id}"
+    fi
+    printf 'session %-6s schema_version %-3s %s\n' "${id}" "${version:-?}" "${note}"
+  done
+}
+
+# Move a refused store aside. NOT a migration, and not a silent delete.
+#
+# The store cannot be migrated by design, so the only recovery is to discard it — but it is
+# the session's record, so it is MOVED and the move is reported. Postgres `events` keeps the
+# projection, so the feed's history survives; what is lost is the model conversation the
+# session could otherwise resume.
+cmd_reset_session() {
+  local id="${1:-}"
+  [[ -n "${id}" ]] || { echo "usage: bin/harness reset-session <session-id>" >&2; exit 64; }
+
+  local dir="${HARNESS_STORE_DIR:-${state_dir}/sessions}"
+  local file="${dir}/session-${id}.sqlite3"
+  [[ -f "${file}" ]] || { echo "no store for session ${id} at ${file}" >&2; exit 1; }
+
+  local version entries
+  version="$(sqlite3 "${file}" "select value from meta where key='schema_version';" 2>/dev/null || echo "?")"
+  entries="$(sqlite3 "${file}" "select count(*) from entries;" 2>/dev/null || echo "?")"
+
+  local stamp dest
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dest="${file}.refused-v${version}-${stamp}"
+  # The -wal/-shm siblings go too, or a reopen reads a journal belonging to a file that is
+  # no longer there.
+  mv "${file}" "${dest}"
+  for sidecar in "${file}-wal" "${file}-shm"; do
+    [[ -f "${sidecar}" ]] && mv "${sidecar}" "${dest}$(basename "${sidecar}" | sed "s|.*sqlite3||")"
+  done
+
+  echo "moved aside: ${dest}"
+  echo "discarded ${entries} harness entries at schema_version ${version}; the session will"
+  echo "start a fresh store on its next run. Postgres events keeps the projection, so the"
+  echo "feed's history survives — the session cannot resume its model conversation."
+}
+
 case "${1:-}" in
   start) cmd_start ;;
   stop) cmd_stop ;;
@@ -168,6 +236,11 @@ case "${1:-}" in
     cmd_start
     ;;
   status) cmd_status ;;
+  sessions) cmd_sessions ;;
+  reset-session)
+    shift
+    cmd_reset_session "${1:-}"
+    ;;
   logs)
     shift
     exec tail "${@:--f}" "${log_file}"
@@ -180,7 +253,7 @@ case "${1:-}" in
     exec "$(resolve_node)" --import tsx src/index.ts
     ;;
   *)
-    echo "usage: bin/harness {start|stop|restart|status|logs|foreground}" >&2
+    echo "usage: bin/harness {start|stop|restart|status|logs|foreground|sessions|reset-session <id>}" >&2
     exit 64
     ;;
 esac

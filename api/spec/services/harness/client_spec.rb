@@ -3,6 +3,46 @@
 require 'rails_helper'
 
 RSpec.describe(Harness::Client) do
+  describe 'POST /runs refuses a non-2xx' do
+    def client_returning(status, body)
+      described_class.new(
+        base_url: 'http://harness.test',
+        shared_secret: 's',
+        http: ->(_uri, _json) { instance_double(Net::HTTPResponse, code: status.to_s, body: body.to_json) }
+      )
+    end
+
+    it 'raises Refused carrying the harness reason on a 500' do
+      client = client_returning(500, { 'message' => 'store unavailable for session 35: incompatible_version' })
+
+      # The reason is the only actionable part. A bare "the harness returned 500" sends an
+      # operator looking at the network instead of at a store schema.
+      expect { client.start_run({}) }
+        .to(raise_error(described_class::Refused, /incompatible_version/))
+    end
+
+    it 'falls back to naming the status when the body carries no reason' do
+      client = client_returning(503, {})
+
+      expect { client.start_run({}) }.to(raise_error(described_class::Refused, /returned 503/))
+    end
+
+    it 'still maps 409 to ActiveRunConflict, which is not a refusal' do
+      client = client_returning(409, { 'error' => 'run_active' })
+
+      # A conflict is a normal, expected state with its own response; collapsing it into
+      # Refused would turn a 409 into a 422 and lose the retry semantics.
+      expect { client.start_run({}) }.to(raise_error(described_class::ActiveRunConflict))
+    end
+
+    it 'ACCEPTS any 2xx, not only 202' do
+      # Treating a 200 as refusal would destroy an AiRun for a run the harness had actually
+      # started — an orphan on the harness side and a session that looks idle.
+      expect(client_returning(200, {}).start_run({}).status).to(eq(200))
+      expect(client_returning(202, {}).start_run({}).status).to(eq(202))
+    end
+  end
+
   # Injectable HTTP: capture (uri, json) and return a canned Net::HTTP-like response.
   def fake_http(status, body = '{}')
     calls = []

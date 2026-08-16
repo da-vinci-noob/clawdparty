@@ -167,6 +167,96 @@ describe("PromptComposer permission modes", () => {
     expect(cap.last()).toMatchObject({ model: "us.anthropic.claude-opus-4-8" });
   });
 
+  it("sends the PROVIDER that listed the chosen model, not just the model id", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          providers: [
+            providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]).providers[0],
+            providersResponse([{ id: "anthropic.claude-opus-5", label: "Opus 5 (Bedrock)" }], {
+              id: "anthropic-bedrock",
+              displayName: "Amazon Bedrock",
+              credentialSource: "env:AWS_PROFILE",
+            }).providers[0],
+          ],
+        }),
+      ),
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("model").querySelectorAll("option")).toHaveLength(3),
+    );
+    fireEvent.change(screen.getByTestId("model"), {
+      target: { value: "anthropic.claude-opus-5" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Message the room/), {
+      target: { value: "go" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    // A model id only means something relative to the provider that listed it. Without this
+    // the server fell back to `anthropic-direct`, which REJECTS a Bedrock inference-profile
+    // id — so picking a Bedrock model produced a run that died at dispatch.
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).toMatchObject({
+      model: "anthropic.claude-opus-5",
+      provider: "anthropic-bedrock",
+    });
+  });
+
+  it("sends NO provider when no model is chosen, leaving the server to resolve", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json(providersResponse([{ id: "claude-opus-5", label: "Opus 5" }])),
+      ),
+    );
+    const cap = captureRunStart();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    fireEvent.change(screen.getByPlaceholderText(/Message the room/), {
+      target: { value: "go" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    // "Default model" must not pin a provider either — `Runs::ResolveModel` picks one the
+    // host can actually serve, and a stale provider here would defeat that.
+    await waitFor(() => expect(cap.last()).not.toBeNull());
+    expect(cap.last()).not.toHaveProperty("provider");
+    expect(cap.last()).not.toHaveProperty("model");
+  });
+
+  it("GROUPS the options by provider, so a participant sees whose account they spend", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          providers: [
+            providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]).providers[0],
+            providersResponse([{ id: "anthropic.claude-opus-5", label: "Opus 5 (Bedrock)" }], {
+              id: "anthropic-bedrock",
+              displayName: "Amazon Bedrock",
+            }).providers[0],
+          ],
+        }),
+      ),
+    );
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // "Claude Opus 5" appears under two providers and bills different accounts ;
+    // a flat list of ids cannot express that.
+    await waitFor(() =>
+      expect(
+        Array.from(screen.getByTestId("model").querySelectorAll("optgroup")).map((g) =>
+          g.getAttribute("label"),
+        ),
+      ).toEqual(["Anthropic (direct)", "Amazon Bedrock"]),
+    );
+  });
+
   it("offers only 'Default model' until discovery resolves (no invalid fallback ids)", () => {
     // No /api/models mock → discovery hasn't produced host-valid ids yet. The picker
     // must NOT offer hardcoded plain-id fallbacks (they're invalid on Bedrock); only

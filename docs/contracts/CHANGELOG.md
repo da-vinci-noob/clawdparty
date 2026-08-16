@@ -125,6 +125,36 @@ would refuse to continue. A settlement key is NULL on ordinary entries, so it ca
 collide by construction. Found by the crash-injection gate, invisible to every other
 test because the happy path never settles under a reserved id.
 
+### Breaking — harness store schema again (B9)
+
+| # | Change | Streams |
+|---|---|---|
+| B9 | **`STORE_SCHEMA_VERSION` 2 → 3.** `entries` gains `emitted INTEGER NOT NULL DEFAULT 1` plus two CHECK constraints pairing it to `seq`, so a store-only entry is MARKED rather than inferred from two nullable fields. An existing store is REFUSED at open with `incompatible_version`. | harness |
+
+**This entry was missing and is being added late.** The bump shipped in its commit
+without one, which the governance table above requires for a store-schema change — and the
+omission had a consequence: nothing warned that existing sessions would stop working, so the
+first sign of it was a `500` on run start.
+
+**B7 was accepted on a basis that has since expired.** It reads "acceptable inside the window
+on the stated basis that this is a fresh setup with no sessions to preserve." That is no
+longer true — a developer hit this with a live session (8 entries, schema_version 1). Any
+further store-schema change inside this window must state the recovery step in its own entry,
+not inherit B7's premise.
+
+**Recovery, because refusal without a recovery path is a dead session.** The store is the
+record and it cannot be migrated (that is the point of invariant 11 — misreading an older
+layout is how a record silently lies). So the only recovery is to discard the refused store
+and let the session start a new one:
+
+```bash
+bin/harness reset-session <id>     # moves the store aside, then reports what was discarded
+```
+
+It MOVES rather than deletes, so the old file is still there to inspect. What is lost is that
+session's harness-side record; Postgres `events` keeps the projection, so the feed's history
+survives — the session simply cannot resume its model conversation.
+
 ### Breaking — the fixture is recaptured, not edited (B8)
 
 | # | Change | Streams |

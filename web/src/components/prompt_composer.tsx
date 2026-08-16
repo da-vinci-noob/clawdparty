@@ -40,8 +40,8 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const contextTokens = useEventStore((s) => selectLatestUsage(s)?.contextTokens ?? 0);
   const usageModel = useEventStore((s) => selectLatestUsage(s)?.model ?? null);
   const [text, setText] = useState("");
-  // Empty = let the server pick its default (ANTHROPIC_MODEL). Set once the user
-  // chooses; the option list itself comes from runtime discovery (useModels).
+  // Empty = let the server resolve a default from what the chosen provider actually serves.
+  // Set once the user chooses; the option list itself comes from runtime discovery.
   const [model, setModel] = useState("");
   const [skillOpen, setSkillOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -53,6 +53,21 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   const revising = !activeRunId && reviewRunId !== null;
 
+  // Derived, never a second dropdown: the participant picks a MODEL, and the provider is
+  // whichever one listed it. Two independent selectors would let them disagree.
+  const selectedProvider = models.find((m) => m.id === model)?.provider ?? "";
+
+  // One group per provider, in discovery order. `Map` rather than an object so the order the
+  // harness reported is preserved — it is the host's preference order, not alphabetical.
+  const providerGroups = [
+    ...models
+      .reduce((groups, m) => {
+        groups.set(m.provider, [...(groups.get(m.provider) ?? []), m]);
+        return groups;
+      }, new Map<string, typeof models>())
+      .entries(),
+  ];
+
   const startRun = (prompt: string): Promise<Response> =>
     fetch(`/api/sessions/${sessionId}/runs`, {
       method: "POST",
@@ -61,6 +76,13 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
       body: JSON.stringify({
         prompt,
         ...(model ? { model } : {}),
+        // The PROVIDER that serves the chosen model, sent alongside it.
+        //
+        // Load-bearing, and its absence was a live defect: the picker offers models from
+        // every available provider, so a Bedrock inference-profile id could be selected while
+        // the server fell back to `anthropic-direct` — which rejects it outright. A model id
+        // only means something relative to the provider that listed it.
+        ...(selectedProvider ? { provider: selectedProvider } : {}),
         ...(revising ? { mode: "revise" } : {}),
         // No per-item toggles: every discovered connector + skill is enabled (all
         // tools stay on, so no disallowed_tools). Omitted when the host has none →
@@ -181,8 +203,11 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
         {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 px-[13px] pb-3">
-          {/* model dropdown — options come from runtime discovery (useModels);
-              the chosen id is sent as `model` on run start (empty = server default). */}
+          {/* Model dropdown — options come from runtime discovery (useModels); the chosen id
+              is sent as `model` plus the `provider` that listed it (empty = server resolves
+              from what the provider serves). GROUPED by provider, because ids alone do not
+              say which account a run will spend: "Claude Opus 5" under Anthropic (direct)
+              and under Amazon Bedrock bill different places . */}
           {showModeControl && (
             <select
               aria-label="Model"
@@ -192,10 +217,14 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
               className="rounded-[9px] border border-[#17231b] bg-[#0e140f] px-[11px] py-[7px] font-mono text-[12px] text-[#cdd2cd] hover:border-[#2c5580] focus:outline-none"
             >
               <option value="">Default model</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
+              {providerGroups.map(([providerId, group]) => (
+                <optgroup key={providerId} label={group[0]?.providerLabel ?? providerId}>
+                  {group.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           )}

@@ -8,6 +8,7 @@
 class RunsController < ApplicationController
   include RunCapabilities
   include RunErrorResponses
+  include ProviderErrorResponses
 
   before_action :require_user
 

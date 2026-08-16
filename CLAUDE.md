@@ -53,7 +53,7 @@ clawdparty/
 ├── docker-compose.yml       # rails · harness · jobs · postgres (+ vite in dev); named volumes
 ├── bin/start                # brings up the containers AND the host harness; reports both
 ├── bin/stop                 # takes both down; harness first, so it releases its store locks
-├── bin/harness              # start|stop|status|logs|foreground for the host process
+├── bin/harness              # start|stop|status|logs|foreground + sessions|reset-session for the host process
 ├── bin/setup                # generates HARNESS_SHARED_SECRET + prepares env (DB creation runs in the rails container entrypoint)
 ├── .claude/ + openspec/     # OpenSpec workflow wiring (see below)
 ```
@@ -95,6 +95,7 @@ The build files + wiring are all in place — these are the project's working co
 
 - **Setup:** `bin/setup` (generates `HARNESS_SHARED_SECRET`, prepares env; the Postgres DBs are created by the rails container entrypoint, gated on postgres health).
 - **Run the stack:** `bin/start` — brings up the `rails`, `jobs` (Solid Queue), `postgres` and (dev) `vite` containers, AND starts the harness as a host process, then reports the health of each and names whichever is down. `bin/stop` reverses it, harness first so it releases its store locks (a clean close does; a crash leaves them to age out). `bin/harness` manages the host process alone. Source is bind-mounted (`:delegated`); gems/node_modules live in named volumes; the harness read-only binds host `~/.claude` + `~/.aws` (credentials) and inherits the host's Claude/AWS auth env (so it uses the dev's existing login — API key, subscription/enterprise OAuth, or Bedrock — with no app-owned key). The **target repo is bind-mounted read-write** (Claude edits the worktree; reject reverts it) — only the credential mounts are read-only.
+- **A session store refuses to open (`incompatible_version`):** the store schema is versioned and **refused, never migrated** (invariant 11) — misreading an older layout is how a record silently lies. So a store written before a `STORE_SCHEMA_VERSION` bump makes that session's runs fail with a harness 500. `bin/harness sessions` lists every store with its version and flags the refusable ones; `bin/harness reset-session <id>` moves the store aside (it does not delete it) so the session starts a fresh one. What is lost is that session's harness-side record — Postgres `events` keeps the projection, so the feed's history survives, but the session cannot resume its model conversation. Every store-schema bump gets a `docs/contracts/CHANGELOG.md` entry stating its own recovery step.
 - **Lint/format:** **Biome** for `web/` and `harness/` (one tool, no ESLint/Prettier split); **RuboCop** (rubocop-rails + rubocop-rspec; line length 120, frozen string literals, required parens) for `api/`.
 - **Tests / CI:** three independent GitHub Actions jobs — `api`: RuboCop + RSpec · `harness`: Biome + `tsc` + Vitest · `web`: Biome + `tsc` + Vitest. Web tests are **Vitest + React Testing Library**, `.test.tsx` co-located with components, **MSW** (`setupServer`) for REST mocking.
 - Pinned toolchain: **Ruby 4.0.5, Node 24 LTS, PostgreSQL 18**; `openspec` v1.5.0. (CI pins these; note the host currently has Node 25.7.0 installed, so pin Node 24 in CI to avoid green-on-laptop / red-in-CI drift.)

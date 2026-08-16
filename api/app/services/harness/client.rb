@@ -12,6 +12,10 @@ module Harness
   class Client
     class ActiveRunConflict < StandardError; end
     class UnknownRun < StandardError; end
+    # The harness ANSWERED, and refused. Distinct from TransportError (unreachable) because
+    # the two need different messages: this one carries the harness's own reason, which is the
+    # only part that tells an operator what to fix.
+    class Refused < StandardError; end
     class TransportError < StandardError; end
 
     Result = Struct.new(:status, :body, keyword_init: true)
@@ -33,9 +37,10 @@ module Harness
       @shared_secret = shared_secret
     end
 
-    # GET /models — the models available to the host's Claude/Bedrock login,
-    # discovered at runtime. The harness never 500s here (it falls back to a
-    # static list), so we just return the parsed body.
+    # GET /models — every configured provider and the models it can serve on this host,
+    # discovered at runtime. Never 500s: an unavailable provider is REPORTED with a reason and
+    # a remedy rather than omitted. It does NOT fall back to a static model list —
+    # a guessed id is one the host may not serve, which is what  forbids.
     def list_models
       get('/models')
     end
@@ -68,9 +73,21 @@ module Harness
     end
 
     # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
+    #
+    # Any 2xx is acceptance; anything else refuses. The status used to come back in a `Result`
+    # nobody read, so a harness 500 — an incompatible store schema, say — produced a `queued`
+    # AiRun, a `202 Accepted` to the browser, and 15 seconds later a swept `run_failed` reading
+    # `harness_unreachable`. That last part is a lie the participant then has to debug: the
+    # harness was reachable and said exactly what was wrong.
+    #
+    # 2xx rather than `== 202` deliberately. The contract says 202 and the harness sends it,
+    # but treating a 200 as refusal would DESTROY an AiRun for a run the harness had actually
+    # started — an orphan on the harness side and a session that looks idle. Being wrong in
+    # that direction is worse than tolerating a status the contract does not use.
     def start_run(payload)
       res = post('/runs', payload)
       raise(ActiveRunConflict, 'harness reports a run already active') if res.status == 409
+      raise(Refused, refusal_reason(res)) unless res.status.between?(200, 299)
 
       res
     end
@@ -94,6 +111,14 @@ module Harness
     private
 
     attr_reader :base_url, :shared_secret
+
+    # Fastify puts a thrown message in `message`; a route that refuses deliberately uses
+    # `error`. Either beats a bare status, which explains nothing.
+    def refusal_reason(res)
+      body = res.body
+      detail = body.is_a?(Hash) ? (body['message'] || body['error'] || body['detail']) : nil
+      detail.presence || "the harness returned #{res.status}"
+    end
 
     def post(path, body)
       uri = URI.join(base_url, path)

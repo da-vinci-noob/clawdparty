@@ -24,6 +24,43 @@ RSpec.describe('Run control') do
 
   # Every example above names a model explicitly, which is why the hardcoded default went
   # unnoticed: the resolution path was never entered. These cover it.
+  describe 'POST /api/sessions/:id/runs when the harness REFUSES' do
+    it 'forwards the harness reason and leaves no queued run behind' do
+      # RAISES rather than returning a 500 Result. The status check lives inside
+      # `Harness::Client#start_run`, so stubbing that method to return a 500 would replace the
+      # very code under test and this spec would assert nothing. Which statuses refuse is
+      # `client_spec.rb`'s subject; what the app does about a refusal is this one's.
+      allow_any_instance_of(Harness::Client).to(receive(:start_run)
+        .and_raise(Harness::Client::Refused,
+                   'store unavailable for session 35: incompatible_version'))
+      join_as(session, role: 'owner')
+
+      expect do
+        post("/api/sessions/#{session.id}/runs", params: { prompt: 'go', model: 'm' })
+      end.not_to(change(AiRun, :count))
+
+      # Previously: 202 Accepted, a `queued` run, and 15s later a swept `run_failed` reading
+      # `harness_unreachable` — which is false and sends the operator looking at the network.
+      expect(response).to(have_http_status(:unprocessable_content))
+      expect(response.parsed_body['errors'].first['message']).to(include('incompatible_version'))
+    end
+
+    it 'does not leave the session blocked for the next run' do
+      allow_any_instance_of(Harness::Client).to(receive(:start_run)
+        .and_raise(Harness::Client::Refused, 'boom'))
+      join_as(session, role: 'owner')
+      post("/api/sessions/#{session.id}/runs", params: { prompt: 'go', model: 'm' })
+
+      # `queued` counts toward index_ai_runs_one_active_per_session, so a run left behind
+      # would 409 every subsequent attempt until the sweeper caught it.
+      allow_any_instance_of(Harness::Client).to(receive(:start_run)
+        .and_return(Harness::Client::Result.new(status: 202, body: {})))
+      post("/api/sessions/#{session.id}/runs", params: { prompt: 'again', model: 'm' })
+
+      expect(response).to(have_http_status(:accepted))
+    end
+  end
+
   describe 'POST /api/sessions/:id/runs with NO model named' do
     def providers(list)
       allow_any_instance_of(Harness::Client).to(receive(:list_models)

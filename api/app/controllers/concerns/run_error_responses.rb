@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-# Maps the run lifecycle's service/harness errors to their client HTTP responses.
+# Maps the run LIFECYCLE's service/harness errors to their client HTTP responses.
+# Provider/model resolution failures live in `ProviderErrorResponses` — a different subject.
 # Kept in a concern so RunsController stays focused on the run actions themselves;
 # each raise site lives in Runs::* / Harness::Client and lands here as one status.
 module RunErrorResponses
@@ -28,9 +29,6 @@ module RunErrorResponses
     # The message carries the provider's own remedy, so a Bedrock host with an expired SSO
     # session is told to run `aws sso login` rather than shown "invalid model id" from a
     # provider error two steps later.
-    rescue_from Runs::ResolveModel::Unresolvable do |error|
-      render_error("Cannot start a run: #{error.message}", :unprocessable_content)
-    end
     rescue_from Git::WorktreeManager::GitError do
       render_error('Could not prepare the session worktree — is the target repo a git repository? ' \
                    '(set TARGET_REPO_PATH to a repo with a commit)', :unprocessable_content)
