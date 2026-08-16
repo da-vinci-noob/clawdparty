@@ -50,6 +50,12 @@ Rails.application.routes.draw do
       # GET /api/sessions/:session_id/files/content?path=… (content via RepoBrowser).
       get 'files', to: 'files#index'
       get 'files/content', to: 'files#content'
+      # Projection repair + audit (owner only): the record is the harness's, `events` is
+      # a view of it, so a gap here is repairable rather than lost.
+      # GET  /api/sessions/:session_id/projection/check
+      # POST /api/sessions/:session_id/projection/rederive
+      get 'projection/check', to: 'projections#check'
+      post 'projection/rederive', to: 'projections#rederive'
     end
 
     # Run control: POST /api/runs/:id/messages, POST /api/runs/:id/interrupt

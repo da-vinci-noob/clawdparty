@@ -33,17 +33,55 @@ function silentTransport(): Transport {
   });
 }
 
-/** Every route the harness exposes, so a new one cannot be added unauthenticated. */
-const ROUTES: Array<{ method: "GET" | "POST"; url: string }> = [
-  { method: "GET", url: "/healthz" },
-  { method: "GET", url: "/runs" },
-  { method: "GET", url: "/models" },
-  { method: "GET", url: "/connectors" },
-  { method: "GET", url: "/skills" },
-  { method: "POST", url: "/runs" },
-  { method: "POST", url: "/runs/1/messages" },
-  { method: "POST", url: "/runs/1/interrupt" },
+/**
+ * Every route the harness exposes, so a new one cannot be added unauthenticated.
+ *
+ * `covers every route Fastify registered` below checks this list against the server's own
+ * routing table. Without that check the comment is a wish: the list is hand-maintained,
+ * and a route added without a line here would be tested by nothing while the file still
+ * claimed to cover everything.
+ */
+const ROUTES: Array<{ method: "GET" | "POST"; url: string; pattern: string }> = [
+  { method: "GET", url: "/healthz", pattern: "/healthz" },
+  { method: "GET", url: "/runs", pattern: "/runs" },
+  { method: "GET", url: "/models", pattern: "/models" },
+  { method: "GET", url: "/connectors", pattern: "/connectors" },
+  { method: "GET", url: "/skills", pattern: "/skills" },
+  { method: "GET", url: "/sessions/45/entries", pattern: "/sessions/:id/entries" },
+  { method: "POST", url: "/runs", pattern: "/runs" },
+  { method: "POST", url: "/runs/1/messages", pattern: "/runs/:id/messages" },
+  { method: "POST", url: "/runs/1/interrupt", pattern: "/runs/:id/interrupt" },
 ];
+
+/**
+ * Parse `printRoutes` into full method+path pairs.
+ *
+ * The tree NESTS on shared prefixes even with `commonPrefix: false`, so
+ * `/runs/:id/messages` renders as a child line `/:id/messages` under a `/runs` parent
+ * and a naive per-line regex yields the fragment. Depth comes from the 4-character
+ * indent units, and each depth's prefix is remembered so a child can be joined to it.
+ *
+ * HEAD is dropped: Fastify adds it automatically alongside every GET, through the same
+ * onRequest hook.
+ */
+function registeredRoutes(tree: string): Array<{ method: string; pattern: string }> {
+  const out: Array<{ method: string; pattern: string }> = [];
+  const prefixAtDepth: string[] = [];
+
+  for (const line of tree.split("\n")) {
+    const match = /^((?:(?:│|\s)\s{3})*)(?:├──|└──) (\S*) \(([A-Z, ]+)\)/.exec(line);
+    if (!match) continue;
+
+    const depth = (match[1] as string).length / 4;
+    const full = (depth === 0 ? "" : (prefixAtDepth[depth - 1] ?? "")) + (match[2] as string);
+    prefixAtDepth[depth] = full;
+
+    for (const method of (match[3] as string).split(", ")) {
+      if (method !== "HEAD") out.push({ method, pattern: full });
+    }
+  }
+  return out;
+}
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "harness-auth-"));
@@ -73,14 +111,57 @@ describe("every control route rejects a bad token", () => {
     it(`rejects ${name} on all ${ROUTES.length} routes`, async () => {
       const app = buildServer(supervisor, CONFIG);
 
-      for (const route of ROUTES) {
-        const res = await app.inject({ ...route, headers, payload: {} });
-        expect(res.statusCode, `${route.method} ${route.url} accepted a ${name} token`).toBe(401);
+      for (const { method, url } of ROUTES) {
+        const res = await app.inject({ method, url, headers, payload: {} });
+        expect(res.statusCode, `${method} ${url} accepted a ${name} token`).toBe(401);
       }
 
       await app.close();
     });
   }
+
+  it("covers every route Fastify registered, so the list cannot fall behind", async () => {
+    const app = buildServer(supervisor, CONFIG);
+    await app.ready();
+
+    const registered = registeredRoutes(app.printRoutes({ commonPrefix: false }));
+    const listed = new Set(ROUTES.map((r) => `${r.method} ${r.pattern}`));
+    const missing = registered
+      .map((r) => `${r.method} ${r.pattern}`)
+      .filter((key) => !listed.has(key));
+
+    // Read from the server's own routing table rather than restated. A route added
+    // without a line above would otherwise be covered by nothing while this file still
+    // claimed to cover everything — which is worse than having no list.
+    expect(missing).toEqual([]);
+    // Guards the guard: a parser that matched nothing would make `missing` empty and the
+    // assertion above vacuously true.
+    expect(registered.length).toBe(ROUTES.length);
+    await app.close();
+  });
+
+  it("parses a NESTED route tree, which is what makes the check above real", () => {
+    // The shape Fastify actually emits: `/runs/:id/messages` appears as a child fragment
+    // under a `/runs` parent, so a per-line regex returns `/:id/messages` and the coverage
+    // check silently compares the wrong strings.
+    const tree = [
+      "├── /healthz (GET, HEAD)",
+      "├── /runs (GET, HEAD, POST)",
+      "│   ├── /:id/messages (POST)",
+      "│   └── /:id/interrupt (POST)",
+      "└── /sessions/:id/entries (GET, HEAD)",
+      "",
+    ].join("\n");
+
+    expect(registeredRoutes(tree)).toEqual([
+      { method: "GET", pattern: "/healthz" },
+      { method: "GET", pattern: "/runs" },
+      { method: "POST", pattern: "/runs" },
+      { method: "POST", pattern: "/runs/:id/messages" },
+      { method: "POST", pattern: "/runs/:id/interrupt" },
+      { method: "GET", pattern: "/sessions/:id/entries" },
+    ]);
+  });
 
   it("says only 'unauthorized', never which part was wrong", async () => {
     const app = buildServer(supervisor, CONFIG);

@@ -6,8 +6,8 @@ import { RunLoop, type RunSpec } from "./loop/run_loop.js";
 import { AnthropicDirectAdapter } from "./providers/anthropic_direct.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
-import { openStore } from "./store/store.js";
-import type { HarnessStoreApi } from "./store/types.js";
+import { afterCursorToFrom, openStore } from "./store/store.js";
+import type { Entry, HarnessStoreApi } from "./store/types.js";
 import { BashTool } from "./tools/bash.js";
 import * as glob from "./tools/glob.js";
 import * as grep from "./tools/grep.js";
@@ -128,6 +128,27 @@ export class Supervisor {
     const out: Record<string, number> = {};
     for (const [runId, run] of this.runs) out[runId] = run.store.maxStoreSeq();
     return out;
+  }
+
+  /**
+   * The RE-DERIVATION source. Entries after `afterStoreSeq`, exclusive.
+   *
+   * Serves `projectionFrom`, not `entriesFrom`: store-only entries are surface state for
+   * request reconstruction and are not events, so shipping them would project phantom
+   * rows into `events`.
+   *
+   * Goes through `storeFor`, which returns the ALREADY-OPEN instance when the session has
+   * a live run. Opening a second handle would be refused by the session lock, so a
+   * re-derivation of an active session would fail for a reason that has nothing to do
+   * with re-derivation.
+   */
+  async projectionEntries(sessionId: string, afterStoreSeq: number): Promise<Entry[]> {
+    const store = await this.storeFor(sessionId);
+    try {
+      return store.projectionFrom(afterCursorToFrom(afterStoreSeq));
+    } finally {
+      await this.releaseStore(sessionId);
+    }
   }
 
   activeRuns(): Array<{ run_id: string; session_id: string; lane: string; store_seq: number }> {

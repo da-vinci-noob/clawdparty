@@ -67,6 +67,13 @@ break a contract *outside* this window is a defect, not an amendment (Principle 
 - **New endpoints** — `GET /runs` (the authoritative active-run list, and the
   reconciliation source), `GET /plugins`, `POST /sessions/:id/plugins`,
   `GET /sessions/:id/entries?after=<store_seq>`.
+- **Projection repair, client-facing (owner-only)** — `GET /api/sessions/:id/projection/check`
+  and `POST /api/sessions/:id/projection/rederive`, documented in
+  [`http_api.md §2`](./http_api.md). Additive: no existing endpoint changes shape, and a
+  client that never calls them is unaffected. They exist because `events` became a
+  *projection* in this window — the repair is the other half of that change, and without it
+  /'s "a gap is repairable, not lost" has no way to be exercised.
+  `POST` defaults to **gap-fill**; `reset: true` must be asked for, and does not broadcast.
 - **`POST /internal/events`** keeps its wire shape and gains `store_seq` per event. Its
   *role* changes from the record to a projection channel — invisible to clients, which is
   what keeps M0 behaviour-neutral.

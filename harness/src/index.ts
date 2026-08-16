@@ -64,6 +64,34 @@ export function buildServer(
     listSkills(req.query.cwd ?? process.cwd()),
   );
 
+  /**
+   * The re-derivation source. `?after=` is EXCLUSIVE, matching the
+   * projection cursor everywhere else; the inclusive/exclusive conversion lives in
+   * `afterCursorToFrom` and nowhere else, because splitting it silently drops or
+   * duplicates exactly one event per request.
+   *
+   * Serves the PROJECTION, so store-only entries never leave the harness — Rails does
+   * no filtering of its own and cannot accidentally get it wrong.
+   */
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>(
+    "/sessions/:id/entries",
+    async (req, reply) => {
+      const after = Number(req.query.after ?? 0);
+      if (!Number.isInteger(after) || after < 0) {
+        return reply.code(400).send({ error: "after must be a non-negative integer" });
+      }
+      try {
+        const entries = await supervisor.projectionEntries(req.params.id, after);
+        return reply.code(200).send({ session_id: req.params.id, after, entries });
+      } catch (err) {
+        // An unknown session and a store held by another writer both mean "cannot read
+        // this record now". Reported rather than thrown as a 500: a re-derivation that
+        // 500s reads as a harness fault when it is a state a caller can retry.
+        return reply.code(409).send({ error: "store_unavailable", detail: String(err) });
+      }
+    },
+  );
+
   // POST /runs — start a run. 202 on accept; 409 when the LANE already has one.
   app.post("/runs", async (req, reply) => {
     const input = req.body as StartRunInput;

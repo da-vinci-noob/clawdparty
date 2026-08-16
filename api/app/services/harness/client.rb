@@ -60,6 +60,13 @@ module Harness
       get('/runs')
     end
 
+    # GET /sessions/:id/entries?after= — the re-derivation source. `after` is
+    # EXCLUSIVE. The harness serves its PROJECTION, so store-only entries never arrive
+    # here and Rails does no filtering of its own.
+    def list_entries(session_id, after: 0)
+      get("/sessions/#{session_id}/entries", { after: after })
+    end
+
     # POST /runs — 202 { run_id, status } on accept; 409 if a run is already active.
     def start_run(payload)
       res = post('/runs', payload)

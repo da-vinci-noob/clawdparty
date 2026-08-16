@@ -262,6 +262,61 @@ describe("Fastify server (supervisor-backed)", () => {
     await app.close();
   });
 
+  it("GET /sessions/:id/entries serves the PROJECTION, withholding store-only rows", async () => {
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
+
+    const res = await app.inject({ method: "GET", url: "/sessions/45/entries", headers: AUTH });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ session_id: "45", after: 0 });
+    // Rails does NO filtering of its own, so a store-only entry escaping here would be
+    // projected as a phantom event with nothing downstream to catch it.
+    expect(body.entries.every((e: { emitted: number }) => e.emitted === 1)).toBe(true);
+    await app.close();
+  });
+
+  it("treats ?after= as EXCLUSIVE, like every other projection cursor", async () => {
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({ method: "POST", url: "/runs", payload: startBody(), headers: AUTH });
+
+    const all = await app.inject({ method: "GET", url: "/sessions/45/entries", headers: AUTH });
+    const first = all.json().entries[0]?.store_seq as number;
+    const after = await app.inject({
+      method: "GET",
+      url: `/sessions/45/entries?after=${first}`,
+      headers: AUTH,
+    });
+
+    // Off-by-one here drops or duplicates exactly one event per request, which is the
+    // hardest projection bug to see.
+    expect(after.json().entries.map((e: { store_seq: number }) => e.store_seq)).not.toContain(
+      first,
+    );
+    await app.close();
+  });
+
+  it("rejects a nonsense cursor instead of coercing it", async () => {
+    const app = buildServer(supervisor, CONFIG);
+    const res = await app.inject({
+      method: "GET",
+      url: "/sessions/45/entries?after=-1",
+      headers: AUTH,
+    });
+
+    // `Number("abc")` is NaN and `Number("-1")` is negative; either would read as 0 and
+    // silently re-derive the whole session when the caller asked for a slice.
+    expect(res.statusCode).toBe(400);
+    const bad = await app.inject({
+      method: "GET",
+      url: "/sessions/45/entries?after=abc",
+      headers: AUTH,
+    });
+    expect(bad.statusCode).toBe(400);
+    await app.close();
+  });
+
   it("GET /connectors and /skills keep their pinned shapes", async () => {
     const app = buildServer(supervisor, CONFIG);
     const connectors = await app.inject({

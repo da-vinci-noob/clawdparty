@@ -39,6 +39,7 @@ implement this convention; it is pinned here as the single source.
 | run input | follow-up · interrupt |
 | **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
+| **projection repair** | `GET /api/sessions/:id/projection/check` · `POST /api/sessions/:id/projection/rederive` (owner) |
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
 | changeset | approve · reject |
 | files | tree · content read |
@@ -66,6 +67,26 @@ session is `404`.
 Returns **`200`** with an **ordered array of Contract-1 event envelopes**, every element having
 `id` **greater than** `<cursor>`, in **ascending `id`** order. The catch-up algorithm relies only
 on the envelope cursor (`id`) and dedupe-by-`id` for durable events.
+
+### Projection repair — `GET /api/sessions/:id/projection/check` · `POST .../rederive`
+
+`events` is a **projection** of the harness's store, so a gap in it — a Rails outage, a
+ring-buffer overflow the harness reported as genuine loss — is repairable rather than lost.
+
+`check` is read-only and returns both sides so a divergence can be read rather than guessed:
+`{ diverged, reason, rails: { high_water, count }, harness: { high_water, count } }`. `reason`
+is one of `missing_batch` (Rails is behind), `unexpected_rows` (Rails has rows the record does
+not), `content_mismatch` (same high water mark, different content — a mutated or duplicated
+row), or `null`. **It never repairs what it finds**: a silent auto-heal destroys the evidence.
+
+`rederive` defaults to **gap-fill** — replay from Rails' own `max(store_seq)`, additive, and
+broadcast because those events are genuinely unseen. `reset: true` deletes the session's rows
+and rebuilds the whole log; it does **not** broadcast, because the rebuilt rows get new `id`s
+and re-broadcasting would defeat the client's dedupe-by-id and replay the session into every
+open feed. A client whose cursor spans a reset must reload.
+
+**Owner-only.** Rebuilding the room's history is a session-management action, not a review
+action: an editor can drive Claude and still cannot rewrite what the room saw.
 
 ### Diffs are REST-only
 
@@ -118,6 +139,7 @@ an endpoint.
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
 | approve / reject changeset | ✓ | ✓ | ✓ | ✗ |
 | archive session | ✓ | ✗ | ✗ | ✗ |
+| check / re-derive the projection | ✓ | ✗ | ✗ | ✗ |
 
 (owner = everything incl. runs + approve/reject + invites/archive; editor =
 runs/follow-ups/interrupt + tasks/chat + approve/reject; reviewer = tasks/chat/view +
