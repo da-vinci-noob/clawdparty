@@ -1,6 +1,7 @@
 import type { ConverseStreamOutput } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { inferContextWindow } from "../models.js";
+import { isAnthropicProfileId } from "./bedrock_routing.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -237,9 +238,10 @@ async function listConverseProfiles(
     );
     for (const p of res.inferenceProfileSummaries ?? []) {
       const id = p.inferenceProfileId;
-      // Anthropic profiles belong to the sibling adapter. Everything else that is text
-      // + streaming is a candidate here; capability gating happens in listModels.
-      if (!id || id.toLowerCase().includes("anthropic")) continue;
+      // Anthropic profiles belong to the sibling adapter. The SAME predicate that
+      // adapter includes on, used with opposite sense here — that is what makes the two
+      // filters complementary and double-listing impossible.
+      if (!id || isAnthropicProfileId(id)) continue;
       const bare = id.split(".").slice(1).join(".");
       if (textStreaming.has(bare)) {
         out.push({ id, displayName: p.inferenceProfileName ?? id });

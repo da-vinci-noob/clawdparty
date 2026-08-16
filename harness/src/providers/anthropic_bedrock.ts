@@ -2,6 +2,7 @@ import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { dedupeByModel, inferContextWindow } from "../models.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
+import { isAnthropicProfileId } from "./bedrock_routing.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -320,8 +321,9 @@ async function listInferenceProfiles(
     );
     for (const profile of res.inferenceProfileSummaries ?? []) {
       const id = profile.inferenceProfileId;
-      // This app drives Claude only; a Bedrock account carries other vendors' profiles too.
-      if (!id || !id.toLowerCase().includes("anthropic")) continue;
+      // This adapter serves ONLY the Anthropic profiles; everything else is bedrock-converse's.
+      // The shared predicate is what keeps the two adapters' filters complementary.
+      if (!id || !isAnthropicProfileId(id)) continue;
       out.push({ id, displayName: profile.inferenceProfileName ?? id });
     }
     nextToken = res.nextToken;
