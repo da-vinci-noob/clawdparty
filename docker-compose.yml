@@ -122,18 +122,30 @@ services:
     volumes:
       - ./harness:/app:delegated
       - harness_node_modules:/app/node_modules
+      # The contracts package is a `file:../packages/contracts` dependency, so from
+      # /app it resolves to /packages — which must therefore exist in-container. Same
+      # mount as `rails` uses, for the same reason. Without it the harness cannot
+      # start at all: the tests pass because vitest resolves through the HOST install,
+      # so this only surfaces when the container actually runs.
+      - ./packages:/packages:ro
       # Target repo READ-WRITE, mounted at the IDENTICAL host path (Claude edits
       # the worktree; reject reverts it). Same absolute path as the host + rails
       # so worktree gitdir paths resolve everywhere and the run cwd (a host path
       # from the run-start payload) is valid in-container.
       - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
       # Host login. Targets the `node` user's home so `~/.claude` / `~/.aws`
-      # resolve to the mounts. `~/.claude` is READ-WRITE: the Agent SDK writes
+      # resolve to the mounts. BOTH are READ-ONLY: the harness owns its own record
+      # (HARNESS_STORE_DIR, outside any project tree), so it has no reason to write
+      # into the developer's credential directories at all. It reads
+      # `.credentials.json`, `settings.json` and `skills/` and writes nothing.
+      #
+      # This was READ-WRITE while the Agent SDK drove the loop: it wrote
       # runtime dirs there (session-env/<id> per run, and the resume JSONL under
       # projects/ — the resume design wants that persisted to the host). A
-      # read-only mount fails the run with EROFS on session-env mkdir. `~/.aws`
-      # stays READ-ONLY (the Bedrock/AWS credentials — tamper-safe; not in ~/.claude).
-      - ${HOME}/.claude:/home/node/.claude
+      # its resume JSONL and `session-env/<id>` there, and a read-only mount failed
+      # the run with EROFS on the session-env mkdir. Owning the record removed the
+      # need; a follow-up removes the mount entirely when the harness moves to the host.
+      - ${HOME}/.claude:/home/node/.claude:ro
       - ${HOME}/.aws:/home/node/.aws:ro
       # Claude Code stores user MCP servers in the `~/.claude.json` FILE (beside
       # the `~/.claude/` dir, so not covered by the mount above). Expose it

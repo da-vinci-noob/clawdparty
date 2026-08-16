@@ -1,11 +1,17 @@
-# Harness image — Node 24 (pinned; the host runs Node 25, but the container
-# runtime is deterministic). Runs the Fastify server wrapping the Agent SDK.
+# Harness image — Node 24 (pinned; the host runs a newer Node, but the container
+# runtime is deterministic). Runs the Fastify server that owns the agent loop.
 FROM node:24-slim
 
 # git is required: the harness runs git inside the bind-mounted target repo's
 # worktrees (created by the root `rails` service).
+#
+# python3/make/g++ are required by better-sqlite3, the harness store's driver. It is
+# a NATIVE module, and node:24-slim ships no build toolchain, so npm falls back to
+# compiling from source and node-gyp fails with "not ok". CI does not hit this — it
+# installs on a bare ubuntu runner where a prebuild exists — so the failure appears
+# only when running the stack, which is the worst place to discover it.
 RUN apt-get update -qq \
-  && apt-get install --no-install-recommends -y git curl \
+  && apt-get install --no-install-recommends -y git curl python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
 # Cross-uid git ownership: `rails` runs as root and creates worktrees under
