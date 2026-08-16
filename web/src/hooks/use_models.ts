@@ -28,8 +28,12 @@ export interface ModelInfo {
    * Whether tools may be offered on a STREAMING request. False for 8 of 18 non-Anthropic
    * Bedrock models, which accept a tool request or a streamed response but not both — the
    * loop refuses such a run, so the picker has to say so before it is chosen.
+   *
+   * `undefined` means the harness did not report it — a pre-1.6 harness during version skew.
+   * That is distinct from `false` ("known limitation") and must NOT be shown as one: treating
+   * absent as false labelled every Anthropic model "no tools while streaming".
    */
-  toolUseWhileStreaming: boolean;
+  toolUseWhileStreaming: boolean | undefined;
 }
 
 interface ProviderList {

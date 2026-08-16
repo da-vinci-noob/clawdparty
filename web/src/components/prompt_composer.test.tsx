@@ -264,10 +264,13 @@ describe("PromptComposer permission modes", () => {
         HttpResponse.json({
           providers: [
             {
-              ...providersResponse([{ id: "us.meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" }], {
-                id: "bedrock-converse",
-                displayName: "Amazon Bedrock (Converse)",
-              }).providers[0],
+              ...providersResponse(
+                [{ id: "us.meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" }],
+                {
+                  id: "bedrock-converse",
+                  displayName: "Amazon Bedrock (Converse)",
+                },
+              ).providers[0],
               models: [
                 {
                   id: "us.meta.llama3-3-70b-instruct-v1:0",
@@ -295,6 +298,48 @@ describe("PromptComposer permission modes", () => {
       return el;
     });
     expect(option.textContent).toMatch(/no tools/i);
+  });
+
+  it("does NOT mark a model whose capability is simply capable", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json(providersResponse([{ id: "claude-opus-5", label: "Opus 5" }])),
+      ),
+    );
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    const option = await waitFor(() => {
+      const el = screen.getByTestId("model").querySelector('option[value="claude-opus-5"]');
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    expect(option.textContent).toBe("Opus 5");
+  });
+
+  it("does NOT mark a model when the field is ABSENT (older harness), only when it is false", async () => {
+    // Version skew, observed live: a harness on pre-1.6 code serves capabilities with no
+    // `toolUseWhileStreaming` at all. Treating missing as `false` labelled EVERY Anthropic
+    // model "no tools while streaming" — alarming and wrong, since Anthropic does both. The
+    // label is a warning about a KNOWN limit, so only an explicit `false` earns it.
+    server.use(
+      http.get("/api/models", () => {
+        const body = providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]);
+        for (const m of body.providers[0]?.models ?? []) {
+          delete (m.capabilities as { toolUseWhileStreaming?: boolean }).toolUseWhileStreaming;
+        }
+        return HttpResponse.json(body);
+      }),
+    );
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    const option = await waitFor(() => {
+      const el = screen.getByTestId("model").querySelector('option[value="claude-opus-5"]');
+      if (!el) throw new Error("not yet");
+      return el;
+    });
+    expect(option.textContent).toBe("Opus 5");
   });
 
   it("offers only 'Default model' until discovery resolves (no invalid fallback ids)", () => {

@@ -222,8 +222,12 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                   {group.map((m) => (
                     <option key={m.id} value={m.id}>
                       {/* A run with tools is REFUSED for these, so the limit belongs in the
-                          label rather than in the failure a participant gets after choosing. */}
-                      {m.toolUseWhileStreaming ? m.label : `${m.label} — no tools while streaming`}
+                          label rather than in the failure a participant gets after choosing.
+                          Only an EXPLICIT false earns the warning — an absent field is version
+                          skew, not a known limitation, and labelling it flags every model. */}
+                      {m.toolUseWhileStreaming === false
+                        ? `${m.label} — no tools while streaming`
+                        : m.label}
                     </option>
                   ))}
                 </optgroup>
