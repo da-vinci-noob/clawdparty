@@ -221,7 +221,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 <optgroup key={providerId} label={group[0]?.providerLabel ?? providerId}>
                   {group.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.label}
+                      {/* A run with tools is REFUSED for these, so the limit belongs in the
+                          label rather than in the failure a participant gets after choosing. */}
+                      {m.toolUseWhileStreaming ? m.label : `${m.label} — no tools while streaming`}
                     </option>
                   ))}
                 </optgroup>

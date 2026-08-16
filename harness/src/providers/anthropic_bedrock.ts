@@ -45,6 +45,7 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
 const BEDROCK_CAPABILITIES: Omit<Capabilities, "contextWindow"> = {
   streaming: true,
   toolUse: true,
+  toolUseWhileStreaming: true,
   maxOutputTokens: 64_000,
   adaptiveThinking: true,
   thinkingDisplaySummarized: true,

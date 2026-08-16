@@ -24,6 +24,12 @@ export interface ModelInfo {
   /** Which provider serves it — the picker groups on this, and a run records it. */
   provider: string;
   providerLabel: string;
+  /**
+   * Whether tools may be offered on a STREAMING request. False for 8 of 18 non-Anthropic
+   * Bedrock models, which accept a tool request or a streamed response but not both — the
+   * loop refuses such a run, so the picker has to say so before it is chosen.
+   */
+  toolUseWhileStreaming: boolean;
 }
 
 interface ProviderList {
@@ -62,6 +68,7 @@ function toModels(providers: ProviderStatus[]): ModelInfo[] {
           context_window: model.capabilities.contextWindow,
           provider: provider.id,
           providerLabel: provider.displayName,
+          toolUseWhileStreaming: model.capabilities.toolUseWhileStreaming,
         })),
       )
   );

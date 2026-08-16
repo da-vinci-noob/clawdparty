@@ -257,6 +257,7 @@ export function assertTotalCapabilities(caps: Capabilities, label: string): void
   const required: Array<keyof Capabilities> = [
     "streaming",
     "toolUse",
+    "toolUseWhileStreaming",
     "contextWindow",
     "maxOutputTokens",
     "adaptiveThinking",
@@ -283,6 +284,14 @@ export function assertTotalCapabilities(caps: Capabilities, label: string): void
   expect(caps.contextWindow, `${label} contextWindow must be a real budget`).toBeGreaterThan(0);
   expect(caps.maxOutputTokens).toBeGreaterThan(0);
   expect(Array.isArray(caps.effortLevels)).toBe(true);
+
+  // An EXPLICIT boolean, never inferred. `streaming` and `toolUse` are literal `true`, so an
+  // adapter that omitted this would be read as "supports both together" — the one reading that
+  // is wrong for 8 of the 18 non-Anthropic Bedrock models measured.
+  expect(
+    typeof caps.toolUseWhileStreaming,
+    `${label}.toolUseWhileStreaming must be an explicit boolean`,
+  ).toBe("boolean");
 
   for (const tool of ["webSearch", "webFetch", "codeExecution"] as const) {
     expect(

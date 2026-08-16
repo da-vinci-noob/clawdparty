@@ -50,6 +50,7 @@ const PROBE_HINTS = {
 const CONSERVATIVE_FALLBACK: Capabilities = {
   streaming: true,
   toolUse: true,
+  toolUseWhileStreaming: true,
   contextWindow: 200_000,
   maxOutputTokens: 8_192,
   adaptiveThinking: false,
@@ -220,6 +221,7 @@ function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
   return {
     streaming: true,
     toolUse: true,
+    toolUseWhileStreaming: true,
     contextWindow: model.max_input_tokens ?? CONSERVATIVE_FALLBACK.contextWindow,
     maxOutputTokens: model.max_tokens ?? CONSERVATIVE_FALLBACK.maxOutputTokens,
     adaptiveThinking: caps?.thinking?.types?.adaptive?.supported === true,

@@ -101,6 +101,7 @@ function stubCaps() {
   return {
     streaming: true as const,
     toolUse: true as const,
+    toolUseWhileStreaming: true,
     contextWindow: 1000,
     maxOutputTokens: 100,
     adaptiveThinking: false,

@@ -313,6 +313,7 @@ function caps(over: { webSearch?: boolean; webFetch?: boolean }) {
   return {
     streaming: true as const,
     toolUse: true as const,
+    toolUseWhileStreaming: true,
     contextWindow: 1_000_000,
     maxOutputTokens: 64_000,
     adaptiveThinking: true,

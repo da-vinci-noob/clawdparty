@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 5 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 6 } as const;
 
 /**
  * The 30 frozen event type names. Adding or removing a name is a CONTRACT
@@ -586,6 +586,25 @@ export const CREDENTIAL_PRECEDENCE: readonly CredentialSourceId[] = [
 export interface ProviderCapabilities {
   streaming: true;
   toolUse: true;
+  /**
+   * Whether tools may be offered ON A STREAMING request. Both of the literals above stay
+   * true when this is false — the model streams, and it uses tools, just not at the same
+   * time.
+   *
+   * Added at v1.6 because the two capabilities are INDEPENDENT on Amazon Bedrock and the
+   * contract could not say so: `streaming: true` and `toolUse: true` are literal types, so
+   * every provider asserted both unconditionally. Measured against 18 text-capable
+   * non-Anthropic Bedrock models, 8 refuse a `toolConfig` on `ConverseStream` with "This
+   * model doesn't support tool use in streaming mode" while accepting it on `Converse` —
+   * every Llama, plus Mistral Pixtral and both Writer Palmyra models, two of which return a
+   * real `tool_use` stop reason on the non-streaming path. It is a transport limit, not a
+   * model limitation.
+   *
+   * Consumers should treat it as the answer to "will live text arrive on a run that has
+   * tools enabled". `false` means the host must either choose another model, run without
+   * tools, or accept a turn that only appears when it settles.
+   */
+  toolUseWhileStreaming: boolean;
   /** The REAL budget for this model — what the live context indicator divides by. */
   contextWindow: number;
   maxOutputTokens: number;

@@ -48,6 +48,7 @@ const CREDS = {
 const CAPS: Capabilities = {
   streaming: true,
   toolUse: true,
+  toolUseWhileStreaming: true,
   contextWindow: 1_000_000,
   maxOutputTokens: 64_000,
   adaptiveThinking: true,

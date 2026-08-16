@@ -57,6 +57,7 @@ const DECLARED_FIRST_PARTY = {
 const CONSERVATIVE_FALLBACK: Capabilities = {
   streaming: true,
   toolUse: true,
+  toolUseWhileStreaming: true,
   contextWindow: 200_000,
   maxOutputTokens: 8_192,
   adaptiveThinking: false,
@@ -204,6 +205,7 @@ function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
   return {
     streaming: true,
     toolUse: true,
+    toolUseWhileStreaming: true,
     // Real budgets, straight from the API. The live context indicator divides by
     // this, so a hardcoded constant here would misreport pressure per model.
     contextWindow: model.max_input_tokens ?? CONSERVATIVE_FALLBACK.contextWindow,

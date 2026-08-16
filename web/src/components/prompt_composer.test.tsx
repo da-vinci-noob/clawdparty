@@ -80,6 +80,7 @@ function providersResponse(
 const MODEL_CAPS = {
   streaming: true as const,
   toolUse: true as const,
+  toolUseWhileStreaming: true,
   contextWindow: 200_000,
   maxOutputTokens: 64_000,
   adaptiveThinking: true,
@@ -255,6 +256,45 @@ describe("PromptComposer permission modes", () => {
         ),
       ).toEqual(["Anthropic (direct)", "Amazon Bedrock"]),
     );
+  });
+
+  it("MARKS a model that cannot use tools while streaming", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          providers: [
+            {
+              ...providersResponse([{ id: "us.meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" }], {
+                id: "bedrock-converse",
+                displayName: "Amazon Bedrock (Converse)",
+              }).providers[0],
+              models: [
+                {
+                  id: "us.meta.llama3-3-70b-instruct-v1:0",
+                  displayName: "Llama 3.3 70B",
+                  capabilities: { ...MODEL_CAPS, toolUseWhileStreaming: false },
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // Measured on Bedrock: 8 of 18 non-Anthropic models refuse a toolConfig on a streaming
+    // request. The loop refuses such a run rather than sending it, so a participant who picks
+    // one from an unmarked list learns about the limit from a failure — which reads as the
+    // product being broken.
+    const option = await waitFor(() => {
+      const el = screen
+        .getByTestId("model")
+        .querySelector('option[value="us.meta.llama3-3-70b-instruct-v1:0"]');
+      if (!el) throw new Error("option not rendered yet");
+      return el;
+    });
+    expect(option.textContent).toMatch(/no tools/i);
   });
 
   it("offers only 'Default model' until discovery resolves (no invalid fallback ids)", () => {

@@ -155,6 +155,27 @@ export class RunLoop {
         signal: spec.signal,
       });
 
+      // A model that cannot use tools WHILE streaming, asked to do exactly that.
+      //
+      // Refused HERE rather than sent, because the provider would reject it anyway (Bedrock
+      // answers with `ValidationException: This model doesn't support tool use in streaming
+      // mode`) and a knowable capability limit should not reach a participant as an opaque
+      // provider error. The two quiet alternatives are both worse: dropping the tools yields
+      // an agent that says it edited a file and did not, and dropping the streaming yields a
+      // turn that appears only once it settles — the defect removed later.
+      if (!capabilities.toolUseWhileStreaming && built.tools.length > 0) {
+        return this.refuse(spec, normalizer, totalUsage, {
+          provider: adapter.id,
+          kind: "api_error",
+          message:
+            `${spec.model} cannot use tools while streaming: the provider accepts a tool ` +
+            "request or a streamed response, not both in one turn.",
+          remedy:
+            "Choose a model that supports both (the picker reports it), or start this run " +
+            "with every tool disabled to use it for chat only.",
+        });
+      }
+
       // request:before — may rewrite what is claimed, or refuse the turn outright.
       // Dispatched AFTER the request is built so a handler sees the real assembled
       // messages rather than a promise of them.
@@ -167,17 +188,12 @@ export class RunLoop {
           request: built,
         });
         if (pre.outcome.k === "refuse") {
-          const event = normalizer.providerError(
-            {
-              provider: adapter.id,
-              kind: "api_error",
-              message: `request refused by ${pre.by ?? "policy"}: ${pre.outcome.reason}`,
-              remedy: "Adjust the prompt or the rule that refused it, then start a new run.",
-            },
-            this.now(),
-          );
-          emit([event]);
-          return this.fail(spec, normalizer, "refused", totalUsage);
+          return this.refuse(spec, normalizer, totalUsage, {
+            provider: adapter.id,
+            kind: "api_error",
+            message: `request refused by ${pre.by ?? "policy"}: ${pre.outcome.reason}`,
+            remedy: "Adjust the prompt or the rule that refused it, then start a new run.",
+          });
         }
       }
 
@@ -640,6 +656,28 @@ export class RunLoop {
     );
     this.terminate(spec, event, { outcome: "finished", uncertain: false, stopReason });
     return { outcome: "finished", uncertain: false, stopReason, turns };
+  }
+
+  /**
+   * Refuse a turn before it is sent: PERSIST the reason, broadcast it, then fail.
+   *
+   * The persist is the point. `fail()` records only `run_failed`, whose payload carries a
+   * stop reason and no explanation, so a `provider_error` that was merely emitted vanished on
+   * restart and the record could not say why the run died. That applied to the pre-existing
+   * `request:before` refusal too — both paths route through here now.
+   */
+  private async refuse(
+    spec: RunSpec,
+    normalizer: LoopNormalizer,
+    usage: Usage,
+    detail: Parameters<LoopNormalizer["providerError"]>[0],
+  ): Promise<RunOutcome> {
+    const event = normalizer.providerError(detail, this.now());
+    // Not on the surface: it is a statement about the request, not part of the conversation
+    // the model should see next time.
+    this.deps.store.commit({ writes: [this.entryFor(event, null)] });
+    this.deps.emit([event]);
+    return this.fail(spec, normalizer, "refused", usage);
   }
 
   private async fail(

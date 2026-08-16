@@ -233,6 +233,44 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.6.0] — `toolUseWhileStreaming` capability (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 6 }`.** Additive `minor` bump: one new REQUIRED field
+on `ProviderCapabilities`. Additive for consumers (Rails and the web gain a field they may
+ignore); for producers it is a compile error until every adapter declares it, which is the
+intent — the value must be stated, never inferred.
+
+```ts
+interface ProviderCapabilities {
+  streaming: true;
+  toolUse: true;
+  toolUseWhileStreaming: boolean;  // NEW
+  ...
+}
+```
+
+**Why.** `streaming` and `toolUse` are LITERAL `true` types, so the contract asserted that every
+provider does both, unconditionally, and could not express otherwise. On Amazon Bedrock they are
+independent: measured against 18 distinct text-capable non-Anthropic inference profiles in
+us-west-2, **8 refuse a `toolConfig` on `ConverseStream`** with `ValidationException: This model
+doesn't support tool use in streaming mode`, while accepting the same request on non-streaming
+`Converse` — every Meta Llama, Mistral Pixtral, and both Writer Palmyra models, two of which
+return a real `tool_use` stop reason there. It is a transport limit, not a model limitation, and
+the two literals stay TRUE when the new field is false: the model streams, and it uses tools,
+just not in one turn.
+
+**What consumers should do with it.** Read it as the answer to "will live text arrive on a run
+that has tools enabled". `false` means the host must pick another model, run without tools, or
+accept a turn that only appears once it settles. The web picker labels such models
+(`prompt_composer.tsx`); the loop REFUSES a tools-enabled turn on one and emits a
+`provider_error` naming the constraint and its remedy, rather than sending a request the provider
+would reject or quietly dropping the tools.
+
+**Recovery / migration.** No stored data changes and no event payload changes, so no session is
+affected and nothing needs re-derivation. A provider adapter written before this bump will not
+compile until it declares the field; Anthropic adapters declare `true`, which is measured
+behaviour, not an assumption.
+
 ## [1.5.0] — harness event taxonomy (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 5 }`.** Additive `minor` bump

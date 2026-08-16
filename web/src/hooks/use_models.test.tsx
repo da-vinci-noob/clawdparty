@@ -24,6 +24,7 @@ import { useModels, useUnavailableProviders } from "./use_models";
 const CAPS: ProviderCapabilities = {
   streaming: true,
   toolUse: true,
+  toolUseWhileStreaming: true,
   contextWindow: 200_000,
   maxOutputTokens: 64_000,
   adaptiveThinking: true,
