@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BashTool } from "../../src/tools/bash.js";
 import type { ToolContext } from "../../src/tools/registry.js";
 import { bashInvocation } from "../../src/tools/sandbox.js";
-import { shimDirs, toolchainEnv } from "../../src/tools/toolchain.js";
+import { WITHHELD_FROM_TOOLS, shimDirs, toolchainEnv } from "../../src/tools/toolchain.js";
 
 /**
  * a command Claude runs resolves what the developer's own shell
@@ -106,6 +106,39 @@ describe("the environment a bash call runs with", () => {
     expect(env.AWS_PROFILE).toBe("work");
     expect(env.SSH_AUTH_SOCK).toBe("/tmp/agent");
     expect(env.CLAWDPARTY_SESSION).toBe("1");
+  });
+
+  it("WITHHOLDS the harness's own provider credentials", () => {
+    const base: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    for (const key of WITHHELD_FROM_TOOLS) base[key] = "planted";
+    const env = toolchainEnv(base, home);
+
+    // Iterates the exported list rather than restating it: adding a variable to the list
+    // without withholding it should fail here, and a copied literal would not notice.
+    for (const key of WITHHELD_FROM_TOOLS) {
+      expect(env, `${key} reached the child`).not.toHaveProperty(key);
+    }
+  });
+
+  it("keeps the credential SELECTORS, so `aws` still resolves a profile", () => {
+    const env = toolchainEnv(
+      { PATH: "/usr/bin", AWS_PROFILE: "work", AWS_REGION: "us-east-1" },
+      home,
+    );
+
+    // The env credential chain is removed; the file-and-profile chain is not. Dropping
+    // these too would break a legitimate `aws` call in a repo task, which is a different
+    // thing from leaking a key.
+    expect(env.AWS_PROFILE).toBe("work");
+    expect(env.AWS_REGION).toBe("us-east-1");
+  });
+
+  it("deletes rather than blanks, so nothing reads as present-but-empty", () => {
+    const env = toolchainEnv({ PATH: "/usr/bin", ANTHROPIC_API_KEY: "planted" }, home);
+
+    // An empty string still announces the variable exists, and some SDKs treat that as a
+    // broken credential instead of an absent one.
+    expect("ANTHROPIC_API_KEY" in env).toBe(false);
   });
 });
 
