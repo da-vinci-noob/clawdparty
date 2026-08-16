@@ -64,3 +64,9 @@ jobs:
       # regression, under it means lower the budget.
       - name: Crash injection gate (test:crash)
         run: npm run test:crash
+
+      # Adapter conformance. It passed locally for a while WITHOUT being wired here,
+      # which is the failure mode a required-gate list exists to catch: a gate that
+      # exists, works, and enforces nothing.
+      - name: Adapter conformance gate (test:adapters)
+        run: npm run test:adapters

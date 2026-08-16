@@ -28,12 +28,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { EPHEMERAL_EVENT_TYPES } from "@clawdparty/contracts";
 import * as checkpoint from "../src/loop/checkpoint.ts";
 import { RunLoop } from "../src/loop/run_loop.ts";
 import { applyRecovery } from "../src/store/recovery.ts";
 import { openStore } from "../src/store/store.ts";
 import { buildRegistry } from "../src/supervisor.ts";
 import { ScriptedAdapter, TURNS } from "./narrative.js";
+
+const EPHEMERAL = new Set<string>(EPHEMERAL_EVENT_TYPES);
 
 const FIXTURE = fileURLToPath(
   new URL("../../packages/contracts/fixtures/sample_run.jsonl", import.meta.url),
@@ -125,7 +128,11 @@ async function main() {
     // — web tests and the Rails replay both read it — so a durable event must carry one, and
     // an ephemeral event must not. Leaving them all null made the parity baseline empty,
     // which passed as "no types to compare" rather than failing.
-  ].map((e) => ({ ...e, id: e.seq === null ? null : ++id }));
+    // DURABILITY decides the id, not `seq`. A session-scoped durable event
+    // (`participant_joined`, `chat_message`) has a NULL seq and still needs an id — it is
+    // persisted, it is just not run-scoped. Keying off `seq` gave those a null id and broke
+    // the frozen envelope rule that every durable event carries one.
+  ].map((e) => ({ ...e, id: EPHEMERAL.has(e.type) ? null : ++id }));
 
   // The scratch directory is the ONLY thing that varies between runs, and it varies in
   // `run_started.cwd`. Normalized to a stable path so regenerating twice produces identical

@@ -78,22 +78,6 @@ export class LoopNormalizer {
     return this.seq;
   }
 
-  /**
-   * Take `count` ids for entries the LOOP writes directly rather than emitting as events
-   * (the per-call tool-result surface entries).
-   *
-   * Here because of the rule at the top of this file: seq is assigned in one place. The
-   * loop first allocated these from `store.nextSeq`, which reads MAX(seq) — and in a
-   * commit that also carries normalizer-seq'd events, those rows are not inserted yet, so
-   * it handed back an id one of them was about to use and `UNIQUE (run_id, seq)` dropped
-   * the surface entry SILENTLY. Same two-allocator bug as the earlier one, one commit later.
-   */
-  takeSeqs(count: number): number[] {
-    const ids: number[] = [];
-    for (let i = 0; i < count; i += 1) ids.push(++this.seq);
-    return ids;
-  }
-
   isEphemeral(type: EnvelopeType): boolean {
     return EPHEMERAL.has(type);
   }

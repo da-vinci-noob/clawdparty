@@ -81,15 +81,17 @@ describe("request_pending — the only permitted uncertainty", () => {
     expect(result.action).toBe("abandoned");
   });
 
-  it("writes the settlement under its SETTLEMENT KEY, with a normal seq", async () => {
+  it("writes the settlement under its SETTLEMENT KEY, with NO event seq", async () => {
     await applyRecovery(store, RUN, deps);
 
     const entry = entriesFor(RUN).at(0);
-    // The key carries the identity; the seq is allocated normally. Reserving a seq
-    // instead collided with the turn's own entries, so UNIQUE (run_id, seq) rejected
-    // the settlement — the constraint meant to stop a SECOND one blocked the FIRST.
+    // The key carries the identity. The seq is NULL because this is a store entry, not an
+    // emitted event — consuming a seq here punched a hole in the emitted per-run sequence,
+    // which the frozen envelope rules forbid. Reserving a seq (the original design) was
+    // worse still: it collided with the turn's own entries, so UNIQUE (run_id, seq) rejected
+    // the settlement and the constraint meant to stop a SECOND one blocked the FIRST.
     expect(entry?.settlement_key).toBe("settle_7");
-    expect(entry?.seq).toBe(1);
+    expect(entry?.seq).toBeNull();
     expect(entry?.type).toBe("run_interrupted");
     expect(entry?.payload).toMatchObject({ uncertain: true, reason: "harness_restart" });
   });

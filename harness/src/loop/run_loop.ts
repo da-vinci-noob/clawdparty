@@ -434,7 +434,6 @@ export class RunLoop {
             // A refusal is an OUTCOME, so it settles on the surface like any other. Held
             // in memory it would vanish on a crash and leave the call unanswered.
             this.toolResultWrite(
-              normalizer,
               spec,
               call,
               toolResultBlock(call.toolUseId, gated.outcome.reason, true),
@@ -498,7 +497,6 @@ export class RunLoop {
         writes: [
           ...events.map((e) => this.entryFor(e, null)),
           this.toolResultWrite(
-            normalizer,
             spec,
             call,
             toolResultBlock(call.toolUseId, text, finalResult.isError),
@@ -534,17 +532,17 @@ export class RunLoop {
    * Carries the call's `settlementKey` so a settlement can only ever land once, matching
    * what recovery writes for the same call.
    */
-  private toolResultWrite(
-    normalizer: LoopNormalizer,
-    spec: RunSpec,
-    call: checkpoint.ToolCallPosition,
-    block: unknown,
-  ): Write {
+  private toolResultWrite(spec: RunSpec, call: checkpoint.ToolCallPosition, block: unknown): Write {
     return {
       kind: "entry",
       entry: {
         run_id: spec.runId,
-        seq: normalizer.takeSeqs(1)[0] as number,
+        // NULL seq, deliberately. `seq` is the per-run counter for the Contract-1 EVENT
+        // stream, and this entry is never emitted — it is surface state for request
+        // reconstruction. Taking a seq punched holes in the emitted sequence (8 -> 10),
+        // which the frozen envelope rules forbid; uniqueness comes from `settlement_key`,
+        // so it needs no seq at all.
+        seq: null,
         settlement_key: call.settlementKey,
         type: "ai_raw",
         actor_kind: "user",

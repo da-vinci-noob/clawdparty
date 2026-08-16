@@ -117,9 +117,10 @@ function settleUncertain(
       kind: "entry",
       entry: {
         run_id: runId,
-        // seq allocated NORMALLY. Single-use comes from `settlement_key`, not from a
-        // reserved seq — reserving one collided with the turn's own entries.
-        seq: store.allocateSeq(runId),
+        // NULL seq: this is a store entry, not an emitted event. `seq` is the per-run
+        // counter for the Contract-1 event stream, so consuming one here punched a hole in
+        // the emitted sequence. Uniqueness comes from `settlement_key`.
+        seq: null,
         settlement_key: plan.settlementKey,
         type: "run_interrupted",
         actor_kind: "system",
@@ -217,10 +218,7 @@ async function finishTools(
     executed += 1;
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
-      writes: [
-        resultWrite(runId, store.allocateSeq(runId), call, result, ts),
-        checkpoint.positionWrite(runId, position),
-      ],
+      writes: [resultWrite(runId, call, result, ts), checkpoint.positionWrite(runId, position)],
     });
   }
 
@@ -230,10 +228,7 @@ async function finishTools(
     reexecuted += 1;
     position = checkpoint.withCallStatus(position, call.index, "completed");
     store.commit({
-      writes: [
-        resultWrite(runId, store.allocateSeq(runId), call, result, ts),
-        checkpoint.positionWrite(runId, position),
-      ],
+      writes: [resultWrite(runId, call, result, ts), checkpoint.positionWrite(runId, position)],
     });
   }
 
@@ -275,7 +270,6 @@ async function runCall(
 /** One settled tool result, ON the surface, under the call's SETTLEMENT KEY. */
 function resultWrite(
   runId: string,
-  seq: number,
   call: ToolCallPosition,
   result: ReexecuteResult,
   ts: number,
@@ -284,10 +278,9 @@ function resultWrite(
     kind: "entry",
     entry: {
       run_id: runId,
-      // Allocated normally; the SETTLEMENT KEY is what makes this single-use. A seq
-      // spent on a rejected duplicate simply leaves a gap, which the contract permits
-      // ("per-run monotonic", not gapless).
-      seq,
+      // NULL: a settled tool result is surface state, not an emitted event. The
+      // SETTLEMENT KEY makes it single-use, so it needs no event seq.
+      seq: null,
       settlement_key: call.settlementKey,
       type: result.ok ? "tool_finished" : "tool_failed",
       actor_kind: "system",

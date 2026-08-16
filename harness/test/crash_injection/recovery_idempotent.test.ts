@@ -49,10 +49,16 @@ describe("recovery is idempotent", () => {
     const { store, close } = await inspect(crashed);
     try {
       const settled = store.entriesFrom(0).filter((e) => e.run_id === RUN);
-      const seqs = settled.map((e) => e.seq);
-      // No duplicate seq anywhere. This is the schema doing the work: the executor does
-      // not check first, it simply writes and lets UNIQUE reject the second attempt.
-      expect(new Set(seqs).size).toBe(seqs.length);
+      // Two separate uniqueness rules, checked separately — a single `new Set(seqs)` check
+      // silently COLLAPSED the many null seqs of store entries and reported them as
+      // duplicates, so it was asserting the wrong thing entirely.
+      const seqs = settled.map((e) => e.seq).filter((v): v is number => v !== null);
+      expect(new Set(seqs).size, "duplicate event seq").toBe(seqs.length);
+
+      const keys = settled.map((e) => e.settlement_key).filter((v): v is string => v !== null);
+      // The one that matters here: the executor does not check first, it writes and lets
+      // UNIQUE (run_id, settlement_key) reject the second attempt.
+      expect(new Set(keys).size, "duplicate settlement").toBe(keys.length);
     } finally {
       await close();
     }

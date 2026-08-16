@@ -72,8 +72,10 @@ describe("the loop cannot allocate a seq", () => {
     const normalizer = read(join(SRC, "loop/normalize.ts"));
     const increments = [...normalizer.matchAll(/\+\+this\.seq/g)];
 
-    // Two sites and no more: the envelope assignment and `takeSeqs`. A third would mean
-    // something else in the file is minting ids on its own.
-    expect(increments).toHaveLength(2);
+    // ONE site: the envelope assignment. `takeSeqs` is gone — the loop's store-only surface
+    // entries now carry `seq: null`, because `seq` is the per-run counter for the EMITTED
+    // event stream and an entry nobody emits must not consume one. A second site would mean
+    // something is minting event ids outside the envelope path.
+    expect(increments).toHaveLength(1);
   });
 });
