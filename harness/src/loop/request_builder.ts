@@ -90,17 +90,73 @@ export function build(input: BuildInput): ProviderRequest {
  * silently trains the model to stop making parallel calls.
  */
 export function foldSurface(surface: Entry[]): NeutralMessage[] {
+  // Every tool id that has BOTH halves somewhere on the surface. A `tool_use` or `tool_result`
+  // whose id is not paired is an ORPHAN, and every provider 400s on one — so it is dropped
+  // here rather than sent. Orphans arise whenever a run terminates between a tool call
+  // and its result (interrupt, provider_error, a mid-turn failure), and once on the surface
+  // they poison every later turn; dropping at the fold is provider-agnostic, catches the
+  // orphan whatever caused it, and SELF-HEALS a session that already holds one.
+  const paired = pairedToolIds(surface);
   const messages: NeutralMessage[] = [];
 
   for (const entry of surface) {
     if (entry.blocks === null || entry.blocks.length === 0) continue;
+    const kept = entry.blocks.filter((block) => {
+      const id = toolBlockId(block);
+      return id === null || paired.has(id);
+    });
+    // A message whose only blocks were orphans is dropped whole — an empty content array is
+    // itself a 400.
+    if (kept.length === 0) continue;
+
     const role = roleFor(entry);
     const last = messages.at(-1);
-
-    if (last && last.role === role) last.content.push(...entry.blocks);
-    else messages.push({ role, content: [...entry.blocks] });
+    if (last && last.role === role) last.content.push(...kept);
+    else messages.push({ role, content: [...kept] });
   }
   return messages;
+}
+
+/** Tool ids that have a `tool_use` AND a matching `tool_result` somewhere on the surface. */
+function pairedToolIds(surface: Entry[]): Set<string> {
+  const uses = new Set<string>();
+  const results = new Set<string>();
+  for (const entry of surface) {
+    for (const block of entry.blocks ?? []) {
+      const use = toolUseId(block);
+      if (use !== null) uses.add(use);
+      const result = toolResultId(block);
+      if (result !== null) results.add(result);
+    }
+  }
+  const paired = new Set<string>();
+  for (const id of uses) if (results.has(id)) paired.add(id);
+  return paired;
+}
+
+/** The tool id a block carries as either half of a call, or null if it is not a tool block. */
+function toolBlockId(block: unknown): string | null {
+  return toolUseId(block) ?? toolResultId(block);
+}
+
+function toolUseId(block: unknown): string | null {
+  if (block === null || typeof block !== "object") return null;
+  const b = block as Record<string, unknown>;
+  // Anthropic-shaped, and the canonical shape the Converse mapper now emits.
+  if (b.type === "tool_use" && typeof b.id === "string") return b.id;
+  // Legacy Converse-shaped block on a surface written before the canonical shape landed.
+  const toolUse = b.toolUse as { toolUseId?: unknown } | undefined;
+  if (toolUse && typeof toolUse.toolUseId === "string") return toolUse.toolUseId;
+  return null;
+}
+
+function toolResultId(block: unknown): string | null {
+  if (block === null || typeof block !== "object") return null;
+  const b = block as Record<string, unknown>;
+  if (b.type === "tool_result" && typeof b.tool_use_id === "string") return b.tool_use_id;
+  const toolResult = b.toolResult as { toolUseId?: unknown } | undefined;
+  if (toolResult && typeof toolResult.toolUseId === "string") return toolResult.toolUseId;
+  return null;
 }
 
 function roleFor(entry: Entry): "user" | "assistant" {
