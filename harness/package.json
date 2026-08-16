@@ -20,7 +20,8 @@
     "test:extensions": "vitest run test/extensions",
     "test:security": "vitest run test/security",
     "capture:fixture": "node --import tsx scripts/capture_fixture.ts --write",
-    "test:plugin-adversarial": "vitest run test/plugins/adversarial"
+    "test:plugin-adversarial": "vitest run test/plugins/adversarial",
+    "reconstruct": "node --import tsx scripts/reconstruct.ts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.4",

@@ -82,7 +82,12 @@ export interface SupervisorOptions {
   }) => RunLoop;
 }
 
-const DEFAULT_SYSTEM_PROMPT =
+/**
+ * Exported so the `reconstruct` CLI can supply the SAME prompt a run used. A second copy
+ * would fail its digest check on every session, which is the check working and the tool
+ * being useless.
+ */
+export const DEFAULT_SYSTEM_PROMPT =
   "You are Claude, working in a shared clawdparty session. Multiple people are " +
   "watching and may send follow-up messages mid-run.";
 

@@ -55,3 +55,11 @@ jobs:
 
       - name: RSpec
         run: bundle exec rspec
+
+      # Gate 3, Rails half. Already inside the RSpec run above — repeated as its own
+      # REQUIRED step for the same reason the harness gates are: this is what proves a
+      # divergence between the record and its projection is DETECTED, and a projection that
+      # is quietly wrong looks complete. One line among 431 is not legible enough for the
+      # check that decides whether the feed can be trusted.
+      - name: Projection equivalence gate
+        run: bundle exec rspec spec/services/events/projection_check_spec.rb spec/services/events/rederive_spec.rb

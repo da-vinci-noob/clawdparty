@@ -70,3 +70,15 @@ jobs:
       # exists, works, and enforces nothing.
       - name: Adapter conformance gate (test:adapters)
         run: npm run test:adapters
+
+      # Gate 3. Two properties that only fail in ways nobody notices: a request that
+      # can no longer be rebuilt from the record, and a credential value reaching the store.
+      # The first degrades silently — every run still works, and the claim that the record
+      # explains them stops being true. The second is a leaked key that looks like a normal
+      # session until someone reads the file.
+      #
+      # `npm run test:reconstruction` pointed at an empty directory for a while and exited
+      # 1 with "No test files found", so it was neither passing nor wired — the same
+      # exists-but-enforces-nothing shape as the adapter gate above.
+      - name: Reconstruction + no-secrets gate (test:reconstruction)
+        run: npm run test:reconstruction

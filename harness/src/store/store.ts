@@ -54,6 +54,16 @@ export interface OpenOptions {
   owner?: string;
   /** Reclaim a lock whose heartbeat is older than this. */
   staleAfterMs?: number;
+  /**
+   * Open for READING only: no schema apply, no lock claim, and `commit` throws.
+   *
+   * Exists so an operator tool can inspect a session the running harness owns. Without it
+   * the only way to read a live record is to stop the harness, which is exactly when the
+   * record is most worth reading. Safe because WAL readers do not block the writer and this
+   * connection cannot write — the lock protects against a second WRITER, and there is no
+   * second writer here.
+   */
+  readOnly?: boolean;
 }
 
 export async function openStore(sessionId: string, opts: OpenOptions): Promise<OpenResult> {
@@ -62,7 +72,7 @@ export async function openStore(sessionId: string, opts: OpenOptions): Promise<O
 
   let db: Database.Database;
   try {
-    db = new Database(path);
+    db = new Database(path, opts.readOnly ? { readonly: true, fileMustExist: true } : {});
   } catch (err) {
     return { ok: false, reason: "corrupt", detail: String(err) };
   }
@@ -73,21 +83,25 @@ export async function openStore(sessionId: string, opts: OpenOptions): Promise<O
   // NORMAL — so the value is set explicitly on every open rather than inherited,
   // otherwise a session's FIRST run would commit under different durability than
   // every later one.
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
+  // A read-only connection cannot set journal_mode or apply a schema, and does not need
+  // to: the file already IS WAL, and creating tables is a writer's job.
+  if (!opts.readOnly) {
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("foreign_keys = ON");
 
-  try {
-    db.exec(readFileSync(SCHEMA_PATH, "utf8"));
-  } catch (err) {
-    db.close();
-    return { ok: false, reason: "corrupt", detail: `schema apply failed: ${String(err)}` };
+    try {
+      db.exec(readFileSync(SCHEMA_PATH, "utf8"));
+    } catch (err) {
+      db.close();
+      return { ok: false, reason: "corrupt", detail: `schema apply failed: ${String(err)}` };
+    }
   }
 
   const found = readSchemaVersion(db);
-  if (found === null) {
+  if (found === null && !opts.readOnly) {
     seedMeta(db, sessionId);
-  } else if (found !== STORE_SCHEMA_VERSION) {
+  } else if (found !== null && found !== STORE_SCHEMA_VERSION) {
     db.close();
     return {
       ok: false,
@@ -98,16 +112,18 @@ export async function openStore(sessionId: string, opts: OpenOptions): Promise<O
   }
 
   const owner = opts.owner ?? randomUUID();
-  const staleAfterMs = opts.staleAfterMs ?? LOCK_STALE_AFTER_MS;
-  const incumbent = claimLock(db, owner, staleAfterMs);
-  if (incumbent) {
-    db.close();
-    return { ok: false, reason: "locked", heldBy: incumbent };
+  if (!opts.readOnly) {
+    const staleAfterMs = opts.staleAfterMs ?? LOCK_STALE_AFTER_MS;
+    const incumbent = claimLock(db, owner, staleAfterMs);
+    if (incumbent) {
+      db.close();
+      return { ok: false, reason: "locked", heldBy: incumbent };
+    }
   }
 
   return {
     ok: true,
-    store: new HarnessStore(sessionId, db, owner),
+    store: new HarnessStore(sessionId, db, owner, opts.readOnly === true),
     schemaVersion: STORE_SCHEMA_VERSION,
   };
 }
@@ -168,10 +184,13 @@ class HarnessStore implements HarnessStoreApi {
   private readonly owner: string;
   private closed = false;
 
-  constructor(sessionId: string, db: Database.Database, owner: string) {
+  private readonly readOnly: boolean;
+
+  constructor(sessionId: string, db: Database.Database, owner: string, readOnly = false) {
     this.sessionId = sessionId;
     this.db = db;
     this.owner = owner;
+    this.readOnly = readOnly;
   }
 
   /**
@@ -182,6 +201,10 @@ class HarnessStore implements HarnessStoreApi {
    */
   commit(tx: Transaction): CommitResult {
     this.assertOpen();
+    // Refused HERE rather than relying on SQLite's own read-only error, so the message names
+    // the cause instead of surfacing as "attempt to write a readonly database" from whichever
+    // statement happened to run first.
+    if (this.readOnly) throw new Error("store opened read-only: commit is not permitted");
     const run = this.db.transaction((): CommitResult => {
       const storeSeqs: Array<number | null> = [];
       const skipped: number[] = [];
@@ -389,6 +412,7 @@ class HarnessStore implements HarnessStoreApi {
   }
 
   heartbeat(): void {
+    if (this.readOnly) return;
     this.assertOpen();
     writeLock(this.db, this.owner);
   }

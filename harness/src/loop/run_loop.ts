@@ -232,14 +232,11 @@ export class RunLoop {
       // DURABLE events only. `turn.events` interleaves the deltas, which are broadcast and
       // never persisted (events.md, two-tier streaming) — they carry no seq, so storing one
       // also puts a row in the log that no client can order.
-      const assistantWrites = turn.events
-        .filter((event) => !normalizer.isEphemeral(event.type))
-        .map((event) =>
-          this.entryFor(
-            event,
-            event.type === "ai_text" || event.type === "ai_thinking" ? turn.blocks : null,
-          ),
-        );
+      const durable = turn.events.filter((event) => !normalizer.isEphemeral(event.type));
+      const carrier = blockCarrier(durable);
+      const assistantWrites = durable.map((event, index) =>
+        this.entryFor(event, index === carrier ? turn.blocks : null),
+      );
 
       if (action.kind === "dispatch_tools") {
         const planned = checkpoint.planTools(
@@ -255,7 +252,7 @@ export class RunLoop {
           spec.runId,
           [
             ...assistantWrites,
-            usageWrite(spec, adapter.id, reserved.reservedUsageId, turn.usage, this.now()),
+            ...usageWrites(spec, adapter.id, reserved.reservedUsageId, turn, this.now()),
           ],
           planned,
         );
@@ -271,7 +268,7 @@ export class RunLoop {
         spec.runId,
         [
           ...assistantWrites,
-          usageWrite(spec, adapter.id, reserved.reservedUsageId, turn.usage, this.now()),
+          ...usageWrites(spec, adapter.id, reserved.reservedUsageId, turn, this.now()),
         ],
         { phase: "checkpoint" },
       );
@@ -345,6 +342,14 @@ export class RunLoop {
     blocks: unknown[];
     toolCalls: Array<{ id: string; name: string; input: unknown }>;
     usage: Usage;
+    /**
+     * Whether the provider actually REPORTED figures for this turn.
+     *
+     * Distinguished from zero because a ledger row is a statement: `0` says the turn was
+     * free, which is false for any request that was made. No report means unknown, and the
+     * honest record of unknown is no row at all — same rule as `RunResult.uncertain`.
+     */
+    usageReported: boolean;
     stopReason: StopReason | null;
     error?: { event: EventEnvelope; stopReason: string };
   }> {
@@ -352,6 +357,7 @@ export class RunLoop {
     const blocks: unknown[] = [];
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
     let usage = zeroUsage();
+    let usageReported = false;
     let stopReason: StopReason | null = null;
 
     try {
@@ -370,6 +376,7 @@ export class RunLoop {
         if (event.t === "message_delta") {
           stopReason = event.stopReason;
           usage = event.usage;
+          usageReported = true;
           // Ephemeral, so it costs no seq — the durable figure is on the ledger.
           this.deps.emit([normalizer.contextUsage(usage, capabilities.contextWindow, this.now())]);
         }
@@ -382,6 +389,7 @@ export class RunLoop {
         blocks,
         toolCalls,
         usage,
+        usageReported,
         stopReason,
         error: {
           event: normalizer.providerError(
@@ -393,7 +401,7 @@ export class RunLoop {
       };
     }
 
-    return { events, blocks, toolCalls, usage, stopReason };
+    return { events, blocks, toolCalls, usage, usageReported, stopReason };
   }
 
   /**
@@ -735,6 +743,54 @@ function toolResultBlock(toolUseId: string, text: string, isError: boolean): unk
     content: [{ type: "text", text }],
     is_error: isError,
   };
+}
+
+/**
+ * Which of a turn's durable entries carries the turn's verbatim blocks — EXACTLY ONE.
+ *
+ * The blocks are a property of the TURN, not of any single event, and the previous rule
+ * ("every `ai_text`/`ai_thinking` entry gets the whole array") got both ends wrong:
+ *
+ *   too many  A thinking-then-text turn produced two on-surface entries each holding the
+ *             full array, so every later request re-sent that turn's content TWICE. With
+ *             adaptive thinking on by default this was the normal path, and byte-comparing
+ *             a rebuilt request against the sent one could never see it — both sides fold
+ *             the same duplicated surface.
+ *   too few   A turn with only a `tool_use` block — an extremely common Claude response,
+ *             with no preamble text — has neither event type, so the block reached the
+ *             surface NOWHERE. The next request then carried a `tool_result` with no
+ *             matching `tool_use`, which the API rejects outright.
+ *
+ * The FIRST claude-actored entry is the carrier: `ai_thinking`, `ai_text` and
+ * `tool_started` are all `actor.kind === "claude"`, so one of them exists whenever the
+ * model produced content, and `foldSurface` merges it into the assistant message in
+ * provider block order.
+ *
+ * Returns -1 when the turn produced no claude-actored entry. A compaction-only turn is
+ * that case (`context_compacted` is system-actored) and is NOT handled here — a follow-up covers it.
+ */
+function blockCarrier(durable: EventEnvelope[]): number {
+  return durable.findIndex((event) => event.actor.kind === "claude");
+}
+
+/**
+ * Zero or one usage write. NO ROW when the provider reported nothing.
+ *
+ * A row of zeroes is a STATEMENT that the turn was free, and no turn that made a request
+ * is. The only honest record of "unknown" is silence — same reasoning as
+ * `RunResult.uncertain`, which is never collapsed to false to simplify a display. An
+ * adapter that forgets to emit `message_delta` should leave a visible hole in the ledger,
+ * not a run that looks free.
+ */
+function usageWrites(
+  spec: RunSpec,
+  provider: string,
+  id: number,
+  turn: { usage: Usage; usageReported: boolean },
+  nowMs: number,
+): Write[] {
+  if (!turn.usageReported) return [];
+  return [usageWrite(spec, provider, id, turn.usage, nowMs)];
 }
 
 function usageWrite(

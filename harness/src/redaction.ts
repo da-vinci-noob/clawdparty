@@ -35,10 +35,28 @@ export function redactCredentials(value: unknown): unknown {
  * Redact FIRST, then truncate to the 8KB cap. The order is load-bearing:
  * truncating first can slice a secret in half and leave the front of it in the
  * record.
+ *
+ * NEVER THROWS, and that is the whole point of the `ai_raw` valve. This is the fallback
+ * the normalizer reaches for when a mapping fails, so it is handed exactly the values
+ * that already broke something — and it used to break on them too: walking and
+ * JSON-stringifying an untrusted object re-triggers a throwing getter, blows the stack on
+ * a cycle, and refuses a BigInt outright. A fallback that fails on its own input is not a
+ * fallback, and the run died with a provider error instead of recording an `ai_raw`.
+ *
+ * A value it cannot serialize degrades to a NAMED marker rather than `{}`: "this could not
+ * be serialized" and "the provider sent nothing" are different facts, and a reader who
+ * cannot tell them apart is looking in the wrong place.
  */
 export function boundRawPayload(raw: unknown): { raw: unknown; truncated: boolean } {
-  const redacted = redactCredentials(raw);
-  const serialized = JSON.stringify(redacted) ?? "";
+  let redacted: unknown;
+  let serialized: string;
+  try {
+    redacted = redactCredentials(raw);
+    serialized = JSON.stringify(redacted) ?? "";
+  } catch (err) {
+    return { raw: { unserializable: String(err).slice(0, 300) }, truncated: true };
+  }
+
   if (Buffer.byteLength(serialized, "utf8") <= AI_RAW_CAP_BYTES) {
     return { raw: redacted, truncated: false };
   }
