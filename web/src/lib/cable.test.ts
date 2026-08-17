@@ -298,3 +298,72 @@ describe("the shared room converges", () => {
     late.handle.stop();
   });
 });
+
+/**
+ * The ephemeral bypass is a property of the ENVELOPE, not a list of type names.
+ *
+ * `context_usage` must reach a live participant and must NOT be replayed to a late joiner, and
+ * the catch-up algorithm needs no change to make that true: it branches on a null `id`, so any
+ * new ephemeral type inherits the behaviour. That is the thing worth pinning — a refactor to
+ * `if (type === "ai_text_delta" || …)` would still pass every existing test while silently
+ * dropping every ephemeral type added after it, which is why the algorithm is left alone.
+ */
+describe("a new ephemeral type inherits the bypass", () => {
+  function ephemeral(type: EventEnvelope["type"]): EventEnvelope {
+    return {
+      id: null,
+      session_id: "s",
+      ai_run_id: "run_1",
+      seq: null,
+      type,
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: { input: 10, output: 1, cache_read: 0, cache_creation: 0, window: 200_000 },
+    };
+  }
+
+  it("applies a live context_usage that arrives during the backfill window", async () => {
+    const applied: EventEnvelope[] = [];
+    const { channel, emit } = fakeChannel();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const catchUp = startCatchUp({
+      channel,
+      backfill: async () => {
+        await gate;
+        return [durable(1)];
+      },
+      apply: (event) => applied.push(event),
+      maxAppliedId: () => 0,
+    });
+
+    // Buffered mid-backfill, exactly like a delta.
+    emit(ephemeral("context_usage"));
+    release?.();
+    const handle = await catchUp;
+
+    expect(applied.filter((e) => e.type === "context_usage")).toHaveLength(1);
+    handle.stop();
+  });
+
+  it("does not backfill it to a late joiner, because it was never persisted", async () => {
+    const stream = [durable(1), ephemeral("context_usage"), durable(2)];
+    const applied: EventEnvelope[] = [];
+    const { channel } = fakeChannel();
+
+    const handle = await startCatchUp({
+      channel,
+      // The server can only return durables; asserting the joiner sees no ephemeral proves the
+      // client is not inventing one either.
+      backfill: async () => stream.filter((e) => e.id !== null),
+      apply: (event) => applied.push(event),
+      maxAppliedId: () => 0,
+    });
+
+    expect(applied.filter((e) => e.id === null)).toHaveLength(0);
+    handle.stop();
+  });
+});

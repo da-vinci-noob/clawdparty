@@ -8,6 +8,7 @@ import {
   selectActiveRunId,
   selectAwaitingReviewRunId,
   selectLatestUsage,
+  selectLiveContext,
   useEventStore,
 } from "../stores/event_store";
 import { SkillsPopover } from "./session/skills_popover";
@@ -47,6 +48,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   // Select PRIMITIVES (not the object) so a new reference each render can't loop Zustand.
   const contextTokens = useEventStore((s) => selectLatestUsage(s)?.contextTokens ?? 0);
   const usageModel = useEventStore((s) => selectLatestUsage(s)?.model ?? null);
+  // The LIVE reading, when a turn has reported one. Primitives again, for the same reason.
+  const liveTokens = useEventStore((s) => selectLiveContext(s)?.contextTokens ?? null);
+  const liveWindow = useEventStore((s) => selectLiveContext(s)?.window ?? null);
   const [text, setText] = useState("");
   // Empty = let the server resolve a default from what the chosen provider actually serves.
   // Set once the user chooses; the option list itself comes from runtime discovery.
@@ -168,13 +172,23 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 
   const showModeControl = !activeRunId; // a new run is created (start or revise)
 
-  // Real context usage from the latest completed run (0 until the first run finishes).
-  // Window follows that run's model (falling back to the currently-selected model),
-  // read from the discovered models list — falling back to 200K when nothing matches.
+  // Context usage, LIVE where the harness has reported it and per-run otherwise.
+  //
+  // The live figure is `context_usage`, emitted every turn , and it wins because it is
+  // fresher: the per-run one only exists once a run has ENDED, so the bar used to sit at the
+  // previous run's number for the whole of the next one. Its window comes from the event — the
+  // adapter's real `capabilities().contextWindow` — so a mid-session model switch re-bases the
+  // denominator here with no model lookup at all.
+  //
+  // The per-run fallback is not redundant: `context_usage` is ephemeral and never backfilled, so
+  // a reload or a late joiner has none of it and reads the durable figure instead.
   const windowModelId = usageModel ?? model;
   const contextWindow =
-    models.find((m) => m.id === windowModelId)?.context_window ?? DEFAULT_CONTEXT_WINDOW;
-  const contextPct = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
+    liveWindow ??
+    models.find((m) => m.id === windowModelId)?.context_window ??
+    DEFAULT_CONTEXT_WINDOW;
+  const shownTokens = liveTokens ?? contextTokens;
+  const contextPct = Math.min(100, Math.round((shownTokens / contextWindow) * 100));
   // The model the latest run ACTUALLY used (from run_started), so a viewer can
   // confirm the selection took effect — Claude can't reliably introspect this itself.
   const runModelLabel = usageModel
@@ -197,9 +211,9 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
         data-testid="prompt-composer"
         className="overflow-hidden rounded-[15px] border border-[#17231b] bg-[#0c0e0c] shadow-[0_8px_30px_rgba(0,0,0,.35)]"
       >
-        {/* Live context-usage bar: the latest completed run's prompt-side tokens
-            (from run_finished/run_failed `usage`) over the model's window. Reads 0
-            until the first run finishes; updates at run end, not live mid-stream. */}
+        {/* Context-usage bar: prompt-side tokens over the model's real window. Live from
+            `context_usage` while a run is turning, and the last completed run's durable figure
+            when there is no live reading (reload, late join, or before the first turn). */}
         <div className="flex items-center gap-[10px] px-[15px] pt-[10px]">
           <span className="font-mono text-[10px] tracking-[0.5px] text-[#6b726b]">CONTEXT</span>
           <div className="h-1 flex-1 overflow-hidden rounded-[3px] bg-[#1c2a20]">
@@ -215,7 +229,7 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                 {runModelLabel} ·{" "}
               </span>
             )}
-            {tokensToK(contextTokens)} / {tokensToK(contextWindow)} · {contextPct}%
+            {tokensToK(shownTokens)} / {tokensToK(contextWindow)} · {contextPct}%
           </span>
         </div>
 

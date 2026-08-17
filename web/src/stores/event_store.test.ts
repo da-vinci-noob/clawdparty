@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
-import { selectDurableEvents, selectLatestUsage, useEventStore } from "./event_store";
+import {
+  selectDurableEvents,
+  selectLatestUsage,
+  selectLiveContext,
+  useEventStore,
+} from "./event_store";
 
 // The executable contract fixture (real spike-derived envelopes, v1.1). Resolved
 // from the web/ package root (vitest runs with cwd = web/).
@@ -351,5 +356,85 @@ describe("selectLatestUsage", () => {
       contextTokens: 50_000,
       model: "claude-sonnet-5",
     });
+  });
+});
+
+/**
+ * `context_usage` is ephemeral and was DROPPED.
+ *
+ * The store's null-id path handled `ai_text_delta`, `ai_thinking_delta` and `presence_changed`,
+ * then fell through to "apply nothing durable". So 's live indicator had nothing to read,
+ * and the bug would have looked like a rendering fault in a component that was working.
+ */
+function contextUsage(over: Partial<Record<string, number>> = {}): EventEnvelope {
+  return {
+    id: null,
+    session_id: "s",
+    ai_run_id: "run1",
+    seq: null,
+    type: "context_usage",
+    actor: { kind: "system" },
+    ts: "2026-08-17T00:00:00.000Z",
+    payload: {
+      input: 10_000,
+      output: 500,
+      cache_read: 2_000,
+      cache_creation: 1_000,
+      window: 200_000,
+      ...over,
+    },
+  };
+}
+
+describe("live context usage", () => {
+  beforeEach(() => useEventStore.getState().reset());
+
+  it("is null before any turn reports one", () => {
+    expect(selectLiveContext(useEventStore.getState())).toBeNull();
+  });
+
+  it("sums everything SENT, so the bar does not jump when the source changes at run end", () => {
+    useEventStore.getState().apply(contextUsage());
+    // input + cache_read + cache_creation — the same sum selectLatestUsage uses. `output` is
+    // deliberately excluded: it is not part of what the next request sends.
+    expect(selectLiveContext(useEventStore.getState())).toEqual({
+      contextTokens: 13_000,
+      window: 200_000,
+    });
+  });
+
+  it("takes the window from the EVENT, so a mid-session model switch re-bases it", () => {
+    useEventStore.getState().apply(contextUsage({ window: 200_000 }));
+    useEventStore.getState().apply(contextUsage({ input: 20_000, window: 1_000_000 }));
+
+    // The harness sends the real capabilities().contextWindow of the model in use; the client
+    // does no model lookup at all, which is what makes the switch free.
+    expect(selectLiveContext(useEventStore.getState())).toEqual({
+      contextTokens: 23_000,
+      window: 1_000_000,
+    });
+  });
+
+  it("is last-writer-wins, not accumulated", () => {
+    useEventStore.getState().apply(contextUsage({ input: 10_000 }));
+    useEventStore.getState().apply(contextUsage({ input: 11_000 }));
+
+    // A reading of current pressure, like presence. Adding them would double-count history.
+    expect(selectLiveContext(useEventStore.getState())?.contextTokens).toBe(14_000);
+  });
+
+  it("never lands in the durable list, and never advances the catch-up cursor", () => {
+    useEventStore.getState().apply(contextUsage());
+
+    expect(selectDurableEvents(useEventStore.getState())).toHaveLength(0);
+    // Advancing the cursor on an ephemeral would make backfill skip real durable events.
+    expect(useEventStore.getState().maxAppliedId).toBe(0);
+  });
+
+  it("is cleared by reset, so a session switch does not inherit the last one", () => {
+    useEventStore.getState().apply(contextUsage());
+    useEventStore.getState().reset();
+
+    expect(selectLiveContext(useEventStore.getState())).toBeNull();
   });
 });

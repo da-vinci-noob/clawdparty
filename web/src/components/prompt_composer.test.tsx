@@ -844,3 +844,110 @@ describe("PromptComposer account disclosure", () => {
     expect(screen.queryByTestId("composer-account-notice")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The bar is LIVE.
+ *
+ * It previously showed only the last COMPLETED run's usage, so during a run it sat at the
+ * previous run's number and read 0% for the whole of the first one. The harness has been
+ * emitting `context_usage` every turn the entire time; the web dropped it.
+ */
+describe("PromptComposer live context bar", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+  afterEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+
+  const contextUsage = (input: number, window: number): EventEnvelope =>
+    ({
+      id: null,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: null,
+      type: "context_usage",
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: { input, output: 100, cache_read: 0, cache_creation: 0, window },
+    }) as EventEnvelope;
+
+  const completedRun = (inputTokens: number): EventEnvelope[] => [
+    {
+      id: 1,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: 1,
+      type: "run_started",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-08-17T00:00:00.000Z",
+      payload: { model: "claude-opus-4-8", cwd: "/r" },
+    } as EventEnvelope,
+    {
+      id: 2,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: 2,
+      type: "run_finished",
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:01.000Z",
+      payload: { usage: { input_tokens: inputTokens } },
+    } as EventEnvelope,
+  ];
+
+  const stubOpus = () =>
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json(
+          providersResponse([{ id: "claude-opus-4-8", label: "Opus", window: 200_000 }]),
+        ),
+      ),
+    );
+
+  it("reads the live figure mid-run, before any run has completed", async () => {
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+    useEventStore.getState().apply(contextUsage(50_000, 200_000));
+
+    // 0% until now: nothing had completed, so there was no durable usage to read.
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("50K / 200K · 25%");
+  });
+
+  it("re-bases the denominator from the event when the model switches mid-session", async () => {
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+    useEventStore.getState().apply(contextUsage(50_000, 200_000));
+    useEventStore.getState().apply(contextUsage(50_000, 1_000_000));
+
+    // The window rides on the event (the adapter's real capabilities().contextWindow), so this
+    // needs no model lookup and cannot go stale against the picker.
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("50K / 1M · 5%");
+  });
+
+  it("prefers the live reading over the last completed run's", async () => {
+    stubOpus();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    useEventStore.getState().applyMany(completedRun(10_000));
+    useEventStore.getState().apply(contextUsage(80_000, 200_000));
+
+    // Fresher wins: the next run's pressure is already 80K while the durable figure still
+    // describes the run that ended.
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("80K / 200K · 40%");
+  });
+
+  it("falls back to the durable figure when there is no live reading (reload / late join)", async () => {
+    stubOpus();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    useEventStore.getState().applyMany(completedRun(24_000));
+
+    // `context_usage` is ephemeral and never backfilled, so this path is the only thing a
+    // reloaded page or a late joiner has.
+    expect(await screen.findByTestId("context-usage")).toHaveTextContent("24K / 200K · 12%");
+  });
+});

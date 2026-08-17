@@ -5,7 +5,7 @@
 // last-writer-wins per participant. Selectors keep a delta flood from
 // re-rendering the durable log. Mirrors the frozen event-envelope two-tier rule.
 
-import type { EventEnvelope } from "@clawdparty/contracts";
+import type { ContextUsagePayload, EventEnvelope } from "@clawdparty/contracts";
 import { create } from "zustand";
 
 // `block` is treated as an opaque accumulation key (resolved to
@@ -104,6 +104,13 @@ export interface EventStoreState {
   terminatedRuns: Set<string>;
   // Presence, last-writer-wins per participant id.
   presenceByParticipant: Map<string, boolean>;
+  /**
+   * The most recent LIVE context reading , or null before the first turn reports one.
+   *
+   * Ephemeral and never persisted, so a reload has none of it — the bar falls back to the
+   * durable per-run figure on `run_finished`/`run_failed`, which is why both sources exist.
+   */
+  liveContextUsage: ContextUsagePayload | null;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
   maxAppliedId: number;
   /**
@@ -130,6 +137,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   settledBlocks: new Set(),
   terminatedRuns: new Set(),
   presenceByParticipant: new Map(),
+  liveContextUsage: null,
   maxAppliedId: 0,
   runPending: false,
 
@@ -160,6 +168,14 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
           next.set(payload.participant_id, payload.online ?? false);
           set({ presenceByParticipant: next });
         }
+        return;
+      }
+      if (event.type === "context_usage") {
+        // Last-writer-wins, like presence: it is a whole reading of current pressure, not an
+        // increment to accumulate. The harness sends the window of the model IN USE, so a
+        // mid-session model switch re-bases the denominator with no client-side lookup
+        //.
+        set({ liveContextUsage: (event.payload ?? null) as ContextUsagePayload | null });
         return;
       }
       // Any other null-id event is ephemeral-by-envelope; apply nothing durable.
@@ -207,6 +223,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       settledBlocks: new Set(),
       terminatedRuns: new Set(),
       presenceByParticipant: new Map(),
+      liveContextUsage: null,
       maxAppliedId: 0,
       runPending: false,
     }),
@@ -316,6 +333,28 @@ export function selectChangedPaths(state: Pick<EventStoreState, "durableList">):
     }
   }
   return [...seen];
+}
+
+/**
+ * The LIVE context reading, preferred over the per-run one when a turn has reported it.
+ *
+ * `window` comes from the event, not from a client-side model lookup: it is the adapter's real
+ * `capabilities().contextWindow` for the model in use, so switching models mid-session re-bases
+ * the denominator without the client knowing anything about models.
+ */
+export function selectLiveContext(
+  state: EventStoreState,
+): { contextTokens: number; window: number } | null {
+  const usage = state.liveContextUsage;
+  if (usage === null) {
+    return null;
+  }
+  return {
+    // Everything SENT this turn — the same sum the per-run figure uses, so the bar does not
+    // jump when it switches source at run end.
+    contextTokens: (usage.input ?? 0) + (usage.cache_read ?? 0) + (usage.cache_creation ?? 0),
+    window: usage.window,
+  };
 }
 
 export interface ContextUsage {
