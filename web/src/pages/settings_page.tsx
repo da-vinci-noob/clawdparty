@@ -2,6 +2,7 @@ import { type FC, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AuthTestTab } from "../components/settings/auth_test_tab";
 import { ConfigurationTab } from "../components/settings/configuration_tab";
+import { ExtensionsTab } from "../components/settings/extensions_tab";
 import { ProviderTab } from "../components/settings/provider_tab";
 import { SkillsTab } from "../components/settings/skills_tab";
 import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
@@ -20,6 +21,7 @@ const TABS = [
   { id: "provider", label: "Provider" },
   { id: "auth", label: "Auth test" },
   { id: "skills", label: "Skills setup" },
+  { id: "extensions", label: "Extensions" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -74,6 +76,7 @@ export const SettingsPage: FC = () => {
         {tab === "provider" && <ProviderTab sessionId={sessionId} />}
         {tab === "auth" && <AuthTestTab />}
         {tab === "skills" && <SkillsTab sessionId={sessionId} />}
+        {tab === "extensions" && <ExtensionsTab sessionId={sessionId} />}
       </section>
     </main>
   );

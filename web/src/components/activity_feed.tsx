@@ -186,6 +186,11 @@ function renderEvent(
       // A social banner ("<name> joined the session"), same framing as the run
       // lifecycle — the name is resolved from actor.id via the names map.
       return <RunBanner event={event} names={names} />;
+    case "plugin_enabled":
+    case "plugin_disabled":
+      // A capability change, in the timeline. Which rules are in force decides what Claude may do,
+      // so the room learns of a change the same way it learns everything else.
+      return <RunBanner event={event} names={names} />;
     case "skill_changed":
       // Not a run event, but it belongs in the timeline: a skill is instructions Claude will
       // follow, so who changed what the room can do is part of its history. Recording it and

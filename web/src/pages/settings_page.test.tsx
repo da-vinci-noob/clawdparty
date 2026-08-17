@@ -73,7 +73,7 @@ describe("the settings route", () => {
     renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
 
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(tabs).toEqual(["Configuration", "Provider", "Auth test", "Skills setup"]);
+    expect(tabs).toEqual(["Configuration", "Provider", "Auth test", "Skills setup", "Extensions"]);
   });
 
   it("is reachable by a viewer, not just an owner", async () => {

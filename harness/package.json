@@ -26,7 +26,7 @@
     "capture:converse": "node --import tsx scripts/capture_converse.ts",
     "probe:converse": "node --import tsx scripts/probe_converse_models.ts",
     "probe:limits": "node --import tsx scripts/probe_limits.ts",
-    "test:plugin-adversarial": "vitest run test/plugins/adversarial",
+    "test:plugin-adversarial": "vitest run test/plugins",
     "reconstruct": "node --import tsx scripts/reconstruct.ts"
   },
   "dependencies": {

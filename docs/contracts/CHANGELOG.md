@@ -214,6 +214,27 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [extensions] — per-session extension enablement; no third-party loading (additive)
+
+**No `CONTRACT_VERSION` bump: no event type or payload changed.** `plugin_enabled` and
+`plugin_disabled` have existed since 1.5.0 and are now actually emitted.
+
+**New endpoints.** `GET /api/sessions/:id/plugins` (any participant) and
+`PATCH /api/sessions/:id/plugins/:id` (owner). On the harness: `GET /plugins?session_id=` and
+`POST /sessions/:id/plugins`. Both harness routes are bearer-authed like every other.
+
+**Behaviour change worth noting.** `request_header`'s `plugins` field was hardcoded `[]`, so a session
+that disabled a rule produced a snapshot identical to one that had it on. It now carries the resolved
+set, sorted — the snapshot is fingerprinted, and iteration order must not make an unchanged set look
+changed. A consumer diffing snapshots will start seeing this field vary.
+
+**No install endpoint, deliberately.** A measurement showed that a `worker_thread` with `env: {}` isolates
+the environment and nothing else.  is met by construction — no code path loads foreign code —
+and `npm run test:plugin-adversarial` asserts that absence. `origin: "external"` stays in the
+register's union so a record written by a future build remains readable; nothing produces it today.
+
+**Toggles apply at the next run start**, not mid-run. See `harness_protocol.md` §10.
+
 ## [failure-hints] — a mid-run credential failure names the RIGHT fix (clarifying)
 
 **No `CONTRACT_VERSION` bump: no type, field, or endpoint changed.** `provider_error` already carried

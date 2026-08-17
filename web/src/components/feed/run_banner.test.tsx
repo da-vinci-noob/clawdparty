@@ -244,3 +244,51 @@ describe("a failed run explains itself", () => {
     expect(screen.queryByTestId("run-failed-explanation")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * an extension change appears in the TIMELINE, attributed.
+ *
+ * The panel shows current state; the feed shows it CHANGING — and mid-run a toggle changes what
+ * Claude is allowed to do. Same argument as `tool_refused` having its own row: policy
+ * acting is not a tool breaking, and a change nobody sees is an audit trail nobody reads.
+ */
+describe("an extension enabled or disabled", () => {
+  const toggle = (type: "plugin_enabled" | "plugin_disabled"): EventEnvelope =>
+    ({
+      id: 11,
+      session_id: "s",
+      ai_run_id: null,
+      seq: 11,
+      type,
+      actor: { kind: "user", id: "7" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { id: "bundled:deny-destructive-bash", active: [] },
+    }) as unknown as EventEnvelope;
+
+  it("names who did it and what changed", () => {
+    render(<RunBanner event={toggle("plugin_disabled")} names={new Map([["7", "Priya"]])} />);
+
+    const banner = screen.getByTestId("feed-run-banner");
+    expect(banner).toHaveTextContent("Priya");
+    expect(banner).toHaveTextContent("disabled the rule bundled:deny-destructive-bash");
+  });
+
+  it("distinguishes enabling from disabling", () => {
+    render(<RunBanner event={toggle("plugin_enabled")} names={new Map([["7", "Priya"]])} />);
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent(/enabled the rule/);
+  });
+
+  it("renders the id verbatim, matching the panel and the refusal message", () => {
+    // Three names for one rule is how a reader loses the thread between the feed, the panel and a
+    // `tool_refused` row.
+    render(<RunBanner event={toggle("plugin_enabled")} names={new Map()} />);
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent(
+      "bundled:deny-destructive-bash",
+    );
+  });
+
+  it("does not fall back to the raw event type", () => {
+    render(<RunBanner event={toggle("plugin_enabled")} names={new Map()} />);
+    expect(screen.getByTestId("feed-run-banner")).not.toHaveTextContent("plugin_enabled");
+  });
+});

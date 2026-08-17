@@ -57,6 +57,19 @@ module Harness
       get('/aws-profiles')
     end
 
+    # GET /plugins?session_id= — every bundled contributor, with whether this session has it on.
+    # Session-scoped so `enabled` is a real boolean rather than null.
+    def list_plugins(session_id)
+      get('/plugins', session_id: session_id)
+    end
+
+    # POST /sessions/:id/plugins — the RECORD half of a toggle. The harness writes the
+    # `session.plugins` register; Rails appends the event, because a plugin toggle belongs to no run
+    # and the harness allocates seq per run.
+    def set_plugin_enabled(session_id, plugin_id:, enabled:)
+      post("/sessions/#{session_id}/plugins", { plugin_id: plugin_id, enabled: enabled })
+    end
+
     # POST /skills — write a SKILL.md into the repo's `.claude/skills` or the host's. The harness
     # validates the name as a strict single segment, so a write cannot land outside the root.
     def add_skill(cwd:, scope:, name:, description:, body:, replace: false)

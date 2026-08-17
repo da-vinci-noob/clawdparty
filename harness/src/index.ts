@@ -13,6 +13,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { bearerToken, tokenMatches } from "./auth.js";
 import { listAwsProfiles, listConnectors, listSkills } from "./capabilities.js";
 import { type HarnessConfig, loadConfig } from "./config.js";
+import { BUNDLED } from "./extensions/host.js";
 import { listProviders } from "./providers/discovery.js";
 import { verifyProviders } from "./providers/verify.js";
 import { type SkillScope, addSkill, removeSkill } from "./skills_admin.js";
@@ -121,6 +122,50 @@ export function buildServer(
    * answering `invalid_token`.
    */
   app.post("/verify", async () => verifyProviders());
+
+  /**
+   * GET /plugins — every contributor this build ships, with what a session has ON.
+   *
+   * BUNDLED ONLY, by decision: there is no install route and no discovery from disk, because a
+   * measurement showed that a worker thread with an empty env contains nothing but the
+   * environment. Read-only and unscoped by session unless one is named.
+   */
+  app.get<{ Querystring: { session_id?: string } }>("/plugins", async (req) => {
+    const sessionId = req.query.session_id;
+    const active = sessionId ? await supervisor.activePlugins(sessionId) : null;
+    return {
+      plugins: BUNDLED.map((plugin) => ({
+        ...plugin,
+        // `null` when no session was named — distinct from `false`, which would claim it is off.
+        enabled: active === null ? null : active.includes(plugin.id),
+      })),
+    };
+  });
+
+  /**
+   * POST /sessions/:id/plugins — enable or disable one for a session.
+   *
+   * Rails gates this on `manage_session` first; the harness RE-CHECKS nothing about roles (it has no
+   * participant model) but it does re-check the contributor id and its contract version, because the
+   * harness owns the record and must not write an enablement it cannot honour.
+   */
+  app.post<{ Params: { id: string }; Body: { plugin_id?: string; enabled?: boolean } }>(
+    "/sessions/:id/plugins",
+    async (req, reply) => {
+      const { plugin_id: pluginId, enabled } = req.body ?? {};
+      if (typeof pluginId !== "string" || typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "plugin_id and enabled are required" });
+      }
+      const result = await supervisor.setPluginEnabled(req.params.id, pluginId, enabled);
+      if (!result.ok) {
+        // 422 rather than 500: an unknown id or an incompatible contract version is a caller error,
+        // and the reason names which.
+        return reply.code(422).send({ error: "plugin_refused", message: result.reason });
+      }
+      // The RESOLVED set, so Rails can put it on the event it appends rather than asking again.
+      return reply.code(200).send({ plugin_id: pluginId, enabled, active: result.active });
+    },
+  );
 
   // GET /connectors?cwd= / GET /skills?cwd= — read-only, cwd-scoped discovery.
   app.get<{ Querystring: { cwd?: string } }>("/connectors", async (req) =>

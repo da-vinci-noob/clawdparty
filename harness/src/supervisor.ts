@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import type { EventEnvelope } from "@clawdparty/contracts";
-import { ExtensionRegistry } from "./extensions/points.js";
+import { activeFor, enablementWrites, handlersFor } from "./extensions/host.js";
+import { ExtensionRegistry, type Handler, type PointName } from "./extensions/points.js";
 import { bundledRules } from "./extensions/rules/deny_destructive_bash.js";
 import { RunLoop, type RunSpec } from "./loop/run_loop.js";
 import type { McpConnect } from "./mcp/client.js";
@@ -146,13 +147,11 @@ export class Supervisor {
    * the process rather than reset on every run — a rule that fails on three
    * consecutive runs is as broken as one that fails three times in one.
    */
-  private readonly extensions: ExtensionRegistry;
 
   constructor(transport: Transport, opts: SupervisorOptions) {
     this.transport = transport;
     this.opts = opts;
     this.tools = buildRegistry();
-    this.extensions = opts.extensions ?? buildExtensions();
   }
 
   /**
@@ -245,9 +244,15 @@ export class Supervisor {
     const laneStore = laneScoped(store, lane);
     claimLane(laneStore, lane, input.run_id);
 
+    // The contributor set is PER SESSION: a session that disabled a rule must not get
+    // it, so the registry is built from what that session has enabled rather than from the shared
+    // one. An INJECTED registry still wins outright, which is what test doubles rely on.
+    const active = activeFor(store, input.session_id);
+    const extensions = this.opts.extensions ?? registryOf(handlersFor(store, input.session_id));
+
     const loop = this.opts.buildLoop
       ? this.opts.buildLoop({ store: laneStore, adapter, emit })
-      : new RunLoop({ store: laneStore, adapter, tools, emit, extensions: this.extensions });
+      : new RunLoop({ store: laneStore, adapter, tools, emit, extensions });
 
     const spec: RunSpec = {
       runId: input.run_id,
@@ -274,6 +279,8 @@ export class Supervisor {
       // from the echo, which is the honest record: the run does not have it.
       connectors: mcp.loaded,
       skills: skills.names,
+      // Recorded on the snapshot, so the record can say which rules were in force for this turn.
+      plugins: active.map((plugin) => plugin.id),
       connectorsFailed: mcp.failed.map((failure) => ({
         name: failure.server,
         kind: classifyConnectorFailure(failure.reason),
@@ -328,6 +335,47 @@ export class Supervisor {
         await run.done.catch(() => undefined);
       }),
     );
+  }
+
+  /** Which contributors a session has on, for `GET /plugins`. */
+  async activePlugins(sessionId: string): Promise<string[]> {
+    const store = await this.storeFor(sessionId);
+    try {
+      return activeFor(store, sessionId).map((plugin) => plugin.id);
+    } finally {
+      void this.releaseStore(sessionId);
+    }
+  }
+
+  /**
+   * Enable or disable a contributor for a session, durably.
+   *
+   * Writes the RECORD only. The `plugin_enabled`/`plugin_disabled` EVENT is appended by Rails, which
+   * is the established shape for a session-scoped occurrence — `skill_changed` works the same way
+   * (`skills_controller.rb`), and the reason is structural: the harness owns the per-RUN `seq` space
+   * and a plugin toggle belongs to no run, so it has no seq to allocate. Rails owns `events` and
+   * `Events::Append`, which appends and broadcasts in one transaction.
+   *
+   * The DESCRIPTOR is copied into the register rather than referenced , so a session stays
+   * readable after a contributor leaves the build.
+   */
+  async setPluginEnabled(
+    sessionId: string,
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<{ ok: true; active: string[] } | { ok: false; reason: string }> {
+    const store = await this.storeFor(sessionId);
+    try {
+      const planned = enablementWrites(store, sessionId, pluginId, enabled);
+      if (!planned.ok) return planned;
+
+      store.commit({ writes: planned.writes });
+      // Returned so Rails can put the resolved set on its event without asking again — and so a
+      // caller sees what the toggle actually produced rather than what it requested.
+      return { ok: true, active: activeFor(store, sessionId).map((plugin) => plugin.id) };
+    } finally {
+      void this.releaseStore(sessionId);
+    }
   }
 
   /** Open the session's store, or share the one already open, refcounted by lane. */
@@ -446,6 +494,19 @@ export class Supervisor {
 export function buildExtensions(): ExtensionRegistry {
   const registry = new ExtensionRegistry();
   for (const rule of bundledRules) registry.register(rule);
+  return registry;
+}
+
+/**
+ * A registry holding exactly these handlers — the per-session set.
+ *
+ * A fresh registry per run rather than unregistering from a shared one: strikes and auto-disable
+ * state live on the registry , and carrying one session's strike history into another would
+ * disable a contributor for a room that never saw it fail.
+ */
+function registryOf(handlers: Array<Handler<PointName>>): ExtensionRegistry {
+  const registry = new ExtensionRegistry();
+  for (const handler of handlers) registry.register(handler);
   return registry;
 }
 

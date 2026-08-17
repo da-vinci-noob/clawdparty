@@ -58,7 +58,12 @@ jobs:
       - name: Durable-write cost gate (p99 < 5ms per step)
         run: npm run test:perf
 
-      # Gate 1 (scenario S3). Its own REQUIRED step because it is the only thing that
+      # which under  option A is an ABSENCE: no code path loads foreign code. Wired now
+      # that the tests exist — it was deliberately left unwired while the glob matched nothing.
+      - name: Plugin-adversarial gate (no third-party loading)
+        run: npm run test:plugin-adversarial
+
+      # Gate 1. Its own REQUIRED step because it is the only thing that
       # exercises a real SIGKILL: it spawns a child, kills it at every commit boundary,
       # and asserts no `never` tool ran twice and no call went unanswered. It has already
       # found three defects invisible to every other test, so a regression here must be

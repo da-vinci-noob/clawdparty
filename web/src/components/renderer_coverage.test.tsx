@@ -134,12 +134,11 @@ const ALL_EMITTED: readonly string[] = [...EVENT_TYPES, AI_RAW];
  * is the whole reason it exists: `plugin_enabled`/`plugin_disabled` are in the taxonomy and land in
  * the raw fallback today.
  *
- * The pair below must SHRINK to empty as  lands.
+ * It is now EMPTY, which is the intended end state: `plugin_enabled`/`plugin_disabled` were the
+ * last two entries and now render. Kept rather than deleted, because the next type added on the
+ * harness side needs somewhere honest to sit while its renderer is written.
  */
-const PENDING_RENDERER: Record<string, string> = {
-  plugin_enabled: "no plugin host exists yet, so nothing emits it in practice",
-  plugin_disabled: "same as plugin_enabled",
-};
+const PENDING_RENDERER: Record<string, string> = {};
 
 const RENDERED = ALL_EMITTED.filter(
   (type) => !(type in DELIBERATELY_NOT_RENDERED) && !(type in PENDING_RENDERER),

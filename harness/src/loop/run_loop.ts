@@ -71,6 +71,14 @@ export interface RunSpec {
   connectorsFailed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
   /** Skills indexed in the system prompt and loadable via the `skill` tool. */
   skills?: string[];
+  /**
+   * Extension contributors active for this run, by id.
+   *
+   * On the SNAPSHOT rather than merely in process memory: which rules were in force is part of what
+   * produced a turn, so a reader of the record must be able to see it. A run whose gate was disabled
+   * is a materially different run.
+   */
+  plugins?: string[];
   signal: AbortSignal;
 }
 
@@ -233,7 +241,12 @@ export class RunLoop {
         effort: spec.effort ?? null,
         system_prompt_digest: request.digest(spec.systemPrompt),
         tool_schemas_digest: request.digest(JSON.stringify(built.tools)),
-        plugins: [] as string[],
+        // The active contributor set, model-visible-and-recorded. It was an empty
+        // literal, so a session that disabled a rule produced a snapshot identical to one that had
+        // it on — and `request_header` is emit-on-change, so the change was invisible in the record.
+        // Sorted, because the snapshot is FINGERPRINTED: iteration order must not make an unchanged
+        // set look changed.
+        plugins: [...(spec.plugins ?? [])].sort(),
       };
 
       // Emitted when ESTABLISHED OR CHANGED, not per request (the design record's

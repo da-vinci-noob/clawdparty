@@ -54,6 +54,12 @@ Rails.application.routes.draw do
       # the app's only writes outside a session worktree. The DELETE renames aside, never unlinks.
       post 'skills', to: 'skills#create'
       delete 'skills/:id', to: 'skills#destroy'
+
+      # Extensions. Reading is open to any participant — which gate is in force decides what
+      # Claude may do, so a viewer watching a refusal should be able to see the rule. Toggling is
+      # owner-only, the same gate as skills, and for the same reason.
+      get 'plugins', to: 'plugins#index'
+      patch 'plugins/:id', to: 'plugins#update'
       # Chat: POST /api/sessions/:session_id/messages
       resources :messages, only: :create
       # Read-only repo browse: GET /api/sessions/:session_id/files (tree) and

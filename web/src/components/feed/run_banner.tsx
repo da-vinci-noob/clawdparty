@@ -38,6 +38,22 @@ function skillSentence(payload: {
   return `${verb} the ${where} skill ${payload.name}`;
 }
 
+/**
+ * An extension turned on or off.
+ *
+ * The PANEL shows current state; the feed is what shows it CHANGING — and mid-run it changes what
+ * Claude is allowed to do, so it belongs in the timeline with the participant who did it. Same
+ * argument as giving `tool_refused` its own row: policy acting is not a tool breaking.
+ *
+ * The id is rendered verbatim rather than prettified, because it is the identity the panel, the
+ * record and the refusal message all use — three names for one rule is how a reader loses the thread.
+ */
+function pluginSentence(event: EventEnvelope): string {
+  const payload = event.payload as { id?: string };
+  const verb = event.type === "plugin_enabled" ? "enabled" : "disabled";
+  return `${verb} the rule ${payload.id ?? "(unnamed)"}`;
+}
+
 // Whether a run_started's RESOLVED scope withheld every built-in tool — the shape a run gets on
 // a model that cannot use tools. Read from the event, so a late joiner arriving by
 // backfill learns it too: otherwise a run that can only answer is indistinguishable from one
@@ -97,7 +113,9 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   const label =
     event.type === "skill_changed"
       ? skillSentence(event.payload as Parameters<typeof skillSentence>[0])
-      : (LABELS[event.type] ?? event.type);
+      : event.type === "plugin_enabled" || event.type === "plugin_disabled"
+        ? pluginSentence(event)
+        : (LABELS[event.type] ?? event.type);
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const answerOnly = isAnswerOnly(event);
   const failed = failedConnectors(event);
