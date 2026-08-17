@@ -50,7 +50,16 @@ StartLimitIntervalSec=120
 
 # systemd gives a unit a minimal PATH, so node/mise/git are missing unless named.
 # This is the most common reason a unit that works interactively fails supervised.
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+#
+# VERSION-MANAGER SHIMS COME FIRST, and the ordering is. Measured on the
+# macOS side of this pair: with the package manager's bin first, a project pinning
+# `node = "22"` via mise resolved the system v26 while the developer in that directory
+# got v22 — so Claude would have built against a toolchain the developer never uses.
+#
+# `%h` is systemd's own home expansion, available because this is a USER unit. A
+# missing directory on PATH is harmless; a developer using pyenv/nvm/rbenv adds its
+# shim directory here, since nothing can detect that at install time.
+Environment=PATH=%h/.local/share/mise/shims:%h/.asdf/shims:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 
 [Install]
 WantedBy=default.target

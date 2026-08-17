@@ -3,7 +3,8 @@
   launchd user agent for the host harness .
 
   Install:
-    sed "s|REPO_ROOT_PLACEHOLDER|$PWD|g" docker/launchd/com.clawdparty.harness.plist \
+    sed -e "s|REPO_ROOT_PLACEHOLDER|$PWD|g" -e "s|HOME_PLACEHOLDER|$HOME|g" \
+      docker/launchd/com.clawdparty.harness.plist \
       > ~/Library/LaunchAgents/com.clawdparty.harness.plist
     launchctl load -w ~/Library/LaunchAgents/com.clawdparty.harness.plist
 
@@ -55,11 +56,21 @@
 
   <!-- launchd gives an agent a near-empty PATH, so `node`, `mise` and `git` are all
        missing unless named here. This is the single most common reason a unit that
-       works interactively fails under supervision. -->
+       works interactively fails under supervision.
+
+       VERSION-MANAGER SHIMS COME FIRST, and that ordering is . Measured:
+       with Homebrew first, a project pinning `node = "22"` via mise resolved
+       /opt/homebrew/bin/node (v26.5.1) while the developer in that same directory got
+       v22.22.0 — so Claude would have run a build against a toolchain the developer
+       never uses. Shims ahead of Homebrew is also how `mise activate` orders them.
+
+       Both common managers are listed; a missing directory on PATH is harmless. A
+       developer using something else (pyenv, nvm, rbenv…) adds its shim directory
+       here — nothing can detect that at install time. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>HOME_PLACEHOLDER/.local/share/mise/shims:HOME_PLACEHOLDER/.asdf/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 </dict>
 </plist>

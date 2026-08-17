@@ -28,21 +28,48 @@ breaking — downstream code treated the payload as opaque and keeps working.
 
 ---
 
-## ⚠️ MIGRATION WINDOW — OPEN (harness architecture)
+## ✅ MIGRATION WINDOW — CLOSED (harness architecture)
 
-**Opened: 2026-08-16.** **Must close by: 2026-09-15.** **Signed off: 2026-08-16.** Status: **OPEN — breaking
-changes permitted.** Change: `001-harness-harness-architecture`.
+**Opened: 2026-08-16.** **Closed: 2026-08-17.** **Must close by: 2026-09-15** — closed 29 days early.
+**Signed off: 2026-08-16.** Status: **CLOSED — breaking changes are now defects .**
+Change: `001-harness-harness-architecture`.
 
-This is the first and intended-only declared window in the project's life. Per ,
-breaking interface changes are permitted **only** inside it; outside it, changes are
-additive or they are defects. Per  the rename rides in the same window as the
-protocol breaks, so the coordination cost is paid once instead of twice.
+### What actually shipped inside it
 
-**The close date is a deadline, not a forecast.** `plan.md` sequences milestones
-(M-1 → M7) but assigns no calendar dates, so 30 days is a bound chosen here to make the
-window falsifiable — a window that cannot be breached is not a window. Move it
-deliberately if M0 needs longer; do not let it lapse silently. **A follow-up writes the closing
-entry** with the real ship date and the final list of what actually shipped.
+All six declared breaking changes shipped, each verified in the tree rather than assumed:
+
+| # | Declared | Shipped as |
+|---|---|---|
+| B1 | `POST /runs` gains `lane`/`provider`/`effort`, drops `claude_session_id` | Done. `claude_session_id` survives only in comments recording its removal; resumption is harness session + lane, carried by `resume_context`. |
+| B2 | `POST /runs/:id/permission_mode` REMOVED | Done. Route absent (asserted as a 404 in `server.test.ts`, because a removal nothing tests comes back); replaced by the `tool:before` extension point plus the per-run tool set. |
+| B3 | `GET /models` → `{ providers: [...] }` | Done. Never 500s; an unavailable provider is reported with a reason, and since [discovery-classification] that reason distinguishes an expired credential from a network fault. |
+| B4 | Heartbeat gains `store_seq_high_water` | Done. |
+| B5 | One-active-run per SESSION lifted → per LANE | Done, latest of the six. `index_ai_runs_one_active_per_lane` on `(session_id, lane)` replaces the per-session index; verified against the live database, not only as a migration. |
+| B6 | The harness is no longer a container; every route bearer-authed | Done. No `harness` service in `docker-compose.yml`, the process refuses to start in a container , and `inbound_auth.test.ts` derives its route list from Fastify's own routing table so a new route cannot skip auth. |
+
+**Three additive changes rode the window** and are recorded in their own entries below: the event
+taxonomy grew 22 → 32 types, `CONTRACT_VERSION` went `{1,4}` → `{1,14}`, and the endpoint surface
+gained verify/skills/plugins/aws-profiles routes plus projection repair.
+
+**Two breaking changes were CONSIDERED and rejected**, which is worth recording because the window was
+the only chance to make them: rewriting  to permit third-party plugin loading (measurement showed
+that `env: {}` contains only the environment, so the claim could not be honoured — bundled-only
+instead), and hard-deleting a participant on removal (`events.actor_participant_id` has a foreign key,
+so the database refuses to orphan history — `removed_at` instead).
+
+**What closing means from now on.** Additive is cheap and needs a `minor` bump plus an entry here.
+Anything that breaks the envelope, removes a type, or changes a frozen endpoint signature is a
+**defect**, not an amendment (Principle I) — it needs a fix, not a version bump. A future window would
+need its own sign-off and its own declared list.
+
+This was the first and intended-only declared window in the project's life. Per ,
+breaking interface changes were permitted **only** inside it; outside it, changes are
+additive or they are defects. Per  the rename rode in the same window as the
+protocol breaks, so the coordination cost was paid once instead of twice.
+
+**The close date was a deadline, not a forecast** — 30 days chosen to make the window falsifiable,
+because a window that cannot be breached is not a window. It closed on day 2, with all six declared
+breaks shipped. The list above is what the close-out audit was written to produce.
 
 Every breaking change below is foreseen **now**, and all of them land in **M0**
 (`harness_http.md` → Compatibility and sequencing). Anything discovered later that would
