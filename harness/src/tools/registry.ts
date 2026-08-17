@@ -55,10 +55,31 @@ export interface ToolDefinition {
   run(input: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 
+/** Enough to tell two colliding contributors apart: an MCP tool carries its server in its name. */
+function describe(tool: ToolDefinition): string {
+  return tool.schema.description ? `"${tool.schema.description.slice(0, 60)}"` : tool.name;
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
 
+  /**
+   * REFUSES a duplicate id rather than replacing it.
+   *
+   * `set()` made the last registration win, so which tool a run actually got depended on
+   * registration order — the one resolution rule the requirement forbids. A run assembles
+   * built-ins, then the session's MCP tools, then a `skill` tool, so a collision meant the room
+   * believed it had one tool while the model was handed another, with nothing in the record saying
+   * so. Throwing loses the run; keeping the wrong tool loses the guarantee.
+   */
   register(tool: ToolDefinition): this {
+    const existing = this.tools.get(tool.name);
+    if (existing) {
+      throw new Error(
+        `tool id ${tool.name} is already registered (${describe(existing)}); ` +
+          `${describe(tool)} cannot take the same id — rename one of them`,
+      );
+    }
     this.tools.set(tool.name, tool);
     return this;
   }
