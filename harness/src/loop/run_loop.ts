@@ -293,6 +293,11 @@ export class RunLoop {
       // ── the uncertainty window ──────────────────────────────────────────────
       const turn = await this.streamTurn(built, normalizer, capabilities);
       if (turn.error) {
+        // An abort is not a provider fault. The signal is checked HERE as well as at the turn
+        // boundary above, because an interrupt arriving MID-STREAM is only visible as a transport
+        // throw — which `classifyStreamError` knows nothing about and calls `api_error`. Measured
+        // on a live run: pressing Stop produced `run_failed` with no explanation (S9).
+        if (spec.signal.aborted) return this.interrupt(spec, normalizer, totalUsage);
         emit([turn.error.event]);
         return this.fail(spec, normalizer, turn.error.stopReason, totalUsage);
       }
@@ -791,10 +796,15 @@ export class RunLoop {
   private async interrupt(
     spec: RunSpec,
     normalizer: LoopNormalizer,
-    _usage: Usage,
+    usage: Usage,
   ): Promise<RunOutcome> {
     await this.notifyComplete(spec, { outcome: "interrupted", uncertain: false, turns: 0 });
-    const event = normalizer.runInterrupted(this.now());
+    // Was `_usage` — accepted and discarded, so a run stopped after several paid turns recorded
+    // no spend at all (contract 1.15).
+    const event = normalizer.runInterrupted(
+      { usage, total_cost_usd: this.cost(spec, usage) },
+      this.now(),
+    );
     this.terminate(spec, event, { outcome: "interrupted", uncertain: false, stopReason: null });
     return { outcome: "interrupted", uncertain: false, stopReason: null, turns: 0 };
   }

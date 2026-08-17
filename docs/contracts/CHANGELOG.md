@@ -241,6 +241,40 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [1.15.0] — an interrupted run reports what it spent, and an interrupt is not a failure (additive)
+
+**`CONTRACT_VERSION` 1.14 → 1.15.** `RunInterruptedPayload` was `Record<string, never>` and now
+carries two OPTIONAL fields, `usage` and `total_cost_usd`, matching `run_finished`/`run_failed`.
+Additive: a consumer that ignores them is unaffected, and both follow the v1.7 rule — absent means
+UNKNOWN, never zero, for a request that was actually made.
+
+Two defects, both found by driving S9 on the live stack.
+
+**1. A mid-stream interrupt was recorded as a FAILURE.** A real Bedrock run in the `side` lane was
+interrupted while streaming; the harness accepted the interrupt with a 200 and the run terminated as
+`run_failed` with `stop_reason: "api_error"`, `explanation: null`, `api_error_status: null`. Someone
+who pressed Stop was told their run hit an API error, and given a remedy — "check network access to
+the provider" — for something they did on purpose.
+
+The cause is where the loop LOOKS: `spec.signal.aborted` was checked at the top of the turn loop,
+which is a turn BOUNDARY. An abort arriving mid-turn is visible only to the transport, which throws,
+and `classifyStreamError` knows about 401/403/429 and nothing about aborts. The signal is now
+checked at the catch as well. Deliberately the SIGNAL and not the error's wording: every transport
+words an abort differently, and the run's own signal is ground truth about what was asked for.
+
+Interrupt is one of the five capabilities this product never cuts, and the suite was green:
+`independent_interrupt.test.ts` asserts which lanes stay ACTIVE after an interrupt and never looks
+at the event that resulted.
+
+**2. `RunLoop.interrupt()` took the accumulated usage as `_usage` and discarded it.** Exactly the
+shape `RunFailedPayload.explanation` was in before 1.12. A run stopped after several paid turns
+recorded no spend at all, and because Rails copies `usage` off any terminal event, populating the
+payload makes that spend land with no Rails change.
+
+Consumers need no change. `web/src/stores/event_store.ts` deliberately ignores `run_interrupted`
+when computing the context gauge and still may — that selector is about context pressure, not
+billing.
+
 ## [changeset-payloads] — three declared fields are now actually populated (clarifying)
 
 **No `CONTRACT_VERSION` bump: no type, field, or endpoint changed.** What changed is that the

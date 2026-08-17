@@ -1,4 +1,9 @@
-import type { Actor, EnvelopeType, EventEnvelope } from "@clawdparty/contracts";
+import type {
+  Actor,
+  EnvelopeType,
+  EventEnvelope,
+  RunInterruptedPayload,
+} from "@clawdparty/contracts";
 import { EPHEMERAL_EVENT_TYPES } from "@clawdparty/contracts";
 import { isCompactionType } from "../context/compaction.js";
 import type { ProviderEvent, Usage } from "../providers/contract.js";
@@ -365,8 +370,8 @@ export class LoopNormalizer {
     return this.envelope("run_failed", { kind: "system" }, payload, nowMs);
   }
 
-  runInterrupted(nowMs: number = Date.now()): EventEnvelope {
-    return this.envelope("run_interrupted", this.userActor(), {}, nowMs);
+  runInterrupted(payload: RunInterruptedPayload = {}, nowMs: number = Date.now()): EventEnvelope {
+    return this.envelope("run_interrupted", this.userActor(), payload, nowMs);
   }
 
   aiRaw(raw: unknown, nowMs: number = Date.now()): EventEnvelope {

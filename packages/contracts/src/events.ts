@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 14 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 15 } as const;
 
 /**
  * The 31 frozen event type names. Adding or removing a name is a CONTRACT
@@ -376,7 +376,22 @@ export interface RunFailedPayload {
    */
   explanation: string | null;
 }
-export type RunInterruptedPayload = Record<string, never>;
+export interface RunInterruptedPayload {
+  /**
+   * What the run spent before it was stopped (additive since v1.15).
+   *
+   * The payload was deliberately empty, and `RunLoop.interrupt()` took the accumulated total as
+   * `_usage` and discarded it — the same shape as `RunFailedPayload.explanation` before v1.12. An
+   * interrupt after several turns has really spent those tokens, and Rails copies `usage` off any
+   * terminal event, so an empty payload made a multi-turn run that was stopped look free.
+   *
+   * Both fields follow the same rule as the other terminal events: `null`/absent means UNKNOWN,
+   * never zero, for a request that was actually made (v1.7).
+   */
+  usage?: TokenUsage;
+  /** `null` when no price was computed — see `RunFinishedPayload.total_cost_usd`. */
+  total_cost_usd?: number | null;
+}
 export interface ChangesetReadyPayload {
   files_changed: number;
   insertions: number;

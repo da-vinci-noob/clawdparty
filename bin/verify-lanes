@@ -1,0 +1,286 @@
+#!/usr/bin/env node
+// S9 — two concurrent work streams in one session , against the running stack.
+//
+// The unit tests cover each claim in isolation with the model stubbed. This drives two REAL runs at
+// once, which is the only way to check the parts that are about concurrency rather than logic: that
+// both are active at the same moment, that each event is attributable to its own lane, that
+// interrupting one leaves the other running, and that two lanes touching one file surfaces a
+// conflict instead of quietly picking a winner.
+//
+// Usage: [PROVIDER=…] bin/verify-lanes <absolute-repo-path> [base-url]
+
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const WebSocket = createRequire(`${ROOT}/web/package.json`)("ws");
+
+const REPO = process.argv[2];
+const BASE = process.argv[3] ?? "http://localhost:3000";
+const CABLE = `${BASE.replace(/^http/, "ws")}/~cable`;
+const PROVIDER = process.env.PROVIDER ?? "anthropic-bedrock";
+
+if (!REPO) {
+  console.error("usage: bin/verify-lanes <absolute-repo-path> [base-url]");
+  process.exit(2);
+}
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+function note(label, detail) {
+  console.log(`  --   ${label}${detail ? ` — ${detail}` : ""}`);
+}
+
+function cookieFrom(response) {
+  const jar = (response.headers.getSetCookie?.() ?? []).find((c) => c.startsWith("clawd_uid="));
+  if (!jar) throw new Error("no clawd_uid cookie in response");
+  return jar.split(";")[0];
+}
+
+async function api(path, { method = "GET", cookie, body, allow = [] } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  if (!response.ok && !allow.includes(response.status)) {
+    throw new Error(`${method} ${path} → ${response.status}: ${text.slice(0, 400)}`);
+  }
+  return { status: response.status, json: text ? JSON.parse(text) : null };
+}
+
+function watch(sessionId, cookie) {
+  const identifier = JSON.stringify({ channel: "SessionChannel", session_id: String(sessionId) });
+  const socket = new WebSocket(CABLE, ["actioncable-v1-json"], {
+    headers: { Cookie: cookie, Origin: BASE },
+  });
+  const seen = [];
+  const waiters = [];
+
+  socket.on("message", (raw) => {
+    const frame = JSON.parse(raw.toString());
+    if (frame.type === "welcome") {
+      socket.send(JSON.stringify({ command: "subscribe", identifier }));
+      return;
+    }
+    if (!frame.message) return;
+    seen.push(frame.message);
+    for (const w of [...waiters]) {
+      if (w.match(frame.message)) {
+        waiters.splice(waiters.indexOf(w), 1);
+        w.done(frame.message);
+      }
+    }
+  });
+
+  return {
+    seen,
+    until(match, ms, what) {
+      const already = seen.find(match);
+      if (already) return Promise.resolve(already);
+      return new Promise((done, fail) => {
+        const timer = setTimeout(() => fail(new Error(`timed out (${ms}ms) waiting for ${what}`)), ms);
+        waiters.push({ match, done: (e) => (clearTimeout(timer), done(e)) });
+      });
+    },
+    close: () => socket.close(),
+  };
+}
+
+const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+const terminalOf = (seen, runId) => seen.find((e) => e.ai_run_id === runId && TERMINAL.includes(e.type));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  console.log(`\nS9 — two concurrent lanes, live, against ${BASE}\n  repo: ${REPO}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "S9 concurrent lanes",
+      name: "Owner",
+      mode: "review",
+      repository_path: REPO,
+    }),
+  });
+  if (!created.ok) throw new Error(`session create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = cookieFrom(created);
+  console.log(`session ${sessionId} (review mode)\n`);
+
+  const feed = watch(sessionId, cookie);
+  await sleep(500);
+
+  // BOTH lanes edit shared.py, which is what S9 step 4 is about.
+  const start = (lane, prompt) =>
+    api(`/api/sessions/${sessionId}/runs`, {
+      method: "POST",
+      cookie,
+      body: { prompt, provider: PROVIDER, lane },
+    });
+
+  const [main, side] = await Promise.all([
+    start("main", "In shared.py, change the return value of tag() to 'main'. Nothing else."),
+    start("side", "In shared.py, change the return value of tag() to 'side'. Nothing else."),
+  ]);
+  // 202, not 201: the run is ACCEPTED for the harness to execute, not created-and-done.
+  check(
+    main.status === 202 && side.status === 202,
+    "two runs accepted in ONE session — the active-run index is per LANE",
+    `main=${main.json.id} side=${side.json.id}`,
+  );
+
+  const mainId = String(main.json.id);
+  const sideId = String(side.json.id);
+  const mainStart = await feed.until((e) => e.ai_run_id === mainId && e.type === "run_started", 90_000, "main run_started");
+  const sideStart = await feed.until((e) => e.ai_run_id === sideId && e.type === "run_started", 90_000, "side run_started");
+
+  // CONCURRENT, not merely both-eventually: neither had reached a terminal event when the other
+  // started. Sequential execution would satisfy "two runs exist" and fail this.
+  check(
+    !terminalOf(feed.seen, mainId) && !terminalOf(feed.seen, sideId),
+    "both were live at the same moment (neither had finished when the other started)",
+  );
+  check(
+    mainStart.payload.lane === undefined || mainStart.payload.lane === "main",
+    "the default lane is implicit in run_started (omitted for main)",
+    `main lane=${mainStart.payload.lane ?? "(omitted)"}`,
+  );
+  check(sideStart.payload.lane === "side", "a non-default lane names itself", `side lane=${sideStart.payload.lane}`);
+  check(
+    mainStart.payload.cwd !== sideStart.payload.cwd,
+    "each lane runs in its OWN worktree",
+    `${mainStart.payload.cwd.split("/").pop()} vs ${sideStart.payload.cwd.split("/").pop()}`,
+  );
+
+  // Interrupt the SIDE lane and prove the other is untouched. Racy by nature: if side already
+  // finished there is nothing to interrupt, and that is reported rather than failed.
+  const interrupted = await (async () => {
+    if (terminalOf(feed.seen, sideId)) return "already finished";
+    const res = await api(`/api/runs/${sideId}/interrupt`, { method: "POST", cookie, allow: [409, 422] });
+    if (res.status !== 200 && res.status !== 202) return `refused (${res.status})`;
+    await feed.until((e) => e.ai_run_id === sideId && TERMINAL.includes(e.type), 120_000, "side terminal");
+    return "interrupted";
+  })();
+
+  if (interrupted === "interrupted") {
+    const sideTerm = terminalOf(feed.seen, sideId);
+    check(sideTerm.type === "run_interrupted", "the interrupted lane stopped", sideTerm.type);
+    check(!terminalOf(feed.seen, mainId), "the OTHER lane was still running when it stopped");
+  } else {
+    note("interrupt not exercised — the side lane had already completed", interrupted);
+  }
+
+  const mainTerm = await feed.until((e) => e.ai_run_id === mainId && TERMINAL.includes(e.type), 600_000, "main terminal");
+  check(mainTerm.type === "run_finished", "the surviving lane completed on its own", mainTerm.type);
+
+  // Every event is attributable: no event belongs to both lanes, and each lane's stream is
+  // separable by ai_run_id alone (which is what lets the feed label a row).
+  const laneOf = new Map([
+    [mainId, "main"],
+    [sideId, "side"],
+  ]);
+  // Session-scoped events (chat, participant_joined) carry no run; only run-scoped ones are
+  // attributable, and `ai_run_id` is absent rather than null on some of them.
+  const attributable = feed.seen.filter((e) => e.ai_run_id !== null && e.ai_run_id !== undefined);
+  check(
+    attributable.every((e) => laneOf.has(String(e.ai_run_id))),
+    "every run-scoped event names one of the two runs",
+    `${attributable.length} events`,
+  );
+
+  // Independently reviewable: each lane has its own diff, anchored to its own base.
+  const mainDiff = await api(`/api/runs/${mainId}/diff`, { cookie });
+  check(mainDiff.json.lane === "main", "the diff endpoint reports the run's lane", mainDiff.json.lane);
+  check(
+    Array.isArray(mainDiff.json.files) && mainDiff.json.files.length > 0,
+    "the main lane produced its own reviewable changeset",
+    (mainDiff.json.files ?? []).map((f) => f.path).join(", "),
+  );
+
+  // S9 step 4 — the conflict. Approve main so its change is COMMITTED on its own branch, then ask
+  // the side lane's diff: this is the `approved` kind, the one an unrecorded base_sha silenced.
+  await feed.until((e) => e.ai_run_id === mainId && e.type === "changeset_ready", 60_000, "main changeset_ready");
+  await api(`/api/runs/${mainId}/approve`, { method: "POST", cookie });
+
+  // The interrupted side lane never got as far as editing the file, so the conflict needs a lane
+  // that actually produced a change. Its lane is free again now, which is itself the claim that an
+  // interrupt releases a lane rather than wedging it.
+  const revived = await start("side", "In shared.py, change the return value of tag() to 'side'. Nothing else.");
+  check(revived.status === 202, "the interrupted lane accepts a new run — it was released, not wedged");
+  const revivedId = String(revived.json.id);
+
+  await feed.until((e) => e.ai_run_id === revivedId && e.type === "run_started", 90_000, "revived run_started");
+  const revivedTerm = await feed.until(
+    (e) => e.ai_run_id === revivedId && TERMINAL.includes(e.type),
+    600_000,
+    "revived terminal",
+  );
+  check(revivedTerm.type === "run_finished", "the second side run completed", revivedTerm.type);
+  await feed.until((e) => e.ai_run_id === revivedId && e.type === "changeset_ready", 60_000, "revived changeset_ready");
+
+  const sideDiff = await api(`/api/runs/${revivedId}/diff`, { cookie });
+  const conflicts = sideDiff.json.conflicts ?? [];
+  check(
+    (sideDiff.json.files ?? []).some((f) => f.path === "shared.py"),
+    "the side lane produced its OWN changeset to the same file",
+    (sideDiff.json.files ?? []).map((f) => f.path).join(", "),
+  );
+  check(
+    conflicts.some((c) => c.path === "shared.py" && c.lane === "main"),
+    "S9.4 — the reviewer is TOLD the main lane already changed the same file",
+    JSON.stringify(conflicts),
+  );
+  check(
+    conflicts.some((c) => c.kind === "approved"),
+    "and told it is already APPROVED — the kind an unrecorded base_sha silenced",
+    conflicts.map((c) => c.kind).join(",") || "(none)",
+  );
+
+  // S9.5, the half observable from outside: rejecting one lane must revert THAT lane and leave the
+  // other's committed work alone. The context-severing half (the next run must not resume a
+  // conversation that believes reverted edits still exist) is asserted in
+  // `test/crash_injection/reject_no_resume.test.ts`, because it is a property of the request
+  // surface rather than of anything the API exposes.
+  await api(`/api/runs/${revivedId}/reject`, { method: "POST", cookie });
+  await feed.until((e) => e.ai_run_id === revivedId && e.type === "changeset_rejected", 60_000, "changeset_rejected");
+  const afterReject = await api(`/api/runs/${revivedId}/diff`, { cookie });
+  check(
+    (afterReject.json.files ?? []).length === 0,
+    "rejecting the side lane reverted ITS worktree",
+    `${(afterReject.json.files ?? []).length} file(s) left`,
+  );
+  // Asked of git, not of the diff endpoint. Both lanes branch from the same commit so their
+  // recorded base_sha is IDENTICAL by design, and `Git::Diff` floors at HEAD — so once a lane's
+  // work is committed its diff is empty too. Neither figure can distinguish "reverted" from
+  // "approved", which is why the check reads the two worktrees.
+  const headOf = (dir) => execFileSync("git", ["-C", dir, "rev-parse", "HEAD"]).toString().trim();
+  const mainCwd = mainStart.payload.cwd;
+  const sideCwd = sideStart.payload.cwd;
+  check(
+    headOf(mainCwd) !== headOf(sideCwd),
+    "S9.5 — the approved lane advanced by its own commit; the rejected one did not",
+    `main=${headOf(mainCwd).slice(0, 8)} side=${headOf(sideCwd).slice(0, 8)}`,
+  );
+  check(
+    execFileSync("git", ["-C", sideCwd, "status", "--porcelain"]).toString().trim() === "",
+    "and the rejected lane's tree is clean, so its next run is not blocked as dirty",
+  );
+
+  feed.close();
+  console.log(`\n${failures === 0 ? "PASS" : `FAIL (${failures})`} — ${feed.seen.length} live events across 2 lanes\n`);
+  console.log(`session ${sessionId}; branches clawd/session-${sessionId} and clawd/session-${sessionId}-side`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}\n`);
+  process.exit(1);
+});
