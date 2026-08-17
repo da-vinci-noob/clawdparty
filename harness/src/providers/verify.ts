@@ -1,3 +1,4 @@
+import { classifyStreamError } from "./anthropic_family.js";
 import type { ProviderAdapter, Usage } from "./contract.js";
 import { configuredAdapters } from "./discovery.js";
 
@@ -81,13 +82,21 @@ export async function verifyProvider(
       durationMs: now() - started,
     };
   } catch (err) {
+    // CLASSIFIED, like every other failure path in the harness. This was the one place a failure on a
+    // GOOD credential came back as raw vendor text: a live 429 arrived as
+    // `{"error":{"type":"rate_limit_error","message":"Error"}}` — the vendor's own `message` is the
+    // word "Error" — so the field meant to carry the diagnostic carried nothing, while the harness
+    // already knew a 429 means wait and retry.
+    const classified = classifyStreamError(err, adapter.failureHints);
     return {
       ...base,
       ok: false,
       model: chosen,
       credentialSource: probe.credentialSource,
-      // The provider's own words. This is the diagnostic — "AccessDeniedException", "invalid
-      // token", "expired" — and paraphrasing it would throw away the only actionable part.
+      reason: classified.kind,
+      remedy: classified.remedy,
+      // KEPT alongside the classification, never replaced by it: the provider's own words carry the
+      // `request_id`, which is what a vendor support thread needs and no classifier can reconstruct.
       error: err instanceof Error ? err.message : String(err),
       durationMs: now() - started,
     };

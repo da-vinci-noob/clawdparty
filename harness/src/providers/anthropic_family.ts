@@ -1,5 +1,5 @@
 import { isCompactionType } from "../context/compaction.js";
-import type { ProviderEvent, StopReason, Usage } from "./contract.js";
+import type { FailureHints, ProviderEvent, StopReason, Usage } from "./contract.js";
 
 /**
  * Stream mapping shared by every Anthropic-family adapter (direct, host OAuth, Bedrock).
@@ -200,4 +200,52 @@ export function classifyProbeFailure(
 function isAuthResolutionFailure(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /could not resolve authentication method|expected one of apiKey/i.test(message);
+}
+
+/**
+ * A provider failure always names a remedy — a generic message violates.
+ *
+ * The STATUS is classified here (it is HTTP, not vendor-specific) and the WORDS come from the
+ * adapter, which is the only thing that knows which credential it consumes. Without that split
+ * every provider got the same remedy, so an expired AWS SSO session was answered with
+ * `claude setup-token` — advice that fixes nothing.
+ *
+ * The fallbacks are deliberately vendor-NEUTRAL. An adapter that declares no hints should produce
+ * vague advice, never advice for somebody else's credential.
+ */
+export function classifyStreamError(
+  err: unknown,
+  hints?: FailureHints,
+): { kind: string; message: string; remedy: string } {
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 401) {
+    return {
+      kind: "credential_expired",
+      message: "the provider rejected the credential (401)",
+      remedy: hints?.expired ?? "Refresh this provider's credential and start a new run.",
+    };
+  }
+  if (status === 403) {
+    return {
+      kind: "not_entitled",
+      message: "the provider refused the request as unentitled (403)",
+      // NOT a re-authentication prompt: the credential is valid, so logging in again changes
+      // nothing. Telling someone to re-auth here sends them in a circle.
+      remedy:
+        hints?.notEntitled ??
+        "This credential is valid but not permitted to use this model. Check its access, or pick a model it can serve.",
+    };
+  }
+  if (status === 429) {
+    return {
+      kind: "api_error",
+      message: "rate limited (429)",
+      remedy: "Wait and retry; reduce concurrent runs if this persists.",
+    };
+  }
+  return {
+    kind: "api_error",
+    message: String(err),
+    remedy: hints?.unreachable ?? "Check network access to the provider and retry the run.",
+  };
 }
