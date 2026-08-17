@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import type { ExtensionRegistry } from "../extensions/points.js";
 import { type PriceTable, costOf, loadPriceTable } from "../pricing.js";
-import type { ProviderAdapter, ProviderRequest, StopReason, Usage } from "../providers/contract.js";
+import type {
+  FailureHints,
+  ProviderAdapter,
+  ProviderRequest,
+  StopReason,
+  Usage,
+} from "../providers/contract.js";
 import type { LoopStore, Write } from "../store/types.js";
 import type { ToolContext, ToolRegistry, ToolResult } from "../tools/registry.js";
 import * as checkpoint from "./checkpoint.js";
@@ -437,7 +443,7 @@ export class RunLoop {
         }
       }
     } catch (err) {
-      const classified = classifyStreamError(err);
+      const classified = classifyStreamError(err, this.deps.adapter.failureHints);
       return {
         durableEvents,
         blocks,
@@ -940,14 +946,38 @@ function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
-/** A provider failure always names a remedy — a generic message violates. */
-function classifyStreamError(err: unknown): { kind: string; message: string; remedy: string } {
+/**
+ * A provider failure always names a remedy — a generic message violates.
+ *
+ * The STATUS is classified here (it is HTTP, not vendor-specific) and the WORDS come from the
+ * adapter, which is the only thing that knows which credential it consumes. Without that split
+ * every provider got the same remedy, so an expired AWS SSO session was answered with
+ * `claude setup-token` — advice that fixes nothing.
+ *
+ * The fallbacks are deliberately vendor-NEUTRAL. An adapter that declares no hints should produce
+ * vague advice, never advice for somebody else's credential.
+ */
+function classifyStreamError(
+  err: unknown,
+  hints?: FailureHints,
+): { kind: string; message: string; remedy: string } {
   const status = (err as { status?: number } | null)?.status;
   if (status === 401) {
     return {
       kind: "credential_expired",
       message: "the provider rejected the credential (401)",
-      remedy: "Refresh the credential — `claude setup-token` or a new API key.",
+      remedy: hints?.expired ?? "Refresh this provider's credential and start a new run.",
+    };
+  }
+  if (status === 403) {
+    return {
+      kind: "not_entitled",
+      message: "the provider refused the request as unentitled (403)",
+      // NOT a re-authentication prompt: the credential is valid, so logging in again changes
+      // nothing. Telling someone to re-auth here sends them in a circle.
+      remedy:
+        hints?.notEntitled ??
+        "This credential is valid but not permitted to use this model. Check its access, or pick a model it can serve.",
     };
   }
   if (status === 429) {
@@ -960,6 +990,6 @@ function classifyStreamError(err: unknown): { kind: string; message: string; rem
   return {
     kind: "api_error",
     message: String(err),
-    remedy: "Check network access to the provider and retry the run.",
+    remedy: hints?.unreachable ?? "Check network access to the provider and retry the run.",
   };
 }

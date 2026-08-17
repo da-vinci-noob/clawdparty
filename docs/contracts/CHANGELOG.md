@@ -207,6 +207,31 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [failure-hints] — a mid-run credential failure names the RIGHT fix (clarifying)
+
+**No `CONTRACT_VERSION` bump: no type, field, or endpoint changed.** `provider_error` already carried
+`kind`, `message` and `remedy` (1.5.0). What changed is which words a real host produces.
+
+`classifyStreamError` hardcoded one remedy for every provider — "`claude setup-token` or a new API
+key" — so a developer whose **AWS SSO session expired mid-run** was told to run a command that fixes
+nothing. Confidently wrong advice, and the same defect [discovery-classification] fixed one layer up.
+
+The loop now classifies the HTTP **status** (not vendor-specific) and the **adapter** supplies the
+words, through a new optional `ProviderAdapter.failureHints { expired, notEntitled, unreachable }`.
+The Bedrock adapters say `aws sso login`; the first-party ones reuse their existing `PROBE_HINTS`, so
+a provider's mid-run message and its discovery message cannot drift apart.
+
+**A 403 is now `not_entitled`, where it used to be `api_error`.** A valid-but-unentitled credential is
+not fixed by re-authenticating, so its remedy must not suggest it — telling someone to log in again
+sends them in a circle.
+
+`failureHints` is OPTIONAL so a test double need not restate it, and the fallback is deliberately
+vendor-NEUTRAL: an adapter that declares none produces vague advice rather than advice for somebody
+else's credential. A test asserts every registered adapter declares its own, so the fallback is never
+reached in production.
+
+Consumers need no change — they already render whatever `kind`/`remedy` arrive.
+
 ## [lanes] — one active run per LANE; diff reports cross-lane conflicts (B5 lands)
 
 **No `CONTRACT_VERSION` bump: no event type or payload changed.** This is the endpoint + schema half

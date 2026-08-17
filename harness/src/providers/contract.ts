@@ -43,6 +43,29 @@ export interface ProviderAdapter {
 
   /** Entitlement posture — recorded with the adapter, never assumed. */
   readonly entitlement: EntitlementPosture;
+
+  /**
+   * What to tell a participant when THIS provider's credential fails mid-run.
+   *
+   * The loop classifies the HTTP status and the adapter supplies the words, because only the
+   * adapter knows which credential it consumes. One hardcoded remedy for every provider sent a
+   * developer whose AWS SSO session had expired to run `claude setup-token`, which fixes nothing
+   * and is confidently wrong — the same defect already fixed for the discovery path.
+   *
+   * Optional so a test double need not restate it, and the FALLBACK is deliberately vague rather
+   * than vendor-specific: a missing hint should produce non-specific advice, never advice for the
+   * wrong credential.
+   */
+  readonly failureHints?: FailureHints;
+}
+
+export interface FailureHints {
+  /** 401 — the credential was rejected. */
+  expired: string;
+  /** 403 — the credential is valid but not permitted here. Re-authenticating fixes nothing. */
+  notEntitled: string;
+  /** Anything else. */
+  unreachable: string;
 }
 
 export type ProbeResult =

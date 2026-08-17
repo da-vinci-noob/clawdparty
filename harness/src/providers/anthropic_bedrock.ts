@@ -192,6 +192,19 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   readonly id = "anthropic-bedrock";
   readonly displayName = "Amazon Bedrock";
 
+  /**
+   * The AWS session's own words. One remedy for every provider told a developer whose SSO
+   * session had expired to run `claude setup-token`, which fixes nothing — and `aws sso login` is
+   * something only this adapter knows to say.
+   */
+  readonly failureHints = {
+    expired:
+      "The AWS credential was rejected (401). Run `aws sso login` (or refresh the key) and start a new run.",
+    notEntitled:
+      "The AWS credential is valid but this account is not entitled to this model (403). Request Bedrock model access, or pick a model the account can serve.",
+    unreachable: "Could not reach Bedrock. Check network access and the region, then retry the run",
+  } as const;
+
   readonly entitlement: EntitlementPosture = {
     credentialKind: "cloud_marketplace",
     // The customer's own AWS account under their own agreement, so no third party is

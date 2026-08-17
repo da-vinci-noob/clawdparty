@@ -94,6 +94,10 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
   readonly id = "anthropic-direct";
   readonly displayName = "Anthropic (direct)";
 
+  // The SAME strings the probe uses — one set of words per adapter, so the mid-run message
+  // and the discovery message cannot drift apart.
+  readonly failureHints = PROBE_HINTS;
+
   readonly entitlement: EntitlementPosture = {
     credentialKind: "api_key",
     thirdPartyClientPermitted: "yes",

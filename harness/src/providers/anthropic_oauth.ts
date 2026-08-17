@@ -113,6 +113,10 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
   readonly id = "anthropic-oauth";
   readonly displayName = "Anthropic (host login)";
 
+  // The SAME strings the probe uses — one set of words per adapter, so the mid-run message
+  // and the discovery message cannot drift apart.
+  readonly failureHints = PROBE_HINTS;
+
   readonly entitlement: EntitlementPosture = {
     credentialKind: "subscription",
     // NOT "no", and not "yes". The vendor's terms make this the account owner's call, and
