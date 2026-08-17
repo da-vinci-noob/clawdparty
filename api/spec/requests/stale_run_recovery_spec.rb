@@ -11,7 +11,7 @@ RSpec.describe('Stale run recovery') do
   before do
     wt_path = "/repo/.clawdparty/worktrees/session-#{session.id}"
     allow_any_instance_of(Git::WorktreeManager)
-      .to(receive_messages(ensure_worktree!: wt_path, dirty?: false))
+      .to(receive_messages(ensure_worktree!: wt_path, dirty?: false, base_sha: '0' * 40))
     allow_any_instance_of(Harness::Client).to(receive(:start_run)
       .and_return(Harness::Client::Result.new(status: 202, body: {})))
   end

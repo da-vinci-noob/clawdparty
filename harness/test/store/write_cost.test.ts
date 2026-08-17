@@ -53,6 +53,7 @@ function report(label: string, samples: number[]): void {
   const max = Math.max(...samples).toFixed(3);
   // Printed, not just asserted: the number is the deliverable, and a future regression is far
   // easier to read against a recorded baseline than against a bare pass/fail.
+  // biome-ignore lint/suspicious/noConsole: the measurement IS this test's output.
   console.log(`${label}: n=${samples.length} p50=${p50}ms p99=${p99}ms max=${max}ms`);
 }
 

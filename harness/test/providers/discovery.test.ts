@@ -25,6 +25,21 @@ function fakeHome(): string {
   return dir;
 }
 
+/**
+ * A credentials file that actually holds a Claude login. The slot is claimed on CONTENTS, not
+ * existence — the same file also stores MCP server logins, so `{}` is not a credential.
+ * Token material here is obviously fake.
+ */
+function writeClaudeLogin(): void {
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(
+    join(home, ".claude", ".credentials.json"),
+    JSON.stringify({
+      claudeAiOauth: { accessToken: "sample-not-real", expiresAt: 4_000_000_000_000 },
+    }),
+  );
+}
+
 /** Discovery with a completely empty environment, so nothing leaks in from the host. */
 function discover(env: Record<string, string | undefined> = {}, opts = {}) {
   return discoverAnthropicCredential({ env, home, os: "linux", ...opts });
@@ -39,8 +54,7 @@ afterEach(() => {
 
 describe("precedence — first match wins (R5)", () => {
   it("puts ANTHROPIC_API_KEY ahead of everything", () => {
-    mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+    writeClaudeLogin();
     const result = discover({ ANTHROPIC_API_KEY: "real", ANTHROPIC_AUTH_TOKEN: "also-real" });
 
     expect(result).toMatchObject({ source: "env:ANTHROPIC_API_KEY", usable: true });
@@ -75,8 +89,7 @@ describe("precedence — first match wins (R5)", () => {
   });
 
   it("finds the credentials file the CLI writes", () => {
-    mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+    writeClaudeLogin();
 
     expect(discover()).toMatchObject({
       source: "file:~/.claude/.credentials.json",
@@ -96,8 +109,7 @@ describe("precedence — first match wins (R5)", () => {
 
 describe("the empty-key trap", () => {
   it("reports an EMPTY ANTHROPIC_API_KEY as selected-and-invalid, not absent", () => {
-    mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+    writeClaudeLogin();
 
     const result = discover({ ANTHROPIC_API_KEY: "" });
 
@@ -119,8 +131,7 @@ describe("the empty-key trap", () => {
   });
 
   it("does NOT claim the slot when the variable is genuinely unset", () => {
-    mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+    writeClaudeLogin();
 
     expect(discover()).toMatchObject({ source: "file:~/.claude/.credentials.json" });
   });
@@ -130,8 +141,7 @@ describe("Q6 host paths — read directly, no mount", () => {
   it("reads ~/.claude/.credentials.json from the real filesystem", () => {
     // Under the container topology this file had to arrive through a bind mount.
     // On the host there is no mount in the credential path at all.
-    mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude", ".credentials.json"), '{"anything":true}');
+    writeClaudeLogin();
 
     expect(discover().source).toBe("file:~/.claude/.credentials.json");
   });

@@ -26,7 +26,16 @@ const PROBE_HINTS = {
   notEntitled:
     "The credential is valid but not entitled to this API (403). Check the workspace's model access.",
   unreachable: "Could not reach the Anthropic API. Check network access and try again",
+  noCredential:
+    "The SDK found no credential to send. Export ANTHROPIC_API_KEY, or pick Anthropic (host login).",
 } as const;
+
+/** The slots this adapter serves. A host login belongs to `anthropic-oauth`. */
+const DIRECT_SOURCES = new Set([
+  "env:ANTHROPIC_API_KEY",
+  "env:ANTHROPIC_AUTH_TOKEN",
+  "env:workload-identity-federation",
+]);
 
 /**
  * The reference adapter: first-party Anthropic, full capability set.
@@ -121,6 +130,19 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
         reason: discovery.source === "none" ? "no_credential" : "credential_expired",
         // Required and actionable: a broken credential must name itself AND the fix.
         remedy: discovery.remedy ?? `${discovery.problem ?? "unusable credential"}`,
+      };
+    }
+
+    if (!DIRECT_SOURCES.has(discovery.source)) {
+      // A host login won the slot, so THIS adapter has nothing to serve — `anthropic-oauth`
+      // does. Symmetric with the check that adapter already makes when an API key wins. Without
+      // it both adapters probed the same credential and reported the same failure twice, which
+      // reads as two broken providers instead of one credential in the other one's lane.
+      return {
+        available: false,
+        reason: "no_credential",
+        remedy: `Your Claude host login (${discovery.source}) is what is configured, not an API
+key. Pick Anthropic (host login), or export ANTHROPIC_API_KEY to use the direct path.`,
       };
     }
 

@@ -11,7 +11,8 @@ RSpec.describe(Runs::Start) do
     instance_double(
       Git::WorktreeManager,
       ensure_worktree!: "/repo/.clawdparty/worktrees/session-#{session.id}",
-      dirty?: false
+      dirty?: false,
+      base_sha: '0' * 40
     )
   end
 

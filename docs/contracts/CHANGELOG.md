@@ -241,6 +241,35 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [changeset-payloads] — three declared fields are now actually populated (clarifying)
+
+**No `CONTRACT_VERSION` bump: no type, field, or endpoint changed.** What changed is that the
+payloads a real run produces finally match the schema they have always been declared against.
+
+Found by running the acceptance walkthrough's S0 against the live stack. A real Bedrock run edited a
+file, reached `awaiting_review` and was approved — and left a record that said almost nothing:
+
+| event | contract | what a real run emitted |
+|---|---|---|
+| `changeset_ready` | `{files_changed, insertions, deletions}` | `{}` |
+| `changeset_approved` | `{commit_sha}` | `{}` |
+
+`ai_runs.base_sha` was also never written, though `Runs::Start`'s own comment says it records one.
+That one is not cosmetic: `Git::LaneConflicts#commit_range_args` returns nil on a blank base, so a
+conflict with a lane whose change is **already committed** was never reported .
+Scope measured rather than assumed — the `unreviewed` kind diffs the working tree and needs no base,
+so only the approved kind was silenced. `commit!` already RETURNED the sha `changeset_approved`
+needed; `Runs::Approve` was discarding it.
+
+Consumers need no change, and a consumer that was defensively treating these fields as
+possibly-absent may now rely on them. `changeset_ready` reports zeros only if git becomes
+uninspectable between the dirty check and the stat — the alternative was raising inside the ingest
+transaction, which the surrounding dirty check already declines to do.
+
+Why it hid for so long: `lane_conflicts_spec` sets `base_sha` in its own fixture, so it proved the
+algorithm while production never fed it. The new guard in `changeset_payload_spec.rb` drives
+detection from `Runs::Start` and was verified to fail without the fix.
+
 ## [1.14.0] — `participant_removed`, the 32nd event type (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 14 }`.** `EVENT_TYPE_COUNT` 31 → 32.

@@ -163,10 +163,10 @@ async function main(): Promise<void> {
   }
   const headers = entries.filter((e) => e.type === "request_header").length;
   process.stderr.write(
-    `note: ${headers} request_header(s) and ${ledgerBoundaries.length} ledger boundary/ies in the ` +
-      `record. Every turn that reported usage records where its prefix ended, so an ` +
-      `unchanged-snapshot turn is rebuildable too — a turn that reported NO usage still has no ` +
-      `boundary and is not rebuilt here.\n`,
+    `note: ${headers} request_header(s) and ${ledgerBoundaries.length} ledger boundary/ies in the
+record. Every turn that reported usage records where its prefix ended, so an
+unchanged-snapshot turn is rebuildable too — a turn that reported NO usage still has no boundary
+and is not rebuilt here.\n`,
   );
 }
 

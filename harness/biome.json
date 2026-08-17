@@ -26,5 +26,11 @@
         "useImportType": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["scripts/**"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    }
+  ]
 }

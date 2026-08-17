@@ -27,7 +27,8 @@ module Runs
       # the commit records WHO approved it. The event stream already names the
       # approver, but a commit outlives this database — someone reading `git log` in
       # six months must be able to see who accepted the change without it.
-      @worktree.commit!("clawdparty: approved changeset for run #{@run.id}", author: @reviewed_by)
+      commit_sha = @worktree.commit!("clawdparty: approved changeset for run #{@run.id}",
+                                     author: @reviewed_by)
       Events::Append.call(
         session: @run.session,
         event: {
@@ -35,7 +36,9 @@ module Runs
           actor: { kind: 'user', id: @reviewed_by.id },
           ai_run_id: @run.id,
           seq: (@run.events.maximum(:seq) || 0) + 1,
-          payload: {}
+          # The contract's `commit_sha`, which `commit!` already returns. A branch pointer moves
+          # and the database may not outlive the repo, so the approval names its own commit.
+          payload: { commit_sha: commit_sha }
         }
       ) { @run.update!(status: 'approved', reviewed_by: @reviewed_by) }
       @run

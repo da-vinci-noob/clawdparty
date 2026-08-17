@@ -1,0 +1,227 @@
+#!/usr/bin/env node
+// five simultaneous participants see IDENTICAL state, measured against the
+// running stack over real ActionCable sockets. ROOM_SIZE raises the count to measure headroom.
+//
+// `web/src/lib/cable.test.ts` already proves the catch-up ALGORITHM converges, but it drives a
+// stubbed transport: it never opens a socket, never authenticates a cookie, and never asks Rails
+// to fan one broadcast out to five subscribers. This closes that half. Needs `bin/start` first.
+//
+// Usage: [ROOM_SIZE=n] bin/verify-shared-room [base-url]   (defaults: 5, http://localhost:3000)
+
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// `ws`, not the global WebSocket: the handshake has to carry a Cookie header, which is exactly
+// what the browser-spec constructor forbids, and the cookie IS the cable's authentication.
+const WebSocket = createRequire(`${ROOT}/web/package.json`)("ws");
+
+const BASE = process.argv[2] ?? "http://localhost:3000";
+const CABLE = `${BASE.replace(/^http/, "ws")}/~cable`;
+// Five is the bar  sets; ROOM_SIZE raises it to measure headroom above the bar rather than
+// asserting it. The owner is the first, so the rest cycle through the non-owner roles.
+const ROOM_SIZE = Number(process.env.ROOM_SIZE ?? 5);
+const ROLES = Array.from({ length: Math.max(ROOM_SIZE - 1, 0) }, (_, i) =>
+  ["editor", "reviewer", "viewer"][i % 3],
+);
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+function cookieFrom(response) {
+  const header = response.headers.getSetCookie?.() ?? [];
+  const jar = header.find((c) => c.startsWith("clawd_uid="));
+  if (!jar) throw new Error("no clawd_uid cookie in response");
+  return jar.split(";")[0];
+}
+
+async function api(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${method} ${path} → ${response.status}: ${text.slice(0, 300)}`);
+  return { json: text ? JSON.parse(text) : null, response };
+}
+
+/** One subscriber: connect, subscribe, collect every envelope the server pushes. */
+function subscribe(sessionId, cookie, label) {
+  const identifier = JSON.stringify({ channel: "SessionChannel", session_id: String(sessionId) });
+  // `Origin` as well as the cookie: ActionCable's forgery check matches it against
+  // `allowed_request_origins` and answers a handshake without one with a 404, so a client that omits
+  // it (as non-browser clients do) never reaches the subscription at all.
+  const socket = new WebSocket(CABLE, ["actioncable-v1-json"], {
+    headers: { Cookie: cookie, Origin: BASE },
+  });
+  const received = [];
+  const state = { label, received, confirmed: false, rejected: false, socket };
+
+  state.ready = new Promise((done, fail) => {
+    const timer = setTimeout(() => fail(new Error(`${label}: no subscription confirmation`)), 10_000);
+    socket.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString());
+      if (frame.type === "ping") return;
+      // Subscribe only after `welcome`: the connection is not ready to accept commands before it,
+      // and a command sent early is dropped silently — the socket stays open and simply never
+      // confirms.
+      if (frame.type === "welcome") {
+        socket.send(JSON.stringify({ command: "subscribe", identifier }));
+        return;
+      }
+      if (frame.type === "confirm_subscription") {
+        state.confirmed = true;
+        clearTimeout(timer);
+        done();
+        return;
+      }
+      if (frame.type === "reject_subscription") {
+        state.rejected = true;
+        clearTimeout(timer);
+        fail(new Error(`${label}: subscription REJECTED`));
+        return;
+      }
+      if (frame.message) received.push(frame.message);
+    });
+    socket.on("error", (error) => fail(new Error(`${label}: ${error.message}`)));
+  });
+  return state;
+}
+
+/** Durable events only, keyed by the client cursor — the state every subscriber must agree on. */
+function durableKeys(received) {
+  return received
+    .filter((event) => event.id !== null && event.id !== undefined)
+    .map((event) => `${event.id}:${event.type}`)
+    .sort();
+}
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+async function main() {
+  console.log(`\nthe shared room, against ${BASE}\n`);
+
+  // Chat mode: no worktree, so the check needs no repository and touches no git state.
+  const { json: joined, response: created } = await api("/api/sessions", {
+    method: "POST",
+    body: { title: "five-participant check", name: "Owner", mode: "chat" },
+  });
+  // `id` here is the PARTICIPANT — the response describes who you now are, and names the room
+  // separately. Reading it as the session id silently addresses a room that does not exist, which
+  // anti-enumeration then reports as a 404 indistinguishable from "you are not a member".
+  const session = { id: joined.session_id };
+  const ownerCookie = cookieFrom(created);
+  console.log(`session ${session.id} (chat mode), owner joined as participant ${joined.id}`);
+
+  const people = [{ label: "owner", role: "owner", cookie: ownerCookie }];
+  for (const [index, role] of ROLES.entries()) {
+    const { json: invite } = await api(`/api/sessions/${session.id}/invites`, {
+      method: "POST",
+      cookie: ownerCookie,
+      body: { role },
+    });
+    const name = `${role}-${index + 1}`;
+    const { response } = await api("/api/participants", {
+      method: "POST",
+      body: { session_id: session.id, token: invite.token, name },
+    });
+    people.push({ label: name, role, cookie: cookieFrom(response) });
+  }
+  check(people.length === ROOM_SIZE, `${ROOM_SIZE} participants joined, mixed roles`, people.map((p) => p.role).join(", "));
+
+  const subscribers = people.map((person) => subscribe(session.id, person.cookie, person.label));
+  await Promise.all(subscribers.map((s) => s.ready));
+  check(
+    subscribers.every((s) => s.confirmed),
+    `all ${ROOM_SIZE} sockets confirmed on one session stream`,
+  );
+
+  // Everyone talks at once. Chat is the one thing every role may do, viewer included.
+  await Promise.all(
+    people.map((person, index) =>
+      api(`/api/sessions/${session.id}/messages`, {
+        method: "POST",
+        cookie: person.cookie,
+        body: { body: `hello from ${person.label} (#${index})` },
+      }),
+    ),
+  );
+  await sleep(1500);
+
+  const keysets = subscribers.map((s) => durableKeys(s.received));
+  const [first, ...rest] = keysets;
+  check(first.length === ROOM_SIZE, "the room saw every message", `${first.length} durable events`);
+  check(
+    rest.every((keys) => keys.join("|") === first.join("|")),
+    "every subscriber holds the IDENTICAL durable set",
+    keysets.map((k) => k.length).join(" / "),
+  );
+
+  // One more, joining after the conversation: backfill must reconstruct the same state, which is
+  // where a real gap or duplicate would appear.
+  const { json: lateInvite } = await api(`/api/sessions/${session.id}/invites`, {
+    method: "POST",
+    cookie: ownerCookie,
+    body: { role: "reviewer" },
+  });
+  const { response: lateJoin } = await api("/api/participants", {
+    method: "POST",
+    body: { session_id: session.id, token: lateInvite.token, name: "late-6" },
+  });
+  const lateCookie = cookieFrom(lateJoin);
+  const late = subscribe(session.id, lateCookie, "late-6");
+  await late.ready;
+  const { json: backfill } = await api(`/api/sessions/${session.id}/events?after=0`, {
+    cookie: lateCookie,
+  });
+  const events = backfill.events ?? backfill;
+  const backfilled = durableKeys(events);
+  // NOT equality with what the live sockets hold: they subscribed after everyone joined, so they
+  // never saw the `participant_joined` events that backfill rightly includes. The claim is that the
+  // late joiner misses NOTHING the room already had, and gets nothing twice.
+  const missing = first.filter((key) => !backfilled.includes(key));
+  check(
+    missing.length === 0,
+    "the late joiner's backfill contains every event the room already held",
+    `${backfilled.length} backfilled, ${first.length} live${missing.length ? `, MISSING ${missing.join(",")}` : ""}`,
+  );
+  check(
+    new Set(backfilled).size === backfilled.length,
+    "backfill contains no duplicate ids",
+  );
+
+  // A live message after the late join: all six, no divergence.
+  await api(`/api/sessions/${session.id}/messages`, {
+    method: "POST",
+    cookie: ownerCookie,
+    body: { body: "one more, with six watching" },
+  });
+  await sleep(1500);
+  const allKeysets = [...subscribers, late].map((s) => durableKeys(s.received));
+  check(
+    allKeysets.every((keys) => keys.at(-1) === allKeysets[0].at(-1)),
+    "everyone, late joiner included, received the same next event",
+    allKeysets.map((k) => k.length).join(" / "),
+  );
+
+  for (const s of [...subscribers, late]) s.socket.close();
+  await api(`/api/sessions/${session.id}/archive`, { method: "POST", cookie: ownerCookie });
+
+  console.log(
+    `\n${failures === 0 ? "PASS" : `FAIL (${failures})`} — ${ROOM_SIZE + 1} live sockets, one session, ${first.length + 1} durable events\n`,
+  );
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}\n`);
+  process.exit(1);
+});

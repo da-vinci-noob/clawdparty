@@ -17,7 +17,11 @@ import type {
   ProviderEvent,
   ProviderRequest,
 } from "./contract.js";
-import { type Discovery, discoverAnthropicCredential } from "./credentials/discover.js";
+import {
+  type Discovery,
+  discoverAnthropicCredential,
+  readClaudeOauthToken,
+} from "./credentials/discover.js";
 import { KEYCHAIN_SOURCE } from "./credentials/sources.js";
 
 /**
@@ -52,6 +56,9 @@ const PROBE_HINTS = {
   notEntitled:
     "The login is valid but this workspace is not entitled to the API (403). An account owner has to grant access.",
   unreachable: "Could not reach the Anthropic API. Check network access and try again",
+  noCredential:
+    "The SDK found no credential to send. Run `claude /login`, or `claude setup-token` and " +
+    "export CLAUDE_CODE_OAUTH_TOKEN.",
 } as const;
 
 const CONSERVATIVE_FALLBACK: Capabilities = {
@@ -107,6 +114,8 @@ export interface AnthropicOauthOptions {
   client?: Anthropic;
   discovery?: Discovery;
   os?: string;
+  /** Injected so the credentials-file path is testable against a fake home. */
+  home?: string;
 }
 
 export class AnthropicOauthAdapter implements ProviderAdapter {
@@ -132,12 +141,14 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
   private readonly injectedClient?: Anthropic;
   private readonly injectedDiscovery?: Discovery;
   private readonly os: string;
+  private readonly home?: string;
   private capabilityCache = new Map<string, Capabilities>();
 
   constructor(opts: AnthropicOauthOptions = {}) {
     this.injectedClient = opts.client;
     this.injectedDiscovery = opts.discovery;
     this.os = opts.os ?? platform();
+    this.home = opts.home;
   }
 
   async probe(): Promise<ProbeResult> {
@@ -209,7 +220,7 @@ subscription.`,
   }
 
   private discover(): Discovery {
-    return this.injectedDiscovery ?? discoverAnthropicCredential({ os: this.os });
+    return this.injectedDiscovery ?? discoverAnthropicCredential({ os: this.os, home: this.home });
   }
 
   /** Built from the DISCOVERED source, never zero-arg. */
@@ -224,8 +235,14 @@ subscription.`,
       });
     }
 
-    // The credentials file the Claude CLI writes. The SDK reads it itself, so the token
-    // never passes through this process — which is strictly better than us parsing it.
+    // The credentials file the Claude CLI writes. It was believed the SDK reads it itself, so
+    // this constructed a ZERO-ARG client — and the SDK, which reads no such file, threw
+    // "Could not resolve authentication method" before sending anything. On a host whose only
+    // Claude login lives in that file, both Anthropic paths were dead.
+    const fileToken = readClaudeOauthToken(this.home);
+    if (fileToken) {
+      return new Anthropic({ authToken: fileToken, defaultHeaders: OAUTH_BETA_HEADER });
+    }
     return new Anthropic({ defaultHeaders: OAUTH_BETA_HEADER });
   }
 }

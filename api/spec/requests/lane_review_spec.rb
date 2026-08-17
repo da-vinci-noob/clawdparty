@@ -29,7 +29,8 @@ RSpec.describe('Per-lane review') do
     Runs::Start.call(
       session: session, requested_by: session.participants.first, prompt: 'go', model: 'm',
       lane: lane, client: client,
-      worktree: instance_double(Git::WorktreeManager, ensure_worktree!: '/w', dirty?: false)
+      worktree: instance_double(Git::WorktreeManager, ensure_worktree!: '/w', dirty?: false,
+                                                      base_sha: '0' * 40)
     )
   end
 

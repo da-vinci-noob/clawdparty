@@ -101,9 +101,14 @@ export function discoverAnthropicCredential(opts: DiscoverEnv = {}): Discovery {
     return { source: "env:workload-identity-federation", usable: true };
   }
 
-  // Slot 5: the credentials file the Claude CLI writes.
-  if (existsSync(join(home, FILE_SOURCES["file:~/.claude/.credentials.json"]))) {
-    return { source: "file:~/.claude/.credentials.json", usable: true };
+  // Slot 5: the credentials file the Claude CLI writes — claimed on CONTENTS, not existence.
+  // The same file stores `mcpOAuth` entries for MCP server logins, so its presence says nothing
+  // about a Claude login; a host was measured where that was all it held, and claiming the slot
+  // there masked the Keychain slot below, which was where the credential actually was.
+  const claudeFile = join(home, FILE_SOURCES[CLAUDE_FILE_SOURCE]);
+  if (existsSync(claudeFile)) {
+    const claimed = claudeFileSlot(claudeFile);
+    if (claimed) return claimed;
   }
 
   // Below the documented precedence: a Q6-only source. Not a precedence slot,
@@ -126,6 +131,69 @@ export function discoverAnthropicCredential(opts: DiscoverEnv = {}): Discovery {
       "Run `claude setup-token`, or export ANTHROPIC_API_KEY, or run `ant auth login`. " +
       "The harness never mints or stores a credential — it uses the login you already have.",
   };
+}
+
+const CLAUDE_FILE_SOURCE = "file:~/.claude/.credentials.json" as const;
+
+interface ClaudeOauthBlock {
+  accessToken?: string;
+  expiresAt?: number;
+}
+
+function readClaudeOauthBlock(path: string): { block?: ClaudeOauthBlock; unreadable?: string } {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { claudeAiOauth?: ClaudeOauthBlock };
+    return { block: parsed.claudeAiOauth };
+  } catch (err) {
+    return { unreadable: String(err) };
+  }
+}
+
+/** `null` means the file holds no Claude login, so this slot has no claim and must fall through. */
+function claudeFileSlot(path: string): Discovery | null {
+  const { block, unreadable } = readClaudeOauthBlock(path);
+  if (unreadable !== undefined) {
+    return {
+      source: CLAUDE_FILE_SOURCE,
+      usable: false,
+      problem: `~/.claude/.credentials.json is unreadable: ${unreadable}`,
+      remedy: "Run `claude /login` to rewrite it, or export CLAUDE_CODE_OAUTH_TOKEN instead.",
+    };
+  }
+  if (!block) return null;
+  if (!block.accessToken || block.accessToken.trim() === "") {
+    return {
+      source: CLAUDE_FILE_SOURCE,
+      usable: false,
+      problem: "~/.claude/.credentials.json holds a Claude login with no access token",
+      remedy: "Run `claude /login`, or `claude setup-token` and export CLAUDE_CODE_OAUTH_TOKEN.",
+    };
+  }
+  if (typeof block.expiresAt === "number" && block.expiresAt <= Date.now()) {
+    return {
+      source: CLAUDE_FILE_SOURCE,
+      usable: false,
+      problem: "the Claude login in ~/.claude/.credentials.json has expired",
+      remedy:
+        "Run `claude /login` to refresh it, or `claude setup-token` and export " +
+        "CLAUDE_CODE_OAUTH_TOKEN. The harness never refreshes a credential for you.",
+    };
+  }
+  return { source: CLAUDE_FILE_SOURCE, usable: true };
+}
+
+/**
+ * The token itself, for the one caller that must pass it to the SDK.
+ *
+ * The SDK does NOT read this file — it is the Claude Code CLI's, and a zero-arg client resolves
+ * nothing from it. So the token has to cross this process to be used at all. It is never logged,
+ * never recorded, and never returned by `discoverAnthropicCredential`, which reports identities.
+ */
+export function readClaudeOauthToken(home = homedir()): string | null {
+  const path = join(home, FILE_SOURCES[CLAUDE_FILE_SOURCE]);
+  if (!existsSync(path)) return null;
+  const token = readClaudeOauthBlock(path).block?.accessToken;
+  return token && token.trim() !== "" ? token : null;
 }
 
 /** Codex resolves its own internal precedence via `auth_mode`, not by guessing. */

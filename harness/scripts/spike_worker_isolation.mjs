@@ -150,9 +150,8 @@ for (const { name, leaked, detail } of results) {
 }
 
 console.log(
-  `\n  ${criticalLeaks === 0 ? "env isolation HOLDS" : `${criticalLeaks} DESIGN-CRITICAL LEAK(S)`}` +
-    " — anything above marked YES without ‼ is a capability the design must ACCOUNT for,\n" +
-    "  not necessarily a defect. See the spike write-up for what was concluded.\n",
+  `\n  ${criticalLeaks === 0 ? "env isolation HOLDS" : `${criticalLeaks} DESIGN-CRITICAL LEAK(S)`} — anything above marked YES without ‼ is a capability the design must ACCOUNT for,
+  not necessarily a defect.\n`,
 );
 
 process.exit(criticalLeaks === 0 ? 0 : 1);

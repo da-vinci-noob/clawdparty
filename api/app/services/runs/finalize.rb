@@ -102,9 +102,27 @@ module Runs
           actor: { kind: 'system' },
           ai_run_id: run.id,
           seq: (run.events.maximum(:seq) || 0) + 1,
-          payload: {}
+          payload: changeset_stats(run)
         }
       ) { run.update!(status: 'awaiting_review') }
+    end
+
+    # The contract's `{files_changed, insertions, deletions}`, from the same numstat the diff
+    # endpoint serves — so the feed can size a changeset without fetching the whole patch.
+    #
+    # Zeros only if git became uninspectable between `dirty?` (which just returned true) and here;
+    # the alternative is raising mid-ingest, which the dirty check already declines to do.
+    def changeset_stats(run)
+      files = Git::Diff.new(run).call.files
+      {
+        files_changed: files.size,
+        insertions: files.sum { |f| f.insertions.to_i },
+        deletions: files.sum { |f| f.deletions.to_i }
+      }
+    rescue Git::Diff::GitError, Git::WorktreeManager::GitError
+      # BOTH: `Git::Diff` raises its own GitError, not the worktree manager's, and naming only the
+      # latter let a diff failure escape into the ingest transaction.
+      { files_changed: 0, insertions: 0, deletions: 0 }
     end
 
     # A `chat` run has no changeset to review → always completed_clean. A `review`

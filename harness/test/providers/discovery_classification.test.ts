@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicBedrockAdapter } from "../../src/providers/anthropic_bedrock.js";
+import { classifyProbeFailure } from "../../src/providers/anthropic_family.js";
 import { listProviders } from "../../src/providers/discovery.js";
 
 /**
@@ -116,5 +117,49 @@ describe("a failure this code cannot name", () => {
     // An account with no Anthropic profiles enabled is a real state, and it is not an expired
     // credential — the credential worked well enough to return a list.
     expect(providers[0]?.reason).toBe("unreachable");
+  });
+});
+
+/**
+ * The same requirement, one adapter family over — and a case the union anticipated with no code
+ * path producing it.
+ *
+ * `classifyProbeFailure` switched on HTTP status alone, so the SDK's own
+ * "Could not resolve authentication method" — thrown before a request is sent, hence status-less —
+ * fell to `unreachable` and told the developer to check a network that was never used.
+ */
+describe("an auth-resolution failure is not a network fault", () => {
+  const HINTS = {
+    expired: "expired hint",
+    notEntitled: "entitlement hint",
+    unreachable: "Could not reach the Anthropic API. Check network access and try again",
+    noCredential: "The SDK found no credential to send. Export ANTHROPIC_API_KEY.",
+  };
+
+  it("classifies the SDK's own message as no_credential", () => {
+    const err = new Error(
+      "Could not resolve authentication method. Expected one of apiKey, authToken, " +
+        "credentials, config, or profile to be set.",
+    );
+
+    expect(classifyProbeFailure(err, HINTS)).toEqual({
+      reason: "no_credential",
+      remedy: HINTS.noCredential,
+    });
+  });
+
+  it("still calls a real transport failure unreachable", () => {
+    const err = new Error("getaddrinfo ENOTFOUND api.anthropic.com");
+
+    expect(classifyProbeFailure(err, HINTS).reason).toBe("unreachable");
+  });
+
+  it("keeps status-carrying failures on their status, not on message text", () => {
+    // A 401 whose body happens to mention authentication is still an expired credential.
+    const rejected = Object.assign(new Error("Could not resolve authentication method"), {
+      status: 401,
+    });
+
+    expect(classifyProbeFailure(rejected, HINTS).reason).toBe("credential_expired");
   });
 });

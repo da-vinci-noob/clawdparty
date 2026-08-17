@@ -40,9 +40,15 @@ function writeProfile(name: string): void {
   writeFileSync(join(dir, `${name}.json`), "{}");
 }
 
-function writeCredentialsFile(): void {
-  mkdirSync(join(home, ".claude"), { recursive: true });
-  writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+/** A file holding an actual Claude login: the slot is claimed on contents, not existence. */
+function writeCredentialsFile(dir: string = home): void {
+  mkdirSync(join(dir, ".claude"), { recursive: true });
+  writeFileSync(
+    join(dir, ".claude", ".credentials.json"),
+    JSON.stringify({
+      claudeAiOauth: { accessToken: "sample-not-real", expiresAt: 4_000_000_000_000 },
+    }),
+  );
 }
 
 describe("the documented order is applied, first match wins", () => {
@@ -94,8 +100,7 @@ describe("the documented order is applied, first match wins", () => {
         .source,
     ).toBe("env:workload-identity-federation");
 
-    mkdirSync(join(bare, ".claude"), { recursive: true });
-    writeFileSync(join(bare, ".claude", ".credentials.json"), "{}");
+    writeCredentialsFile(bare);
     expect(discoverAnthropicCredential({ env: env(), home: bare }).source).toBe(
       "file:~/.claude/.credentials.json",
     );

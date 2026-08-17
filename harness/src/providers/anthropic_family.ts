@@ -176,7 +176,7 @@ export async function* mapAnthropicStream(stream: RawStream): AsyncIterable<Prov
  */
 export function classifyProbeFailure(
   err: unknown,
-  hints: { expired: string; notEntitled: string; unreachable: string },
+  hints: { expired: string; notEntitled: string; unreachable: string; noCredential?: string },
 ): {
   reason: "no_credential" | "credential_expired" | "not_entitled" | "unreachable";
   remedy: string;
@@ -184,5 +184,20 @@ export function classifyProbeFailure(
   const status = (err as { status?: number } | null)?.status;
   if (status === 401) return { reason: "credential_expired", remedy: hints.expired };
   if (status === 403) return { reason: "not_entitled", remedy: hints.notEntitled };
+  // No status means the SDK threw BEFORE sending anything, and its own auth-resolution failure is
+  // the case that matters: nothing was sent, so calling it `unreachable` told the developer to
+  // check a network that was never used. `no_credential` was in the union all along with no code
+  // path producing it — the same defect already fixed for Bedrock.
+  if (status === undefined && isAuthResolutionFailure(err)) {
+    return {
+      reason: "no_credential",
+      remedy: hints.noCredential ?? `No credential was sent: ${String(err)}`,
+    };
+  }
   return { reason: "unreachable", remedy: `${hints.unreachable}: ${String(err)}` };
+}
+
+function isAuthResolutionFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /could not resolve authentication method|expected one of apiKey/i.test(message);
 }

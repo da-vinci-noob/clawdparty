@@ -72,11 +72,15 @@ module Runs
       # `chat` sessions run Claude in a plain working directory — no worktree, no
       # dirty check, no base_sha. `review` sessions use the git worktree.
       cwd = @session.mode == 'chat' ? chat_cwd : review_worktree!(revise)
+      # NULL for chat, which has no worktree to anchor to. For review it is the floor the diff is
+      # taken from AND the range `Git::LaneConflicts` needs to see what an already-COMMITTED sibling
+      # lane touched — without it that conflict is never reported.
+      base = @session.mode == 'chat' ? nil : @worktree.base_sha
 
       resume = resume_context?(revise)
       prior&.update!(status: 'superseded') if revise
 
-      create_and_post!(cwd, resume)
+      create_and_post!(cwd, resume, base)
     rescue ActiveRecord::RecordNotUnique
       # The partial unique index won the race: another active run exists.
       raise(ActiveRunExists)
@@ -128,8 +132,8 @@ module Runs
     # If the harness refuses the start, drop the just-created run so no
     # queued/active run is left behind to block the session (queued counts toward
     # one-active-run); re-raise so the controller still surfaces the error.
-    def create_and_post!(cwd, resume)
-      run = create_run!
+    def create_and_post!(cwd, resume, base_sha)
+      run = create_run!(base_sha)
       status = post_to_harness(run, cwd, resume)
       Result.new(ai_run: run, harness_status: status)
     rescue Harness::Client::ActiveRunConflict, Harness::Client::TransportError,
@@ -138,14 +142,15 @@ module Runs
       raise
     end
 
-    def create_run!
+    def create_run!(base_sha)
       AiRun.create!(
         session: @session,
         status: 'queued',
         requested_by: @requested_by,
         prompt: @prompt,
         model: @model,
-        lane: @lane
+        lane: @lane,
+        base_sha: base_sha
       )
     end
 
