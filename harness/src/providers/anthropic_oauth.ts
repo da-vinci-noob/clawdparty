@@ -22,6 +22,7 @@ import {
   discoverAnthropicCredential,
   readClaudeOauthToken,
 } from "./credentials/discover.js";
+import { readKeychainToken } from "./credentials/keychain.js";
 import { KEYCHAIN_SOURCE } from "./credentials/sources.js";
 
 /**
@@ -88,27 +89,29 @@ const CONSERVATIVE_FALLBACK: Capabilities = {
 const OAUTH_SOURCES = new Set([
   "env:CLAUDE_CODE_OAUTH_TOKEN",
   "file:~/.claude/.credentials.json",
+  KEYCHAIN_SOURCE.id,
   "profile:active",
   "profile:ANTHROPIC_PROFILE",
   "profile:default",
 ]);
 
 /**
- * The macOS Keychain is DISCOVERED but not read here.
+ * The Keychain is now READ, not merely discovered.
  *
- * Reading it means spawning `/usr/bin/security`, and `no_shell_input.test.ts` holds that
- * every process-starting file lives under `tools/` — a provider adapter spawning a process
- * would retire that invariant for a path the OAuth work does not ask for (its scope is the
- * credentials file and the `ant` profile dir). So the source is reported with the remedy
- * that already works, rather than half-supported.
+ * Both reasons for withholding it were stale. The invariant cited ("every process-starting file
+ * lives under `tools/`") was replaced with "on the allowlist AND argv-form with no
+ * interpolated input" — reshaped *specifically* so a Keychain reader is judged on its shape — and
+ * `credentials/keychain.ts` is on that allowlist. The other reason was that the SDK resolves the
+ * credential itself, which it does not: it reads neither this item nor the credentials file.
  *
- * does name the Keychain, so this is a gap and not a decision to leave it out; a follow-up
- * carries the question of where such a read may live.
+ * The remedy below survives as the FALLBACK, for the case the read cannot be verified from here:
+ * the item was created by another application, so its ACL may prompt or refuse.
  */
 const KEYCHAIN_REMEDY =
-  "Your Claude login is in the macOS Keychain, which the harness does not read yet. Run " +
-  "`claude setup-token` and export CLAUDE_CODE_OAUTH_TOKEN — the harness picks that up " +
-  "directly.";
+  "Your Claude login is in the macOS Keychain but could not be read — the item was created by " +
+  "another application, so macOS may be refusing this process or waiting on a confirmation nobody " +
+  "can answer, and the stored token may simply have expired. Run `claude setup-token` and export " +
+  "CLAUDE_CODE_OAUTH_TOKEN, which the harness reads directly with no Keychain involved.";
 
 export interface AnthropicOauthOptions {
   client?: Anthropic;
@@ -116,6 +119,12 @@ export interface AnthropicOauthOptions {
   os?: string;
   /** Injected so the credentials-file path is testable against a fake home. */
   home?: string;
+  /**
+   * Injected so the Keychain path is testable without reading a real one. Returns the RAW stored
+   * value, not a token: parsing stays inside `readKeychainToken`, so a test exercises the real thing
+   * rather than a second copy of it.
+   */
+  readKeychain?: () => string | null;
 }
 
 export class AnthropicOauthAdapter implements ProviderAdapter {
@@ -142,6 +151,9 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
   private readonly injectedDiscovery?: Discovery;
   private readonly os: string;
   private readonly home?: string;
+  private readonly rawKeychain?: () => string | null;
+  /** Memoised: `undefined` = not asked yet, `null` = asked and unreadable. */
+  private keychainCache: string | null | undefined;
   private capabilityCache = new Map<string, Capabilities>();
 
   constructor(opts: AnthropicOauthOptions = {}) {
@@ -149,6 +161,7 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
     this.injectedDiscovery = opts.discovery;
     this.os = opts.os ?? platform();
     this.home = opts.home;
+    this.rawKeychain = opts.readKeychain;
   }
 
   async probe(): Promise<ProbeResult> {
@@ -161,7 +174,9 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
         remedy: discovery.remedy ?? discovery.problem ?? "unusable credential",
       };
     }
-    if (discovery.source === KEYCHAIN_SOURCE.id) {
+    if (discovery.source === KEYCHAIN_SOURCE.id && this.keychainToken() === null) {
+      // Discovered but unreadable — a denied or prompting ACL, or an expired token. The developer is
+      // exactly where they were, so the remedy that does work is what they should see.
       return { available: false, reason: "no_credential", remedy: KEYCHAIN_REMEDY };
     }
     if (!OAUTH_SOURCES.has(discovery.source)) {
@@ -223,6 +238,20 @@ subscription.`,
     return this.injectedDiscovery ?? discoverAnthropicCredential({ os: this.os, home: this.home });
   }
 
+  /**
+   * One Keychain read per adapter, cached.
+   *
+   * `probe()` and `client()` both need the answer, and a repeated read against an ACL that prompts
+   * would ask the developer twice for one run.
+   */
+  private keychainToken(): string | null {
+    if (this.keychainCache === undefined) {
+      const raw = this.rawKeychain;
+      this.keychainCache = raw ? readKeychainToken(() => raw()) : readKeychainToken();
+    }
+    return this.keychainCache;
+  }
+
   /** Built from the DISCOVERED source, never zero-arg. */
   private client(): Anthropic {
     if (this.injectedClient) return this.injectedClient;
@@ -239,6 +268,13 @@ subscription.`,
     // this constructed a ZERO-ARG client — and the SDK, which reads no such file, threw
     // "Could not resolve authentication method" before sending anything. On a host whose only
     // Claude login lives in that file, both Anthropic paths were dead.
+    if (discovery.source === KEYCHAIN_SOURCE.id) {
+      const keychainToken = this.keychainToken();
+      if (keychainToken) {
+        return new Anthropic({ authToken: keychainToken, defaultHeaders: OAUTH_BETA_HEADER });
+      }
+    }
+
     const fileToken = readClaudeOauthToken(this.home);
     if (fileToken) {
       return new Anthropic({ authToken: fileToken, defaultHeaders: OAUTH_BETA_HEADER });

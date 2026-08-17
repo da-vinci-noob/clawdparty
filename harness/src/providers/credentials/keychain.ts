@@ -10,14 +10,21 @@ import { KEYCHAIN_SOURCE } from "./sources.js";
  * and `anthropic-oauth` reported itself unavailable on exactly the hosts where the credential was
  * present.
  *
- * **EXISTENCE ONLY. This never reads the secret, and that is the design, not a limitation.**
- * `anthropic_oauth.client()` constructs the vendor client with NO token for this path — the SDK
- * resolves the credential itself — so all discovery needs is whether there is one to find. Reading
- * the value would put a credential in this process for no purpose, and  says the harness
- * neither mints, persists, nor transmits one.
+ * Two operations, deliberately separate. `keychainHasToken` is the DISCOVERY probe: metadata only,
+ * never `-w`, because deciding which slot wins needs no secret. `readKeychainToken` is the one caller
+ * that must have the value — the adapter building its client — and it exists because the reason for
+ * withholding it turned out to be false.
  *
- * Concretely: the command is `security find-generic-password -s <service>` and NEVER `-w`, which is
- * the flag that prints the password. A test asserts that.
+ * **The premise that used to justify existence-only was wrong.** It read: "`client()` constructs the
+ * vendor client with NO token for this path — the SDK resolves the credential itself." The SDK reads
+ * neither this Keychain item nor `~/.claude/.credentials.json` (both are Claude Code's, not the
+ * SDK's); a zero-arg client throws `Could not resolve authentication method` before sending anything.
+ * So the credential was DISCOVERED and unusable, and a developer running the remedy the harness
+ * printed (`claude setup-token`, which stores here) stayed at `no_credential`.
+ *
+ * still holds and is not in tension with this: the harness neither mints, persists, nor
+ * transmits a credential. It reads one the developer already has, holds it only long enough to
+ * construct a client, and records the SOURCE — never the value.
  *
  * **Why this file may start a process** — `no_shell_input.test.ts` used to require every
  * process-starter to live under `tools/`, which would have refused this on its path rather than on
@@ -28,6 +35,9 @@ import { KEYCHAIN_SOURCE } from "./sources.js";
 
 /** The exact argv. A constant, so there is nothing for a caller to influence. */
 export const KEYCHAIN_QUERY = ["find-generic-password", "-s", KEYCHAIN_SOURCE.service] as const;
+
+/** The same query plus `-w`, which is what prints the password. Also a constant. */
+export const KEYCHAIN_READ_QUERY = [...KEYCHAIN_QUERY, "-w"] as const;
 
 export const SECURITY_BIN = "/usr/bin/security";
 
@@ -63,4 +73,64 @@ export function keychainHasToken(runner: SecurityRunner = defaultRunner): boolea
   } catch {
     return false;
   }
+}
+
+/** Injected in tests; production uses `execFileSync`. Returns the raw stored value, or null. */
+export type SecretReader = (bin: string, args: readonly string[]) => string | null;
+
+const defaultReader: SecretReader = (bin, args) => {
+  try {
+    // stdout PIPED because the value is the point; stderr IGNORED because a Keychain refusal names
+    // the item and the calling app, and none of that should be able to reach a log. The timeout is
+    // load-bearing rather than defensive: the item was created by another application, so this read
+    // can hit an ACL that prompts for confirmation — and a prompt nobody can answer would otherwise
+    // hang the agent loop.
+    return execFileSync(bin, [...args], {
+      encoding: "utf8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The Claude OAuth token from the Keychain, or null.
+ *
+ * Handles BOTH stored shapes. Claude Code stores a JSON blob (the same `claudeAiOauth` object it
+ * writes to the credentials file), and `claude setup-token` can leave a bare token — neither shape is
+ * ours to guarantee, so both are accepted and anything else is null rather than a guess.
+ *
+ * Never throws, never logs, and returns null on an expired token: sending a dead credential produces
+ * a 401 the participant then has to interpret, when discovery could have said so up front.
+ */
+export function readKeychainToken(reader: SecretReader = defaultReader): string | null {
+  if (process.platform !== KEYCHAIN_SOURCE.supportedOn) {
+    return null;
+  }
+  let raw: string | null;
+  try {
+    raw = reader(SECURITY_BIN, KEYCHAIN_READ_QUERY);
+  } catch {
+    return null;
+  }
+  const value = raw?.trim();
+  if (!value) return null;
+
+  if (value.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value) as {
+        claudeAiOauth?: { accessToken?: string; expiresAt?: number };
+      };
+      const block = parsed.claudeAiOauth;
+      const token = block?.accessToken?.trim();
+      if (!token) return null;
+      if (typeof block?.expiresAt === "number" && block.expiresAt <= Date.now()) return null;
+      return token;
+    } catch {
+      return null;
+    }
+  }
+  return value;
 }

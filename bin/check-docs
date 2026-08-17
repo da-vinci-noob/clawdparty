@@ -25,7 +25,10 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-GUIDANCE=(CLAUDE.md docs/PLAN.md)
+# README.md is IN here as of the supervisor decision: it had drifted for months — claiming the
+# harness mounts `~/.claude` and that a container cannot read the Keychain — precisely because it was
+# the one participant-facing document nothing checked.
+GUIDANCE=(README.md CLAUDE.md docs/PLAN.md)
 
 # Constants whose home is a gem, not this tree.
 FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|Rails|RSpec|SolidQueue|SolidCable|Faraday|Net|JSON|Time|Struct|StandardError)::'

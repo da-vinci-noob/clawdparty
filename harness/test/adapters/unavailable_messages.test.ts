@@ -124,15 +124,34 @@ describe("the wrong provider for the credential that won", () => {
   it("oauth: names the Keychain gap and the workaround that works today", async () => {
     const adapter = new AnthropicOauthAdapter({
       discovery: { source: "keychain:anthropic-oauth", usable: true },
+      // INJECTED, and required now that the Keychain is genuinely read: without it this test asked
+      // the developer's own Keychain and then, if it answered, the real API — passing or failing by
+      // whose machine it ran on. The same isolation defect `precedence.test.ts` once had.
+      readKeychain: () => null,
     });
 
     const { remedy } = unavailable(await adapter.probe());
 
-    // Half-supporting it — reporting available and then failing at run start — would be
-    // worse than saying plainly that this path needs one command first.
+    // The read can fail for reasons this process cannot fix — an ACL that refuses or prompts, or an
+    // expired token — so the remedy that works without the Keychain is what must be shown.
     expect(remedy).toMatch(/macOS Keychain/);
     expect(remedy).toMatch(/claude setup-token/);
     expect(remedy).toMatch(/CLAUDE_CODE_OAUTH_TOKEN/);
+  });
+
+  it("oauth: does NOT report unavailable when the Keychain token is readable", async () => {
+    const adapter = new AnthropicOauthAdapter({
+      discovery: { source: "keychain:anthropic-oauth", usable: true },
+      readKeychain: () => "sample-not-real",
+      client: { models: { list: async () => ({ data: [] }) } } as never,
+    });
+
+    // The complement, so "unavailable" cannot quietly become the answer for every Keychain host
+    // again: a readable token means this adapter serves the run.
+    expect(await adapter.probe()).toMatchObject({
+      available: true,
+      credentialSource: "keychain:anthropic-oauth",
+    });
   });
 });
 

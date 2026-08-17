@@ -63,14 +63,14 @@ See [`docs/PLAN.md`](docs/PLAN.md) for the full architecture, data model, event 
 
 > Prerequisites: macOS host with **Docker** (Docker Desktop or OrbStack). The Ruby 4.0.5, Node 24 LTS, and PostgreSQL 18 toolchain is pinned inside the container images — you don't install them on the host.
 >
-> **Claude credentials:** the harness uses *your existing* Claude login — whatever you already have works, no app-specific key needed. It read-only mounts your `~/.claude` and `~/.aws` and inherits your Claude/AWS auth env, so a direct **API key**, a **Claude subscription / enterprise** login, or **Amazon Bedrock** all work unchanged.
+> **Claude credentials:** the harness uses *your existing* Claude login — whatever you already have works, no app-specific key needed. It runs as a **host process**, so it reads `~/.claude` and `~/.aws` in place (no mounts) and inherits your Claude/AWS auth env: a direct **API key**, a **Claude subscription / enterprise** login, or **Amazon Bedrock** all work unchanged.
 > - **Bedrock:** make sure your AWS session is fresh (`aws sso login`) before `bin/start`.
-> - **Subscription / enterprise login on macOS:** that token lives in the macOS **Keychain**, which a Linux container can't read — run `claude setup-token` once and export `CLAUDE_CODE_OAUTH_TOKEN` (the harness picks it up).
+> - **Subscription / enterprise login on macOS:** `claude setup-token` is enough — the harness reads the token from the **Keychain** directly. If macOS refuses that read (the item belongs to another app, so its ACL may prompt), export `CLAUDE_CODE_OAUTH_TOKEN` instead and the harness uses that with no Keychain involved. The failure message says which case you are in.
 
 ```bash
 git clone <this-repo> && cd clawdparty
 bin/setup        # generates HARNESS_SHARED_SECRET, prepares env
-bin/start        # docker compose build + up: Rails (Puma), the harness, Solid Queue, Postgres, and Vite
+bin/start        # containers (Rails/Puma, Solid Queue, Postgres, Vite) AND the harness as a HOST process; reports both
 ```
 
 **Point it at your repos.** `TARGET_REPO_PATH` is the **absolute** host directory Claude is allowed to work in — set it to the **parent folder of your repos** so the in-app folder picker can browse them all. It's bind-mounted at the *identical* path inside the containers, so git worktrees stay valid on the host too (openable in your editor / GitHub Desktop). Set it in `.env.local` before `bin/start`:
@@ -90,6 +90,36 @@ http://<host>.local:3000
 ```
 
 Open a session, generate an invite link for the role you want to grant, share it, and the invitee picks a display name to join. (Remote access via Tailscale is a planned future phase.)
+
+### Keeping the harness running (optional)
+
+The harness is a host process, so nothing supervises it by default — `bin/start` launches it and
+`bin/harness status` tells you whether it is up. A crash means the next run fails until you run
+`bin/harness start` again, and it does not come back after a reboot.
+
+Units for both platforms ship in `docker/launchd/` and `docker/systemd/` if you want that handled.
+**Installing them is deliberately opt-in, not part of `bin/setup`:** a login agent starts a process
+that reaches your repos and your credentials every time you log in, and that should be a decision
+you make rather than a side effect of cloning a repo.
+
+```bash
+# macOS — a USER agent, never a system daemon: the harness must run as you, with your
+# Keychain, SSH agent and toolchain. A root daemon would have none of them.
+sed -e "s|REPO_ROOT_PLACEHOLDER|$PWD|g" -e "s|HOME_PLACEHOLDER|$HOME|g" \
+  docker/launchd/com.clawdparty.harness.plist \
+  > ~/Library/LaunchAgents/com.clawdparty.harness.plist
+launchctl load -w ~/Library/LaunchAgents/com.clawdparty.harness.plist
+
+# undo
+launchctl unload -w ~/Library/LaunchAgents/com.clawdparty.harness.plist
+rm ~/Library/LaunchAgents/com.clawdparty.harness.plist
+```
+
+Worth knowing if you skip it: the unit sets an explicit `PATH` with version-manager shims **ahead of
+the package manager**, so a supervised run resolves the same tool versions you get in your own shell.
+An interactively started harness inherits whatever `PATH` your shell had, which for a
+non-interactive invocation can differ — a mise-pinned project once resolved Node 26 under a
+mis-ordered `PATH` where the developer got Node 22.
 
 ## Using a session
 
