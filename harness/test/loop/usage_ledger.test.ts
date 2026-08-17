@@ -224,13 +224,29 @@ describe("the ledger records what the provider reported", () => {
     expect(ledger()).toHaveLength(0);
   });
 
-  it("leaves entry_store_seq unset for now", async () => {
+  it("records entry_store_seq as the request's PREFIX BOUNDARY", async () => {
     await run([turn("hi", [100, 10, 0, 0])]);
     await store.close();
 
-    // Asserted as-is rather than assumed. The column exists to link a usage row to its
-    // position in the log, which is also the marker a mid-run request reconstruction needs
-    // — a follow-up populates it, and this test deliberately does not guess at the value here.
-    expect(ledger()[0]?.entry_store_seq).toBeNull();
+    // Was once asserted as NULL. It is now the store's high-water mark at the moment the request
+    // was assembled: everything at or below it was in that request's surface.
+    // The prompt and `run_started` are written before the first turn, so the boundary is past 0 —
+    // a null here would mean the link was never made, and a 0 would mean the request folded
+    // nothing when it had folded the prompt.
+    const boundary = ledger()[0]?.entry_store_seq;
+    expect(boundary).not.toBeNull();
+    expect(boundary).toBeGreaterThan(0);
+  });
+
+  it("advances the boundary for a LATER turn, which is what makes it useful", async () => {
+    // The point of the column: rebuilding an INTERMEDIATE request needs to know where THAT
+    // request's prefix ended. One boundary for every turn would be no better than none, and
+    // `request_header` cannot supply it because headers are emit-on-change.
+    await run([turn("", [100, 10, 0, 0], "tool_use"), turn("done", [50, 5, 0, 0])]);
+    await store.close();
+
+    const boundaries = ledger().map((row) => row.entry_store_seq);
+    expect(boundaries.length).toBeGreaterThan(1);
+    expect(boundaries[1]).toBeGreaterThan(boundaries[0] as number);
   });
 });

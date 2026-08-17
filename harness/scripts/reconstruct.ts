@@ -10,12 +10,13 @@
  * live record is when reading it matters most, and requiring the harness to be stopped first
  * would make this useless for exactly that case.
  *
- * WHICH requests come out, stated plainly because it is a real limitation and not a rounding
- * error: a request's prefix ends where the request was built, and the record only marks that
- * for a turn that emitted a `request_header` — headers are emit-on-change, so an unchanged
- * turn has no marker. So this emits one line per header boundary, plus the request the
- * session would send NEXT, and REPORTS how many turns it could not place. A tool that
- * silently emitted fewer lines than there were requests would read as a passing diff.
+ * WHICH requests come out, stated plainly. A request's prefix ends where the request was built,
+ * and every turn that reported usage records that boundary on its ledger row — so
+ * intermediate requests are rebuildable, not just the turns whose `request_header` changed
+ * (headers are emit-on-change). This emits one line per boundary from the ledger AND from the
+ * headers, plus the request the session would send NEXT, and REPORTS what it could not place: a
+ * turn that reported no usage at all still has no boundary. A tool that silently emitted fewer
+ * lines than there were requests would read as a passing diff.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -59,10 +60,16 @@ function parseArgs(argv: string[]): Args | { error: string } {
  * Including it is free: a header entry carries no blocks, so it is off the surface and
  * contributes nothing to the fold.
  */
-function boundaries(entries: Entry[]): number[] {
+function boundaries(entries: Entry[], ledgerBoundaries: number[]): number[] {
   const headers = entries.filter((e) => e.type === "request_header").map((e) => e.store_seq);
   const all = entries.at(-1)?.store_seq ?? 0;
-  return [...new Set([...headers, all])].sort((a, b) => a - b);
+  // The LEDGER's boundaries are the ones that make intermediate requests rebuildable: one
+  // per turn, recorded at build time, where `request_header` only marks the turns whose snapshot
+  // CHANGED. Headers are still included — they cost nothing and cover a turn that reported no
+  // usage — and `all` is the request the session would send next.
+  return [...new Set([...headers, ...ledgerBoundaries, all])]
+    .filter((seq) => seq > 0)
+    .sort((a, b) => a - b);
 }
 
 async function main(): Promise<void> {
@@ -112,7 +119,16 @@ async function main(): Promise<void> {
   const lines: string[] = [];
   const skipped: string[] = [];
 
-  for (const boundary of boundaries(entries)) {
+  // Every run in the session, since a session's log spans runs and each one has its own ledger.
+  const runIds = [
+    ...new Set(entries.map((e) => e.run_id).filter((id): id is string => id !== null)),
+  ];
+  const ledgerBoundaries = runIds
+    .flatMap((runId) => opened.store.usageRows(runId))
+    .map((row) => row.entry_store_seq)
+    .filter((seq): seq is number => seq !== null);
+
+  for (const boundary of boundaries(entries, ledgerBoundaries)) {
     const result = request.reconstruct({
       entries: entries.filter((e) => e.store_seq <= boundary),
       systemPrompt,
@@ -145,10 +161,12 @@ async function main(): Promise<void> {
     // "byte-identical" when it actually meant "nothing was compared".
     process.stderr.write(`could not rebuild ${skipped.length}:\n  ${skipped.join("\n  ")}\n`);
   }
-  const turns = entries.filter((e) => e.type === "request_header").length;
+  const headers = entries.filter((e) => e.type === "request_header").length;
   process.stderr.write(
-    `note: ${turns} request_header(s) in the record. Turns whose snapshot was UNCHANGED emit no
-header, so their prefix boundary is unmarked and they are not rebuilt here.\n`,
+    `note: ${headers} request_header(s) and ${ledgerBoundaries.length} ledger boundary/ies in the ` +
+      `record. Every turn that reported usage records where its prefix ended, so an ` +
+      `unchanged-snapshot turn is rebuildable too — a turn that reported NO usage still has no ` +
+      `boundary and is not rebuilt here.\n`,
   );
 }
 

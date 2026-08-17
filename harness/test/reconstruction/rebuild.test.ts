@@ -289,6 +289,88 @@ describe("the prefix determines WHICH request comes back", () => {
   });
 });
 
+/**
+ * The boundary comes from the RECORD, not from the caller.
+ *
+ * Every test above passes `adapter.boundaries`, i.e. what the fake adapter observed at send time.
+ * That is precisely the gap: rebuilding an INTERMEDIATE request needed the boundary handed in from
+ * outside the record, and `request_header` cannot supply it because headers are emit-on-change, so
+ * an unchanged turn writes no marker at all.
+ *
+ * `usage.entry_store_seq` now carries it — one write per turn, at build time. These tests use ONLY
+ * that, so they fail if the column goes back to null.
+ */
+describe("the prefix boundary is recoverable from the record alone", () => {
+  /** Boundaries as a READER would find them: from the ledger, with no adapter to ask. */
+  function recordedBoundaries(from: HarnessStoreApi): number[] {
+    return (
+      from
+        // The run id this fixture uses — `usageRows` is per run, since a session's log spans several.
+        .usageRows("1")
+        .map((row) => row.entry_store_seq)
+        .filter((seq): seq is number => seq !== null)
+    );
+  }
+
+  it("records one boundary per turn that reported usage", async () => {
+    await run([turn([text(0, "first")], "tool_use"), turn([text(0, "second")], "end_turn")]);
+
+    // Two turns, two boundaries — where `request_header` would have marked only the first, since
+    // the snapshot did not change between them.
+    expect(recordedBoundaries(await reopen())).toHaveLength(2);
+  });
+
+  it("matches what the adapter actually saw at send time", async () => {
+    const adapter = await run([
+      turn([text(0, "first")], "tool_use"),
+      turn([text(0, "second")], "end_turn"),
+    ]);
+
+    // The claim in one line: the record's boundary IS the send-time boundary. If these diverge,
+    // every reconstruction from the record is folding the wrong prefix.
+    expect(recordedBoundaries(await reopen())).toEqual(adapter.boundaries);
+  });
+
+  it("rebuilds the FIRST request byte-for-byte using only the recorded boundary", async () => {
+    const adapter = await run([
+      turn([text(0, "first")], "tool_use"),
+      turn([text(0, "second")], "end_turn"),
+    ]);
+    const store = await reopen();
+
+    const result = rebuild(store, recordedBoundaries(store)[0]);
+
+    expect(result.ok, result.ok ? "" : `refused: ${result.reason}`).toBe(true);
+    if (!result.ok) return;
+    // The intermediate request — the one that used to be unrebuildable from the record alone.
+    expect(comparable(result.request)).toBe(comparable(adapter.sent[0] as ProviderRequest));
+  });
+
+  it("rebuilds the LAST request from the record too", async () => {
+    const adapter = await run([
+      turn([text(0, "first")], "tool_use"),
+      turn([text(0, "second")], "end_turn"),
+    ]);
+    const store = await reopen();
+
+    const result = rebuild(store, recordedBoundaries(store).at(-1));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(comparable(result.request)).toBe(comparable(adapter.sent.at(-1) as ProviderRequest));
+  });
+
+  it("gives DIFFERENT boundaries for the two turns, so they fold different prefixes", async () => {
+    await run([turn([text(0, "first")], "tool_use"), turn([text(0, "second")], "end_turn")]);
+    const store = await reopen();
+    const [first, second] = recordedBoundaries(store);
+
+    // One boundary reused for every turn would be no better than none.
+    expect(second).toBeGreaterThan(first as number);
+    expect(rebuild(store, first).ok && rebuild(store, second).ok).toBe(true);
+  });
+});
+
 describe("it refuses rather than inventing a request", () => {
   it("refuses when the supplied system prompt is not the one the run used", async () => {
     await run([turn([text(0, "hi")], "end_turn")]);

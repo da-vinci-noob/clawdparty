@@ -372,6 +372,13 @@ class HarnessStore implements HarnessStoreApi {
     );
   }
 
+  usageRows(runId: string): UsageRow[] {
+    this.assertOpen();
+    return this.db
+      .prepare("SELECT * FROM usage WHERE run_id = ? ORDER BY id")
+      .all(runId) as UsageRow[];
+  }
+
   /**
    * The  reconciliation source: the harness's own answer to "what is
    * running?", read from position registers rather than inferred from the log. A

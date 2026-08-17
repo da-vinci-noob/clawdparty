@@ -261,6 +261,18 @@ export class RunLoop {
       );
       if (header) emit([header]);
 
+      // The PREFIX BOUNDARY for this request, captured HERE and not before the build.
+      //
+      // It has to be the high-water mark AFTER the intent commit, because that commit is what
+      // writes the `request_header` — and `reconstruct` REFUSES a prefix with no snapshot in it
+      // (`no_snapshot`). Capturing before the build was off by one and produced exactly that
+      // refusal for the first request of a run: measured 2 where the adapter saw 3.
+      //
+      // Recorded per turn on the usage row because `request_header` cannot carry it: headers are
+      // emit-on-change, so an unchanged turn writes no marker, which is why an INTERMEDIATE request
+      // previously needed its boundary handed in from outside the record.
+      const prefixBoundary = store.maxStoreSeq();
+
       // ── the uncertainty window ──────────────────────────────────────────────
       const turn = await this.streamTurn(built, normalizer, capabilities);
       if (turn.error) {
@@ -298,7 +310,14 @@ export class RunLoop {
           spec.runId,
           [
             ...assistantWrites,
-            ...usageWrites(spec, adapter.id, reserved.reservedUsageId, turn, this.now()),
+            ...usageWrites(
+              spec,
+              adapter.id,
+              reserved.reservedUsageId,
+              turn,
+              this.now(),
+              prefixBoundary,
+            ),
           ],
           planned,
         );
@@ -314,7 +333,14 @@ export class RunLoop {
         spec.runId,
         [
           ...assistantWrites,
-          ...usageWrites(spec, adapter.id, reserved.reservedUsageId, turn, this.now()),
+          ...usageWrites(
+            spec,
+            adapter.id,
+            reserved.reservedUsageId,
+            turn,
+            this.now(),
+            prefixBoundary,
+          ),
         ],
         { phase: "checkpoint" },
       );
@@ -899,9 +925,10 @@ function usageWrites(
   id: number,
   turn: { usage: Usage; usageReported: boolean },
   nowMs: number,
+  prefixBoundary: number,
 ): Write[] {
   if (!turn.usageReported) return [];
-  return [usageWrite(spec, provider, id, turn.usage, nowMs)];
+  return [usageWrite(spec, provider, id, turn.usage, nowMs, prefixBoundary)];
 }
 
 function usageWrite(
@@ -910,13 +937,18 @@ function usageWrite(
   id: number,
   usage: Usage,
   nowMs: number,
+  /** Where this request's folded prefix ended — the boundary `reconstruct()` needs. */
+  prefixBoundary: number,
 ): Write {
   return {
     kind: "usage",
     row: {
       id,
       run_id: spec.runId,
-      entry_store_seq: null,
+      // One write per turn, append-only, and the column was already there for exactly this link.
+      // NOT put in the `request_header` payload: it changes every turn, which would defeat
+      // emit-on-change and make every header a new snapshot.
+      entry_store_seq: prefixBoundary,
       provider,
       model: spec.model,
       input_tokens: usage.input_tokens,

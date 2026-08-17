@@ -252,6 +252,16 @@ export interface HarnessStoreApi {
    * of restating the predicate in Ruby.
    */
   projectionFrom(storeSeq: number): Entry[];
+
+  /**
+   * The run's usage ledger, oldest first.
+   *
+   * Exposed because `entry_store_seq` on these rows is the only per-TURN record of where a
+   * request's folded prefix ended — `request_header` is emit-on-change, so an unchanged turn emits
+   * no marker. `reconstruct` reads these to rebuild an INTERMEDIATE request; without a read path
+   * the column would be written and consulted by nothing, which is the defect it exists to fix.
+   */
+  usageRows(runId: string): UsageRow[];
   activeRunIds(): string[];
   maxStoreSeq(): number;
   reserveUsageId(): number;
