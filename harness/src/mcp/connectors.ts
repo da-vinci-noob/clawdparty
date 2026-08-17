@@ -115,6 +115,8 @@ function definitionFor(
 ): ToolDefinition {
   return {
     name: mcpToolName(server, tool),
+    // Named in a duplicate-id refusal, so "which server" is answerable without reading config.
+    origin: `mcp:${server}`,
     // NEVER replayable. The registry's own default for an unknown tool is `never` for exactly
     // this reason: nothing here says whether the call had a side effect, so a crash must not
     // re-run it.

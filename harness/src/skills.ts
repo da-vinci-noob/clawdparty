@@ -145,6 +145,7 @@ export function skillTool(byName: ReadonlyMap<string, Located>): ToolDefinition 
   const names = [...byName.keys()];
   return {
     name: "skill",
+    origin: "skill",
     // A pure read: re-running it after a crash costs nothing and changes nothing.
     replay: "safe",
     schema: {

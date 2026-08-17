@@ -52,12 +52,21 @@ export interface ToolDefinition {
    * `view` is a pure read while `create`/`str_replace`/`insert` mutate.
    */
   replayFor?: (input: unknown) => ReplayPolicy;
+  /**
+   * WHO contributed this tool — `built-in`, `mcp:<server>`, `skill`.
+   *
+   * Declared rather than derived. The first version of the duplicate-id refusal built its message
+   * from `schema.description`, and canonical server tools are schema-LESS, so a collision on `bash`
+   * reported "tool id bash is already registered (bash); bash cannot take the same id" — naming
+   * neither side of the conflict  requires be named.
+   */
+  origin?: string;
   run(input: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 
-/** Enough to tell two colliding contributors apart: an MCP tool carries its server in its name. */
+/** Who to blame in a collision. Never the tool's own id — that is the same on both sides. */
 function describe(tool: ToolDefinition): string {
-  return tool.schema.description ? `"${tool.schema.description.slice(0, 60)}"` : tool.name;
+  return tool.origin ?? "unknown origin";
 }
 
 export class ToolRegistry {

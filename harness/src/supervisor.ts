@@ -531,13 +531,16 @@ function classifyConnectorFailure(reason: string): "not_configured" | "timeout" 
 }
 
 export function buildRegistry(): ToolRegistry {
+  // `origin` is stamped HERE rather than in each tool file: it describes how a tool reached the
+  // registry, which is this function's business, and one place cannot drift from five.
+  const builtIn = (tool: ToolDefinition): ToolDefinition => ({ origin: "built-in", ...tool });
   const registry = new ToolRegistry()
-    .register(new BashTool().definition)
-    .register(textEditor.definition)
-    .register(read.definition)
-    .register(glob.definition)
-    .register(grep.definition);
-  for (const tool of web.definitions) registry.register(tool);
+    .register(builtIn(new BashTool().definition))
+    .register(builtIn(textEditor.definition))
+    .register(builtIn(read.definition))
+    .register(builtIn(glob.definition))
+    .register(builtIn(grep.definition));
+  for (const tool of web.definitions) registry.register(builtIn(tool));
   return registry;
 }
 

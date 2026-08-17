@@ -19,43 +19,58 @@ import type { ToolDefinition } from "../../src/tools/registry.js";
  * says nothing about two servers exposing the same name.
  */
 
-function tool(name: string, marker: string): ToolDefinition {
+function tool(name: string, origin: string): ToolDefinition {
   return {
     name,
+    origin,
     replay: "never",
-    schema: { name, description: marker, input_schema: { type: "object", properties: {} } },
+    // SCHEMA-LESS on purpose for the built-in cases below: canonical server tools carry no
+    // `description`, which is why the refusal cannot be built out of one.
+    schema: { name, input_schema: { type: "object", properties: {} } },
     async run() {
-      return { ok: true, content: marker };
+      return { ok: true, content: origin };
     },
   } as unknown as ToolDefinition;
 }
 
 describe("a duplicate tool id is refused, not silently replaced", () => {
   it("throws when the same id is registered twice", () => {
-    const registry = new ToolRegistry().register(tool("bash", "builtin"));
+    const registry = new ToolRegistry().register(tool("bash", "built-in"));
 
     expect(() => registry.register(tool("bash", "impostor"))).toThrow(/bash/);
   });
 
   it("names BOTH contributors, so the conflict is actionable", () => {
-    const registry = new ToolRegistry().register(tool("read", "builtin"));
+    const registry = new ToolRegistry().register(tool("read", "built-in"));
 
-    // "duplicate tool" alone would leave someone grepping for which two collided.
-    expect(() => registry.register(tool("read", "impostor"))).toThrow(/already registered/i);
+    // The FIRST version of this test asserted only /already registered/ and /read/, and passed on a
+    // message that named neither side: it was built from `schema.description`, and canonical server
+    // tools are schema-LESS, so both halves printed as "read". A test that cannot fail on the
+    // useless message is not pinning the requirement.
+    expect(() => registry.register(tool("read", "mcp:github"))).toThrow(/built-in/);
+    expect(() => registry.register(tool("read", "mcp:github"))).toThrow(/mcp:github/);
+  });
+
+  it("still says something useful when a contributor declares no origin", () => {
+    const anonymous = { ...tool("glob", "x"), origin: undefined } as ToolDefinition;
+    const registry = new ToolRegistry().register(anonymous);
+
+    // Degrades to "unknown origin" rather than printing the id twice and reading like a tautology.
+    expect(() => registry.register(anonymous)).toThrow(/unknown origin/i);
   });
 
   it("keeps the FIRST registration rather than the last", () => {
-    const registry = new ToolRegistry().register(tool("grep", "builtin"));
+    const registry = new ToolRegistry().register(tool("grep", "built-in"));
 
-    expect(() => registry.register(tool("grep", "impostor"))).toThrow();
+    expect(() => registry.register(tool("grep", "mcp:impostor"))).toThrow();
     // The refusal must not half-apply: a throw that had already overwritten the entry would leave
     // the impostor installed AND report a failure.
-    expect(registry.get("grep")?.schema.description).toBe("builtin");
+    expect(registry.get("grep")?.origin).toBe("built-in");
   });
 
   it("still accepts distinct ids, including the MCP-prefixed shape", () => {
     const registry = new ToolRegistry()
-      .register(tool("bash", "builtin"))
+      .register(tool("bash", "built-in"))
       .register(tool("mcp__github__search", "connector"))
       .register(tool("mcp__linear__search", "connector"));
 
