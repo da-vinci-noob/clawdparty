@@ -50,7 +50,11 @@ class RepoBrowser
   # success; raises NotFound / Oversized / Binary otherwise.
   def content(path)
     absolute = contained_path!(path) # realpath containment (raises NotFound on escape/missing)
-    raise(NotFound, 'denylisted') if denylisted?(path)
+    # BOTH the requested path and the RESOLVED one. Checking only the request let an innocuously
+    # named symlink inside the worktree serve a denylisted file: containment saw a path within the
+    # tree and the denylist saw the link's own basename. Every symlink case in the requirements
+    # record escaped OUTWARD, which is the direction that was already closed.
+    raise(NotFound, 'denylisted') if denylisted?(path) || denylisted?(within_worktree(absolute))
     raise(NotFound, 'not a file') unless File.file?(absolute)
     raise(Oversized, 'exceeds 1MB') if File.size(absolute) > MAX_BYTES
 
@@ -71,6 +75,22 @@ class RepoBrowser
     RepoPaths.contain!(worktree.worktree_path, path)
   rescue RepoPaths::Escape
     raise(NotFound, 'unresolvable or escaping path')
+  end
+
+  # The resolved path expressed relative to the worktree root, so the denylist judges what will
+  # actually be READ. Relative rather than absolute deliberately: the root itself could contain a
+  # segment the denylist matches, and that must not condemn every file under it.
+  #
+  # `File.realpath` on the root as well, because `contained_path!` returns a realpath — on macOS
+  # `/tmp` is a symlink to `/private/tmp`, so a naive prefix strip silently fails to strip and the
+  # check then runs against an absolute path.
+  def within_worktree(absolute)
+    root = File.realpath(worktree.worktree_path)
+    absolute.delete_prefix("#{root}#{File::SEPARATOR}")
+  rescue SystemCallError
+    # The root vanished mid-request. Fall back to the absolute path: a false denial is the safe
+    # direction, and the next call will fail containment anyway.
+    absolute
   end
 
   def denylisted?(path)
