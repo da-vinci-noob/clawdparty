@@ -15,6 +15,9 @@ class SessionChannel < ApplicationCable::Channel
   private
 
   def participant?(session)
-    current_user && session.participants.exists?(user_id: current_user.id)
+    # `.active`, for the same reason the REST check is. A removed participant's next subscribe
+    # is refused; an already-open socket survives until it reconnects, which is stated in the design
+    # record rather than left to be discovered.
+    current_user && session.participants.active.exists?(user_id: current_user.id)
   end
 end

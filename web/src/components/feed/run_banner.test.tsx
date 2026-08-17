@@ -292,3 +292,44 @@ describe("an extension enabled or disabled", () => {
     expect(screen.getByTestId("feed-run-banner")).not.toHaveTextContent("plugin_enabled");
   });
 });
+
+/**
+ * Someone's access was revoked.
+ *
+ * Two people in one row: the actor, resolved from `actor.id` like every other banner, and the person
+ * removed, whose name rides on the payload precisely because their participant row is no longer
+ * active and would not resolve.
+ */
+describe("a participant removed", () => {
+  const removed = (name?: string): EventEnvelope =>
+    ({
+      id: 12,
+      session_id: "s",
+      ai_run_id: null,
+      seq: 12,
+      type: "participant_removed",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { participant_id: "9", ...(name ? { name } : {}) },
+    }) as unknown as EventEnvelope;
+
+  it("names who removed whom", () => {
+    render(<RunBanner event={removed("Priya")} names={new Map([["1", "Shah"]])} />);
+
+    const banner = screen.getByTestId("feed-run-banner");
+    expect(banner).toHaveTextContent("Shah");
+    expect(banner).toHaveTextContent("removed Priya from the session");
+  });
+
+  it("takes the removed name from the PAYLOAD, not the names map", () => {
+    // Their participant row is no longer active, so resolving the id would give "#9" or nothing.
+    // This is the same reason `participant_joined` carries a name.
+    render(<RunBanner event={removed("Priya")} names={new Map()} />);
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent("removed Priya");
+  });
+
+  it("degrades gracefully when the payload carries no name", () => {
+    render(<RunBanner event={removed()} names={new Map()} />);
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent(/removed a participant/);
+  });
+});

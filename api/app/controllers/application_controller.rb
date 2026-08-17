@@ -29,7 +29,9 @@ class ApplicationController < ActionController::API
   def participant_for(session)
     return nil unless current_user
 
-    session.participants.find_by(user_id: current_user.id)
+    # `.active` — a REMOVED participant is not one. Their row survives as the referent for
+    # their history, so without this scope removal would revoke nothing.
+    session.participants.active.find_by(user_id: current_user.id)
   end
 
   # Announce a newly-created participant on the session stream so every client

@@ -45,7 +45,8 @@ class Event < ApplicationRecord
     tool_started tool_finished tool_failed terminal_output file_changed
     run_finished run_failed run_interrupted
     changeset_ready changeset_approved changeset_rejected
-    chat_message task_created task_updated participant_joined presence_changed
+    chat_message task_created task_updated participant_joined participant_removed
+    presence_changed
     request_header context_compacted context_usage tool_refused
     plugin_enabled plugin_disabled provider_error recovery_applied
     skill_changed

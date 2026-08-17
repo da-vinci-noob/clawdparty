@@ -32,7 +32,61 @@ class ParticipantsController < ApplicationController
     render(json: participant_json(participant), status: :created)
   end
 
+  # DELETE /api/sessions/:session_id/participants/:id — owner revokes someone's access.
+  #
+  # **Revokes FUTURE access; does not rewrite the past.** The event stream is append-only, so every
+  # `chat_message` and `user_prompt` they sent stays in the feed, still attributed, and every
+  # changeset they approved stays approved. That is not a limitation to apologise for — a removal
+  # that erased their contributions would leave a record claiming work was approved by nobody, and
+  # the DATABASE agrees: `events.actor_participant_id` has a foreign key, so a hard delete is
+  # refused outright. Hence `removed_at` rather than `destroy`.
+  #
+  # Why this exists at all: revoking an INVITE stops future joins and leaves existing participants
+  # untouched (correctly — revoking a link you posted should not eject the colleague who used it
+  # legitimately), so an owner who admitted the wrong person previously had only one lever, and it
+  # closed the whole session for everyone.
+  def destroy
+    session = Session.find_by(id: params[:session_id])
+    raise(ActiveRecord::RecordNotFound) if session.nil?
+
+    authorize!(:manage_session, session)
+    # `.active`: removing someone twice is a 404, not a second event.
+    target = session.participants.active.find_by(id: params[:id])
+    return render_not_found if target.nil?
+    return render_cannot_remove_host if target.user_id == session.host_id
+
+    remove!(session, target)
+  end
+
   private
+
+  # REVOKED, not deleted — and the database is what settled that. A hard `destroy` raises
+  # `PG::ForeignKeyViolation` on `events.actor_participant_id`, because the event stream is
+  # append-only and every message they sent references them. The constraint is right: erasing the row
+  # would leave unattributable messages in the feed and an `ai_runs` row claiming a changeset was
+  # approved by nobody.
+  #
+  # The revocation and its announcement go in ONE transaction, so the room cannot be told about a
+  # removal that did not happen, or miss one that did. `Events::Append` broadcasts.
+  def remove!(session, target)
+    Events::Append.call(
+      session: session,
+      event: {
+        type: 'participant_removed',
+        actor: { kind: 'user', id: participant_for(session).id },
+        # The NAME rides along so the feed need not resolve a participant it no longer counts.
+        payload: { participant_id: target.id.to_s, name: target.user.name }
+      }
+    ) { target.update!(removed_at: Time.current) }
+    render(json: { id: target.id.to_s, removed: true }, status: :ok)
+  end
+
+  # The host is not removable. Their `sessions.host_id` would dangle, and "the owner removed
+  # themselves" leaves a session nobody can administer — archive is the lever for closing a room.
+  def render_cannot_remove_host
+    render(json: { errors: [{ message: 'The session host cannot be removed — archive the session instead' }] },
+           status: :unprocessable_content)
+  end
 
   # A DISTINCT participant per join (even when the User is reused), so each
   # participant id — what actor.id carries — stays unique per join.

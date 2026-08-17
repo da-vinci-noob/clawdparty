@@ -1,7 +1,12 @@
 import type { EventEnvelope } from "@clawdparty/contracts";
 import { type FC, useEffect, useRef } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
-import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
+import {
+  laneByRun,
+  selectActiveRunId,
+  selectDurableEvents,
+  useEventStore,
+} from "../stores/event_store";
 import { ContextCompactedRow } from "./feed/context_compacted_row";
 import { FileChangedRow } from "./feed/file_changed_row";
 import { ProviderErrorRow } from "./feed/provider_error_row";
@@ -109,6 +114,10 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
   }
 
   const windowed = durable.slice(-FEED_CAP);
+  // Which lane each run is in, for the row labels. Computed from the STABLE durable array
+  // rather than subscribed to as a selector: it builds a new Map, and Zustand compares by reference,
+  // so subscribing looped the render.
+  const lanes = laneByRun(durable);
 
   return (
     <div
@@ -117,8 +126,13 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
       className="space-y-4 font-mono text-[13px] leading-[1.65]"
     >
       {windowed.map((event) => (
-        <div key={event.id ?? `${event.type}-${event.ts}`}>
+        <div key={event.id ?? `${event.type}-${event.ts}`} className="relative">
           {renderEvent(event, finishByToolId, resolvedNames)}
+          {/* ONE ordered stream, with each row labelled by lane — not a split feed. The
+              shared room is the product's central claim, and interleaving is information: you can
+              see two streams racing. Only a NON-DEFAULT lane is labelled, so a single-lane session
+              (which is every session until someone opens a second) carries no noise at all. */}
+          {laneLabel(event, lanes)}
         </div>
       ))}
       {[...thinkingByBlock.entries()].map(([block, text]) => (
@@ -139,6 +153,27 @@ export const ActivityFeed: FC<Props> = ({ names }) => {
     </div>
   );
 };
+
+/**
+ * The lane chip for a row, or nothing.
+ *
+ * Absent for the default lane and for events that belong to no run (a chat message, a participant
+ * joining): labelling those would attribute a session-level occurrence to a work stream.
+ */
+function laneLabel(event: EventEnvelope, laneByRun: Map<string, string>) {
+  const lane = event.ai_run_id === null ? undefined : laneByRun.get(event.ai_run_id);
+  if (lane === undefined) {
+    return null;
+  }
+  return (
+    <span
+      data-testid="feed-lane"
+      className="absolute right-0 top-0 rounded-[5px] bg-[#0f1c2b] px-[6px] py-px font-mono text-[10px] uppercase tracking-[1px] text-[#3b9dff]"
+    >
+      {lane}
+    </span>
+  );
+}
 
 function renderEvent(
   event: EventEnvelope,
@@ -182,6 +217,10 @@ function renderEvent(
       return <TerminalBlock event={event} />;
     case "file_changed":
       return <FileChangedRow event={event} />;
+    case "participant_removed":
+      // A social banner like joining, and in the same stream: the room learns who lost access the
+      // same way it learned who gained it. Their earlier messages stay above it, still attributed.
+      return <RunBanner event={event} names={names} />;
     case "participant_joined":
       // A social banner ("<name> joined the session"), same framing as the run
       // lifecycle — the name is resolved from actor.id via the names map.

@@ -90,6 +90,8 @@ function payloadFor(type: string): Record<string, unknown> {
       return { id: "a-plugin", version: "1.0.0", origin: "third_party" };
     case "skill_changed":
       return { action: "added", name: "deploy", scope: "repo" };
+    case "participant_removed":
+      return { participant_id: "9", name: "Priya" };
     case "run_started":
       return { model: "m", cwd: "/r" };
     case "run_finished":

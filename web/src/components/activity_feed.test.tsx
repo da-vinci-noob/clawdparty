@@ -327,6 +327,12 @@ describe("ActivityFeed auto-scroll", () => {
  * This test exists so a later "tidy up the thinking boxes" change cannot quietly merge them.
  */
 describe("interleaved thinking stays separate", () => {
+  // Its own reset: this describe is a SIBLING of the one that owns the shared hook, so it inherits
+  // no cleanup. Without it the store carries rows over from earlier tests — which is why the
+  // lane-label block passed in isolation and failed in the full file.
+  beforeEach(() => useEventStore.getState().reset());
+  afterEach(() => useEventStore.getState().reset());
+
   const event = (id: number, type: string, payload: object): EventEnvelope =>
     ({
       id,
@@ -374,5 +380,107 @@ describe("interleaved thinking stays separate", () => {
     const rendered = screen.getByTestId("activity-feed").textContent ?? "";
     expect(rendered.indexOf("First I should look")).toBeLessThan(rendered.indexOf("read"));
     expect(rendered.indexOf("read")).toBeLessThan(rendered.indexOf("Now that I have read it"));
+  });
+});
+
+/**
+ * The feed labels each row by lane and stays ONE ordered stream.
+ *
+ * Chosen over a per-lane split because the shared room is the product's central claim (,
+ * enforced by `bin/check-room`), and interleaving is information: you can see two streams racing.
+ * The label is what makes two concurrent streams legible without separating them.
+ */
+describe("lane labels", () => {
+  // Its own reset: this describe is a SIBLING of the one that owns the shared hook, so it inherits
+  // no cleanup. Without it the store carries rows over from earlier tests — which is why this
+  // block passed in isolation and failed in the full file.
+  beforeEach(() => useEventStore.getState().reset());
+  afterEach(() => useEventStore.getState().reset());
+
+  const started = (id: number, runId: string, lane?: string): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: id,
+      type: "run_started",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { model: "m", cwd: "/r", ...(lane ? { lane } : {}) },
+    }) as unknown as EventEnvelope;
+
+  const text = (id: number, runId: string, body: string): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: id,
+      type: "ai_text",
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { block: `b${id}`, text: body },
+    }) as unknown as EventEnvelope;
+
+  it("labels a row from a non-default lane", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany([started(1, "r1", "review"), text(2, "r1", "in review")]),
+    );
+
+    // Derived from `run_started`, so the label reaches a late joiner arriving by backfill too.
+    expect(screen.getAllByTestId("feed-lane").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("feed-lane")[0]).toHaveTextContent("review");
+  });
+
+  it("labels NOTHING in a single-lane session", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany([started(1, "r1"), text(2, "r1", "on main")]));
+
+    // `main` is omitted from the payload, so absence is the answer. Labelling every row "main" in a
+    // session that has never opened a second lane is pure noise.
+    expect(screen.queryByTestId("feed-lane")).not.toBeInTheDocument();
+  });
+
+  it("keeps ONE stream, with the two lanes interleaved in order", () => {
+    renderFeed();
+    act(() =>
+      useEventStore
+        .getState()
+        .applyMany([
+          started(1, "r1"),
+          started(2, "r2", "review"),
+          text(3, "r1", "from main"),
+          text(4, "r2", "from review"),
+        ]),
+    );
+
+    // Not two feeds: one ordered list. The order is the shared truth every participant sees.
+    const rendered = screen.getByTestId("activity-feed").textContent ?? "";
+    expect(rendered.indexOf("from main")).toBeLessThan(rendered.indexOf("from review"));
+    // And only the non-default lane's rows carry a chip.
+    expect(screen.getAllByTestId("feed-lane")).toHaveLength(2);
+  });
+
+  it("does not label an event that belongs to no run", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany([
+        started(1, "r1", "review"),
+        {
+          id: 5,
+          session_id: "s",
+          ai_run_id: null,
+          seq: 5,
+          type: "participant_joined",
+          actor: { kind: "user", id: "9" },
+          ts: "2026-08-17T00:00:00Z",
+          payload: { participant_id: "9", name: "Priya", role: "editor" },
+        } as unknown as EventEnvelope,
+      ]),
+    );
+
+    // A session-level occurrence belongs to no work stream; attributing it to one would be a claim
+    // the record does not make. One chip (the run_started row), not two.
+    expect(screen.getAllByTestId("feed-lane")).toHaveLength(1);
   });
 });

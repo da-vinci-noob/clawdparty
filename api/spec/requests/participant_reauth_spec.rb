@@ -129,11 +129,22 @@ RSpec.describe('Participant re-auth') do
       expect(session.participants.order(:id).last.role).to(eq('editor'))
     end
 
-    it 'offers no way to remove them, which is the actual gap' do
-      # Asserted as an ABSENCE so the gap is visible in the suite rather than only in a note.
-      # `participants` is create-only; if a remove route is added this fails and points at the follow-up.
+    it 'is now removable by an owner' do
+      # This was asserted as an ABSENCE before removal existed, and it FAILED the moment removal
+      # shipped — which is exactly what an absence assertion is for. Kept, inverted, so the route's
+      # existence is now the pinned fact.
       expect(Rails.application.routes.routes.map { |r| [r.verb, r.path.spec.to_s] })
-        .not_to(include(['DELETE', '/api/sessions/:session_id/participants/:id(.:format)']))
+        .to(include(['DELETE', '/api/sessions/:session_id/participants/:id(.:format)']))
+    end
+
+    it 'still leaves REVOCATION distinct from removal' do
+      invite, raw = invite_and_token
+      join_with(raw)
+      invite.update!(revoked_at: Time.current)
+
+      # Revoking the link does not remove anyone; removal is a separate, deliberate act. Conflating
+      # them would eject the colleague who used the link legitimately.
+      expect(session.participants.count).to(be >= 1)
     end
   end
 

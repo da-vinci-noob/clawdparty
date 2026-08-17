@@ -214,6 +214,52 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [1.14.0] — `participant_removed`, the 32nd event type (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 14 }`.** `EVENT_TYPE_COUNT` 31 → 32.
+
+An owner can revoke a participant's access: `DELETE /api/sessions/:session_id/participants/:id`
+(owner-only), appending `participant_removed { participant_id, name }`.
+
+**Removal is a REVOCATION, not a delete, and the DATABASE settled that.** A hard `destroy` raises
+`PG::ForeignKeyViolation` on `events.actor_participant_id`, because the event stream is append-only
+and every message the participant sent references them. The constraint is right: erasing the row would
+leave unattributable messages in the feed and an `ai_runs` row claiming a changeset was approved by
+nobody. So `participants.removed_at` withdraws access while the row survives as the referent for
+history.
+
+Consequences worth stating:
+
+- Their `chat_message` / `user_prompt` events stay in the feed, still attributed, and their approvals
+  stay approved. Removal does not rewrite the past.
+- `name` rides on the payload because the participant is no longer active and would not resolve — the
+  same reason `participant_joined` carries one.
+- **Participantship now means `participants.active`** (`removed_at IS NULL`), in both the REST check
+  and the cable subscription. A check that forgets the scope grants a removed participant everything
+  they had.
+- An already-open cable socket survives until it reconnects; the next subscribe is refused.
+- The session HOST cannot be removed — `sessions.host_id` would dangle and the room would have no
+  administrator. Archive is the lever for closing a session.
+
+**Revocation of an INVITE remains a different thing** and is unchanged: it stops future joins and
+touches nobody who already joined.
+
+## [1.13.0] — `run_started.lane`: which work stream a run belongs to (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 13 }`.** One new optional field on `RunStartedPayload`.
+
+`lane?: string`, echoed for the same reason `disallowed_tools` is: it is the ONLY place a client —
+including a late joiner arriving by backfill with no live events — can learn a run's lane. Every other
+event carries just `ai_run_id`, so without this the feed could not label a row without a REST call per
+run.
+
+**Omitted for the default lane.** Absence means `main`, which is every session that has never opened
+a second one, and labelling every row "main" in a single-lane session is noise.
+
+The web renders it as a per-row chip in ONE ordered stream rather than splitting the feed:
+'s single ordered stream is the product's central claim, and interleaving is information — you
+can see two lanes racing.
+
 ## [extensions] — per-session extension enablement; no third-party loading (additive)
 
 **No `CONTRACT_VERSION` bump: no event type or payload changed.** `plugin_enabled` and

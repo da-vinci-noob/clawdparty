@@ -146,6 +146,10 @@ export class RunLoop {
         {
           model: spec.model,
           cwd: spec.cwd,
+          // The lane, so the feed can label a row and a late joiner can too. Omitted for the
+          // default lane: every pre-lane session is implicitly in it, and labelling every row "main"
+          // in a single-lane session is noise.
+          ...(spec.lane && spec.lane !== "main" ? { lane: spec.lane } : {}),
           ...(spec.disallowedTools?.length ? { disallowed_tools: spec.disallowedTools } : {}),
           ...(spec.connectors?.length ? { connectors: spec.connectors } : {}),
           ...(spec.connectorsFailed?.length ? { connectors_failed: spec.connectorsFailed } : {}),

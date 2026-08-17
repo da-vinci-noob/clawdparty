@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 12 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 14 } as const;
 
 /**
  * The 31 frozen event type names. Adding or removing a name is a CONTRACT
@@ -51,6 +51,7 @@ export const EVENT_TYPES = [
   "task_created",
   "task_updated",
   "participant_joined",
+  "participant_removed",
   "presence_changed",
   // --- Harness types, added at v1.5 (001-sidecar-harness-architecture) --------
   "request_header",
@@ -220,6 +221,18 @@ export interface RunStartedPayload {
    * stderr, which is host-side and outside the record.
    */
   connectors_failed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
+  /**
+   * Which work stream this run belongs to.
+   *
+   * Echoed for the same reason `disallowed_tools` is: it is the ONLY place a client — including a
+   * late joiner arriving by backfill with no live events — can learn a run's lane. Without it the
+   * feed cannot label a row, because every other event carries only `ai_run_id`, and resolving that
+   * to a lane would take a REST call per run.
+   *
+   * Omitted means the default lane (`main`), which is every session that has never opened a second
+   * one.
+   */
+  lane?: string;
 }
 
 // --- Run capability selection (additive since v1.4) --------------------------
@@ -381,6 +394,23 @@ export interface TaskPayload {
   title: string;
   status: string;
 }
+/**
+ * A participant's access was revoked by an owner (additive since v1.14).
+ *
+ * **Their history is NOT removed, and that is the design.** The event stream is append-only, so
+ * every `chat_message` and `user_prompt` they sent stays in the feed, still attributed, and every
+ * changeset they approved stays approved. Removal revokes FUTURE access; it does not rewrite the
+ * past. A removal that erased their contributions would leave a record claiming work was approved by
+ * nobody.
+ *
+ * `name` is carried so the feed can say who was removed without resolving a participant row that no
+ * longer exists — the same reason `participant_joined` carries it.
+ */
+export interface ParticipantRemovedPayload {
+  participant_id: string;
+  name: string;
+}
+
 export interface ParticipantJoinedPayload {
   participant_id: string;
   name: string;
@@ -546,6 +576,7 @@ export interface EventPayloadMap {
   task_created: TaskPayload;
   task_updated: TaskPayload;
   participant_joined: ParticipantJoinedPayload;
+  participant_removed: ParticipantRemovedPayload;
   presence_changed: PresenceChangedPayload;
   request_header: RequestHeaderPayload;
   context_compacted: ContextCompactedPayload;
@@ -582,7 +613,7 @@ type Equal<A, B> = Extends<A, B> extends true ? (Extends<B, A> extends true ? tr
  * v1.10, and this line is deliberately the thing that has to be edited: a taxonomy that can grow
  * without anyone noticing is a taxonomy nobody can rely on.
  */
-export const EVENT_TYPE_COUNT: 31 = EVENT_TYPES.length;
+export const EVENT_TYPE_COUNT: 32 = EVENT_TYPES.length;
 
 /**
  * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 31 names +

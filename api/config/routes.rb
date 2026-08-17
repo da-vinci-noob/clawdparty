@@ -11,7 +11,9 @@ Rails.application.routes.draw do
   # namespace — the app module is already `Api`, so a second `Api::` controller
   # namespace would be confusing and redundant).
   scope '/api' do
-    # Join a session via an invite token → signed clawd_uid cookie.
+    # Join a session via an invite token → signed clawd_uid cookie. `create` only: this route is the
+    # unauthenticated join flow and is NOT session-scoped. Removal is nested under the session
+    # instead, because it is an owner action on a specific room.
     resources :participants, only: :create
 
     # Folder picker: git-flagged immediate subdirs under the repo root (any
@@ -39,6 +41,11 @@ Rails.application.routes.draw do
       # Who am I in this session (re-hydrate the client from the clawd_uid cookie
       # after a refresh): GET /api/sessions/:session_id/participant
       get 'participant', to: 'participants#show'
+      # An OWNER revoking someone's access. Nested because it acts on one session, and
+      # session-scoped so `authorize!` has a session to gate on. It removes FUTURE access and leaves
+      # their history intact — the event stream is append-only, so their messages stay attributed and
+      # their approvals stay approved.
+      delete 'participants/:id', to: 'participants#destroy'
       # Invite management (owner only): mint/list/revoke /api/sessions/:session_id/invites[/:id]
       resources :invites, only: %i[create index destroy]
       # Late-joiner backfill: GET /api/sessions/:session_id/events?after=<cursor>

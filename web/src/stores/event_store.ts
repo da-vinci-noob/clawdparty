@@ -357,6 +357,28 @@ export function selectLiveContext(
   };
 }
 
+/**
+ * Which lane each run belongs to, from `run_started`.
+ *
+ * A PLAIN FUNCTION over the durable list, deliberately NOT a Zustand selector. It builds a new `Map`
+ * each call, and `useEventStore(selector)` compares by reference — so subscribing to it re-rendered
+ * on every render and React aborted with "Maximum update depth exceeded". The same hazard
+ * `selectDurableEvents` exists to avoid: callers subscribe to the STABLE array and derive from it.
+ *
+ * The mapping is derivable because every event carries `ai_run_id` and `run_started` names the lane.
+ * A run absent from the map is in the default lane — the payload omits `lane` for `main`, so absence
+ * is the answer rather than a gap.
+ */
+export function laneByRun(durable: EventEnvelope[]): Map<string, string> {
+  const lanes = new Map<string, string>();
+  for (const event of durable) {
+    if (event.type !== "run_started" || event.ai_run_id === null) continue;
+    const lane = (event.payload as { lane?: string }).lane;
+    if (typeof lane === "string" && lane !== "") lanes.set(event.ai_run_id, lane);
+  }
+  return lanes;
+}
+
 export interface ContextUsage {
   // Prompt-side tokens of the most recent completed run — a proxy for how full the
   // context window is (input + cache-read + cache-creation = everything sent that turn).

@@ -48,6 +48,21 @@ function skillSentence(payload: {
  * The id is rendered verbatim rather than prettified, because it is the identity the panel, the
  * record and the refusal message all use — three names for one rule is how a reader loses the thread.
  */
+/**
+ * Someone's access was revoked.
+ *
+ * Its own sentence rather than a `LABELS` entry, because it names TWO people: the actor (resolved
+ * from `actor.id`, like every other row) and the person removed, whose name rides on the payload
+ * precisely because their participant row no longer counts as active and would not resolve.
+ *
+ * Their earlier messages stay in the feed above this row, still attributed — removal revokes access
+ * and does not rewrite history.
+ */
+function removalSentence(event: EventEnvelope): string {
+  const payload = event.payload as { name?: string };
+  return `removed ${payload.name ?? "a participant"} from the session`;
+}
+
 function pluginSentence(event: EventEnvelope): string {
   const payload = event.payload as { id?: string };
   const verb = event.type === "plugin_enabled" ? "enabled" : "disabled";
@@ -115,7 +130,9 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
       ? skillSentence(event.payload as Parameters<typeof skillSentence>[0])
       : event.type === "plugin_enabled" || event.type === "plugin_disabled"
         ? pluginSentence(event)
-        : (LABELS[event.type] ?? event.type);
+        : event.type === "participant_removed"
+          ? removalSentence(event)
+          : (LABELS[event.type] ?? event.type);
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const answerOnly = isAnswerOnly(event);
   const failed = failedConnectors(event);
