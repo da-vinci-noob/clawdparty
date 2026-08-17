@@ -31,6 +31,15 @@ import type { Transport } from "./transport.js";
 
 export class RunConflict extends Error {}
 export class UnknownRun extends Error {}
+/**
+ * The caller named a provider this harness does not have.
+ *
+ * Typed so the route can answer 422 instead of 500. The message was already specific — it names
+ * the unknown id and lists the known ones — but a caller error returned as a 500 is
+ * indistinguishable from a harness fault in logs and monitoring, and it reads to the person who
+ * mistyped a provider as "the server is broken" rather than "that provider does not exist".
+ */
+export class UnknownProvider extends Error {}
 
 export interface StartRunInput {
   run_id: string;
@@ -386,7 +395,7 @@ export class Supervisor {
     if (adapter) return adapter;
     // Named, never defaulted: running someone's prompt on a provider they did not choose
     // bills an account they did not pick.
-    throw new Error(`unknown provider: ${id}. Known: ${ADAPTER_IDS.join(", ")}`);
+    throw new UnknownProvider(`unknown provider: ${id}. Known: ${ADAPTER_IDS.join(", ")}`);
   }
 
   /**

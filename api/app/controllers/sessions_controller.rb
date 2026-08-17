@@ -71,10 +71,27 @@ class SessionsController < ApplicationController
 
     authorize!(:archive, session)
     session.update!(status: 'archived') unless session.archived?
-    render(json: { id: session.id.to_s, status: session.status }, status: :ok)
+    # Reported, not hidden: a worktree KEPT because it holds unreviewed work is something the
+    # owner needs to know, and `bin/worktrees` is how they deal with it.
+    render(json: { id: session.id.to_s, status: session.status, worktree: prune_worktree(session) },
+           status: :ok)
   end
 
   private
+
+  # Archive is a hard close, so the worktree it created should not outlive it.
+  #
+  # NEVER destroys unreviewed work: a dirty tree is KEPT and reported as `kept_dirty`, because a
+  # changeset that has not been approved or rejected exists only there. A `chat` session has no
+  # worktree at all. Failure to remove one does not fail the archive — the session is closed
+  # either way, and a leftover directory is a cleanup task, not a reason to refuse.
+  def prune_worktree(session)
+    return 'not_applicable' if session.mode == 'chat'
+
+    Git::WorktreeManager.new(session).remove_worktree!.to_s
+  rescue Git::WorktreeManager::GitError
+    'failed'
+  end
 
   # One row of the per-user history list. `status` is server-derived (active /
   # archived); the web layer maps archived → the "revoked" badge. `owned` (am I the

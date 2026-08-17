@@ -169,4 +169,34 @@ RSpec.describe('Session run defaults') do
                                               'aws_profile' => 'claude-code-sso'))
     end
   end
+
+  # Mode is immutable BY DESIGN ("fixed for the session's lifetime"), and the design record captures
+  # that as a deliberate decision rather than an unexamined gap. Asserted because the guarantee is
+  # an ABSENCE: `mode` is simply not among the editable attributes, and an absence nothing tests is
+  # one a later "make everything patchable" refactor removes.
+  #
+  # Why it must stay immutable: chat → review would create a worktree from a repository whose files
+  # earlier chat runs may already have modified in place, so the first changeset would present edits
+  # no run in that session's history accounts for.
+  describe('mode') do
+    it 'is not changed by a PATCH that tries to change it' do
+      join_as(session, role: 'owner')
+      patch("/api/sessions/#{session.id}", params: { mode: 'review' }, as: :json)
+
+      expect(response).to(have_http_status(:ok))
+      expect(session.reload.mode).to(eq('chat'))
+      expect(response.parsed_body['mode']).to(eq('chat'))
+    end
+
+    it 'does not block the rest of the PATCH when mode is sent alongside a real change' do
+      join_as(session, role: 'owner')
+      patch("/api/sessions/#{session.id}", params: { mode: 'review', title: 'Renamed' }, as: :json)
+
+      # Ignored, not refused: a client sending the current mode back with an edit is harmless, and
+      # 422-ing it would make round-tripping a session object impossible.
+      expect(response).to(have_http_status(:ok))
+      expect(session.reload.title).to(eq('Renamed'))
+      expect(session.mode).to(eq('chat'))
+    end
+  end
 end

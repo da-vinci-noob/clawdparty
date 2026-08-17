@@ -74,6 +74,22 @@ const FAILURE_TEXT: Record<string, string> = {
   failed: "failed to connect",
 };
 
+/**
+ * Why the run failed, in the harness's own words (contract 1.12).
+ *
+ * The loop has composed these sentences since M4 — an output limit, a server-side tool that
+ * never converged, a refusal — and `RunLoop.fail()` took the argument as `_message` and threw it
+ * away, so the room read "run failed" and stopped there. On a provider that returns no
+ * explanation with a refusal this is the only account of it that exists.
+ */
+function failureExplanation(event: EventEnvelope): string | null {
+  if (event.type !== "run_failed") {
+    return null;
+  }
+  const explanation = (event.payload as { explanation?: unknown }).explanation;
+  return typeof explanation === "string" && explanation.length > 0 ? explanation : null;
+}
+
 export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = ({
   event,
   names,
@@ -85,36 +101,43 @@ export const RunBanner: FC<{ event: EventEnvelope; names: ParticipantNames }> = 
   const who = event.actor.kind === "user" ? `${actorLabel(event.actor, names)} ` : "";
   const answerOnly = isAnswerOnly(event);
   const failed = failedConnectors(event);
+  const explanation = failureExplanation(event);
   return (
-    <div
-      data-testid="feed-run-banner"
-      className="flex items-center gap-2 text-[11px] text-[#6b726b]"
-    >
-      <span
-        className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#3b9dff]"
-        style={{ boxShadow: "0 0 6px rgba(59,157,255,.7)" }}
-        aria-hidden="true"
-      />
-      <span>
-        {who && <span className="text-[#aeb4ae]">{who}</span>}
-        {label}
-        {answerOnly && (
-          <span data-testid="run-answer-only" className="text-[#565d58]">
-            {" "}
-            · no tools, answers only
-          </span>
-        )}
-        {failed.map((connector) => (
-          <span
-            key={connector.name}
-            data-testid={`run-connector-failed-${connector.name}`}
-            className="text-[#c9a227]"
-          >
-            {" "}
-            · {connector.name} {FAILURE_TEXT[connector.kind] ?? "unavailable"}
-          </span>
-        ))}
-      </span>
+    <div data-testid="feed-run-banner" className="flex flex-col gap-1 text-[11px] text-[#6b726b]">
+      <div className="flex items-center gap-2">
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#3b9dff]"
+          style={{ boxShadow: "0 0 6px rgba(59,157,255,.7)" }}
+          aria-hidden="true"
+        />
+        <span>
+          {who && <span className="text-[#aeb4ae]">{who}</span>}
+          {label}
+          {answerOnly && (
+            <span data-testid="run-answer-only" className="text-[#565d58]">
+              {" "}
+              · no tools, answers only
+            </span>
+          )}
+          {failed.map((connector) => (
+            <span
+              key={connector.name}
+              data-testid={`run-connector-failed-${connector.name}`}
+              className="text-[#c9a227]"
+            >
+              {" "}
+              · {connector.name} {FAILURE_TEXT[connector.kind] ?? "unavailable"}
+            </span>
+          ))}
+        </span>
+      </div>
+      {/* Its own line rather than appended to the banner: these are full sentences with an
+          action in them, and squeezing one onto a "run failed ·" line is how it gets ignored. */}
+      {explanation && (
+        <p data-testid="run-failed-explanation" className="pl-[14px] text-[#a89a7a]">
+          {explanation}
+        </p>
+      )}
     </div>
   );
 };

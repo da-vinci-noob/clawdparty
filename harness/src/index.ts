@@ -16,7 +16,13 @@ import { type HarnessConfig, loadConfig } from "./config.js";
 import { listProviders } from "./providers/discovery.js";
 import { verifyProviders } from "./providers/verify.js";
 import { type SkillScope, addSkill, removeSkill } from "./skills_admin.js";
-import { RunConflict, type StartRunInput, Supervisor, UnknownRun } from "./supervisor.js";
+import {
+  RunConflict,
+  type StartRunInput,
+  Supervisor,
+  UnknownProvider,
+  UnknownRun,
+} from "./supervisor.js";
 import { Transport } from "./transport.js";
 
 /** The write body both skill routes take. Validated by `skills_admin`, not here. */
@@ -184,6 +190,12 @@ export function buildServer(
     } catch (err) {
       if (err instanceof RunConflict) {
         return reply.code(409).send({ error: "run_active" });
+      }
+      // A caller error, not a harness fault. Rails forwards the message verbatim
+      // (`ProviderErrorResponses`), so the participant reads which provider was asked for and
+      // which ones exist — but at 500 it was also logged as a server failure.
+      if (err instanceof UnknownProvider) {
+        return reply.code(422).send({ error: "unknown_provider", message: err.message });
       }
       throw err;
     }

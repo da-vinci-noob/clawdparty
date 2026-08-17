@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# bin/worktrees — list session worktrees and remove the orphaned ones.
+#
+#   bin/worktrees list            — every worktree, with whether its session still exists
+#   bin/worktrees prune           — remove orphans that are CLEAN; keep and report dirty ones
+#   bin/worktrees prune --force   — also remove dirty orphans (destroys unreviewed work)
+#
+# Why this exists: nothing removed a worktree when a session ended, so the mount root
+# accumulated checkouts indistinguishable from live ones. `bin/harness sessions` already does
+# this job for store files; this is the worktree half. Archive now prunes its own worktree, so
+# what lands here is the backlog plus anything a crash left behind.
+#
+# NEVER removes automatically, and never removes a DIRTY worktree without --force: an
+# unreviewed changeset exists only in the worktree, so a sweep that deleted one would destroy
+# work nobody approved or rejected. The session BRANCH is always left alone — it is the record
+# of an approved changeset, and `git worktree remove` does not touch it.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# The same mount root Rails uses. REPO_ROOT is the parent of the projects, and worktrees live
+# under <REPO_ROOT>/.clawdparty/worktrees/session-<id>.
+load_env() {
+  for file in .env.local .env; do
+    [[ -f "${file}" ]] && set -a && . "./${file}" && set +a
+  done
+  : "${TARGET_REPO_PATH:=}"
+  worktree_dir="${TARGET_REPO_PATH:-${repo_root}}/.clawdparty/worktrees"
+}
+
+# Session ids that still exist, one per line. Empty output is treated as UNKNOWN rather than
+# "no sessions": if the database cannot be reached, every worktree would look orphaned and a
+# prune would delete all of them.
+live_session_ids() {
+  bin/rails runner 'puts Session.pluck(:id).join("\n")' 2>/dev/null | tr -d '\r'
+}
+
+is_dirty() {
+  local path="$1"
+  [[ -n "$(git -C "${path}" status --porcelain 2>/dev/null)" ]]
+}
+
+# Each worktree with its id, whether the session exists, and whether it holds changes.
+# Sets the globals the callers iterate over.
+scan() {
+  load_env
+  if [[ ! -d "${worktree_dir}" ]]; then
+    echo "worktree dir: ${worktree_dir} (does not exist — nothing to do)"
+    return 1
+  fi
+  if ! compgen -G "${worktree_dir}/session-*" >/dev/null 2>&1; then
+    echo "worktree dir: ${worktree_dir}"
+    echo "(no session worktrees)"
+    return 1
+  fi
+
+  live="$(live_session_ids || true)"
+  if [[ -z "${live}" ]]; then
+    echo "WARNING: could not read the session list (is the stack up? try bin/start)." >&2
+    echo "         Refusing to guess — every worktree would look orphaned." >&2
+    return 1
+  fi
+  echo "worktree dir: ${worktree_dir}"
+  return 0
+}
+
+session_is_live() {
+  grep -qx "$1" <<<"${live}"
+}
+
+cmd_list() {
+  scan || return 0
+  local path id state changes
+  for path in "${worktree_dir}"/session-*; do
+    id="$(basename "${path}")"
+    id="${id#session-}"
+    session_is_live "${id}" && state="live" || state="ORPHAN"
+    is_dirty "${path}" && changes="dirty (unreviewed work)" || changes="clean"
+    printf 'session %-6s %-7s %s\n' "${id}" "${state}" "${changes}"
+  done
+}
+
+cmd_prune() {
+  local force="${1:-}"
+  scan || return 0
+
+  local path id removed=0 kept=0
+  for path in "${worktree_dir}"/session-*; do
+    id="$(basename "${path}")"
+    id="${id#session-}"
+    if session_is_live "${id}"; then
+      continue
+    fi
+    if is_dirty "${path}" && [[ "${force}" != "--force" ]]; then
+      echo "KEPT    session ${id} — dirty; holds unreviewed work. Re-run with --force to remove."
+      kept=$((kept + 1))
+      continue
+    fi
+    # `git worktree remove` from inside the worktree itself, so this works even when the
+    # originating repo has moved — the common case for an old orphan.
+    if git -C "${path}" worktree remove --force "${path}" 2>/dev/null; then
+      echo "removed session ${id}"
+    else
+      # Not registered with any repo (a stale directory a crash or a repo move left behind).
+      # `git worktree remove` cannot help; the directory is the whole of it.
+      rm -rf "${path}"
+      echo "removed session ${id} (unregistered directory)"
+    fi
+    removed=$((removed + 1))
+  done
+  echo "${removed} removed, ${kept} kept"
+}
+
+case "${1:-list}" in
+  list) cmd_list ;;
+  prune)
+    shift
+    cmd_prune "${1:-}"
+    ;;
+  *)
+    echo "usage: bin/worktrees {list|prune [--force]}" >&2
+    exit 64
+    ;;
+esac

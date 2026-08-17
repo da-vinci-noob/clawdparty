@@ -216,4 +216,72 @@ RSpec.describe(Git::WorktreeManager) do
       expect { mgr.ensure_worktree! }.to(raise_error(described_class::GitError))
     end
   end
+
+  # Nothing removed a worktree when a session ended, so the mount root accumulated
+  # checkouts indistinguishable from live ones. A live example prompted this: an orphan dated
+  # 2026-07-22 for a session that no longer existed, holding real edits to two files.
+  describe '#remove_worktree!' do
+    it 'removes a clean worktree and its git metadata' do
+      path = manager.ensure_worktree!
+
+      expect(manager.remove_worktree!).to(eq(:removed))
+      expect(Dir.exist?(path)).to(be(false))
+      # `git worktree remove` deregisters it too; a leftover registration makes `git worktree
+      # list` report a path that is gone.
+      out, = Open3.capture3('git', '-C', @repo, 'worktree', 'list')
+      expect(out).not_to(include(path))
+    end
+
+    it 'KEEPS a dirty worktree rather than destroying unreviewed work' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'README.md'), "edited but never reviewed\n")
+
+      # An unreviewed changeset lives ONLY here. This is the whole reason removal is not
+      # unconditional — and it is not hypothetical: the orphan that prompted this was dirty.
+      expect(manager.remove_worktree!).to(eq(:kept_dirty))
+      expect(Dir.exist?(path)).to(be(true))
+      expect(File.read(File.join(path, 'README.md'))).to(include('never reviewed'))
+    end
+
+    it 'removes a dirty worktree when force is asked for explicitly' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'README.md'), "edited\n")
+
+      expect(manager.remove_worktree!(force: true)).to(eq(:removed))
+      expect(Dir.exist?(path)).to(be(false))
+    end
+
+    it 'reports :absent when there is nothing to remove' do
+      # Archiving a session that never ran must not look like a failure.
+      expect(manager.remove_worktree!).to(eq(:absent))
+    end
+
+    it 'is idempotent — removing twice is :absent, not an error' do
+      manager.ensure_worktree!
+      manager.remove_worktree!
+
+      expect(manager.remove_worktree!).to(eq(:absent))
+    end
+
+    it 'leaves the session BRANCH behind' do
+      manager.ensure_worktree!
+      manager.remove_worktree!
+
+      # The branch is the only record of an approved changeset. `git worktree remove` does not
+      # touch it, and nothing here should either.
+      out, = Open3.capture3('git', '-C', @repo, 'branch', '--list', manager.branch_name)
+      expect(out).to(include(manager.branch_name))
+    end
+
+    it 'reports :failed rather than raising when git refuses' do
+      path = manager.ensure_worktree!
+      # A REAL failure rather than a stub on the object under test: delete the repo-side
+      # registration and git no longer recognises the directory as a worktree, so `worktree remove`
+      # refuses. This is also the shape a genuine orphan takes once its originating repo has moved.
+      FileUtils.rm_rf(File.join(@repo, '.git', 'worktrees', File.basename(path)))
+
+      # A session must be archivable whether or not its worktree is tidy.
+      expect(manager.remove_worktree!(force: true)).to(eq(:failed))
+    end
+  end
 end

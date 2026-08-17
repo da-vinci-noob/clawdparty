@@ -132,6 +132,30 @@ module Git
       File.directory?(File.join(worktree_path, '.git')) || File.exist?(File.join(worktree_path, '.git'))
     end
 
+    # Remove the session's worktree. Returns what happened, never raises on the
+    # ordinary cases — a session must be archivable whether or not its worktree is tidy.
+    #
+    # :absent          — nothing there
+    # :kept_dirty      — uncommitted work present and `force` was not given
+    # :removed         — gone, and the git metadata with it
+    # :failed          — git refused; the caller decides whether that matters
+    #
+    # DIRTY IS KEPT BY DEFAULT, and that is the whole design: an unreviewed changeset lives
+    # only in the worktree, so removing one silently destroys work nobody approved or
+    # rejected. The BRANCH is deliberately left behind either way — it is the only record of
+    # an approved changeset, and `git worktree remove` does not touch it.
+    def remove_worktree!(force: false)
+      return :absent unless worktree_exists?
+      return :kept_dirty if !force && dirty?
+
+      # `--force` because an unclean tree is exactly the case `force: true` was asked for;
+      # git refuses a dirty worktree otherwise.
+      run_git!('worktree', 'remove', '--force', worktree_path, dir: repo_dir)
+      :removed
+    rescue GitError
+      :failed
+    end
+
     private
 
     def run_git!(*args, dir:)

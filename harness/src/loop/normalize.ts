@@ -357,6 +357,8 @@ export class LoopNormalizer {
       api_error_status: string | null;
       total_cost_usd: number | null;
       usage: unknown;
+      /** REQUIRED (contract 1.12), so a caller with nothing to say must write `null`. */
+      explanation: string | null;
     },
     nowMs: number = Date.now(),
   ): EventEnvelope {

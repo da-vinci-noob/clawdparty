@@ -234,6 +234,41 @@ describe("Fastify server (supervisor-backed)", () => {
     await app.close();
   });
 
+  it("refuses an unknown provider with 422 and names the known ones", async () => {
+    // Measured before the fix: HTTP 500 with the right message. The message was never the
+    // problem — a caller error reported as a server fault is indistinguishable from a harness
+    // outage in logs, and reads to whoever mistyped a provider as "the server is broken".
+    const app = buildServer(supervisor, CONFIG);
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs",
+      payload: startBody({ provider: "not-a-provider" }),
+      headers: AUTH,
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toBe("unknown_provider");
+    // Listing the known ids is what makes the refusal actionable rather than merely correct.
+    expect(res.json().message).toContain("not-a-provider");
+    expect(res.json().message).toContain("anthropic-bedrock");
+    await app.close();
+  });
+
+  it("leaves no run behind after refusing an unknown provider", async () => {
+    const app = buildServer(supervisor, CONFIG);
+    await app.inject({
+      method: "POST",
+      url: "/runs",
+      payload: startBody({ provider: "not-a-provider" }),
+      headers: AUTH,
+    });
+
+    // A half-started run would hold the lane and block every later start on it.
+    const res = await app.inject({ method: "GET", url: "/runs", headers: AUTH });
+    expect(res.json().runs).toEqual([]);
+    await app.close();
+  });
+
   it("POST /runs/:id/permission_mode is GONE (404, not 200)", async () => {
     // B2. Asserted because a removal nothing tests quietly comes back — and the
     // web client stops sending it in the same change.

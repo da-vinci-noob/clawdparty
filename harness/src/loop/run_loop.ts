@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { EventEnvelope } from "@clawdparty/contracts";
 import type { ExtensionRegistry } from "../extensions/points.js";
+import { type PriceTable, costOf, loadPriceTable } from "../pricing.js";
 import type { ProviderAdapter, ProviderRequest, StopReason, Usage } from "../providers/contract.js";
 import type { LoopStore, Write } from "../store/types.js";
 import type { ToolContext, ToolRegistry, ToolResult } from "../tools/registry.js";
@@ -36,6 +37,8 @@ export interface RunLoopDeps {
    * before the harness moves to the host.
    */
   extensions?: ExtensionRegistry;
+  /** Injected so a test prices a run without writing to the host's config directory. */
+  priceTable?: PriceTable;
   now?: () => number;
   newId?: () => string;
 }
@@ -91,11 +94,19 @@ export class RunLoop {
    * from the record.
    */
   private readonly inbox: string[] = [];
+  /**
+   * The host's price table, read ONCE per loop.
+   *
+   * Not per turn: a run must not change its pricing halfway through because the file was edited
+   * mid-run, and the figure it finally reports should come from one consistent source.
+   */
+  private readonly priceTable: PriceTable;
 
   constructor(deps: RunLoopDeps) {
     this.deps = deps;
     this.now = deps.now ?? (() => Date.now());
     this.newId = deps.newId ?? (() => randomUUID());
+    this.priceTable = deps.priceTable ?? loadPriceTable();
   }
 
   async run(spec: RunSpec): Promise<RunOutcome> {
@@ -255,7 +266,10 @@ export class RunLoop {
       const stopReason = turn.stopReason ?? "end_turn";
 
       // ── settlement ──────────────────────────────────────────────────────────
-      const action = decide(stopReason, resumeAttempt);
+      // Capabilities are passed so a REFUSAL can say whether this provider explained itself.
+      // Bedrock and Converse both return a bare stop reason with no content, and the
+      // sentence composed here is the only account of it the room will ever get.
+      const action = decide(stopReason, resumeAttempt, capabilities.serverSideRefusalFallback);
       // `streamTurn` already withheld the deltas (broadcast live, never persisted — they
       // carry no seq, so a stored row would sit in the log with nothing to order it by), so
       // everything here is durable and every entry is a write.
@@ -662,9 +676,15 @@ export class RunLoop {
   ): Promise<RunOutcome> {
     await this.notifyComplete(spec, { outcome: "finished", uncertain: false, turns });
     const event = normalizer.runFinished(
-      // NULL, not 0: no provider here reports a price and nothing computes one, so zero
-      // would claim a request that was made was free (contract v1.7).
-      { stop_reason: stopReason, num_turns: turns, duration_ms: 0, total_cost_usd: null, usage },
+      {
+        stop_reason: stopReason,
+        num_turns: turns,
+        duration_ms: 0,
+        // Priced from the host's table when it has one, and NULL when it does not.
+        // Still never 0 for a request that was made — that would claim it was free (v1.7).
+        total_cost_usd: this.cost(spec, usage),
+        usage,
+      },
       this.now(),
     );
     this.terminate(spec, event, { outcome: "finished", uncertain: false, stopReason });
@@ -698,11 +718,21 @@ export class RunLoop {
     normalizer: LoopNormalizer,
     stopReason: string,
     usage: Usage,
-    _message?: string,
+    message?: string,
   ): Promise<RunOutcome> {
     await this.notifyComplete(spec, { outcome: "failed", uncertain: false, turns: 0 });
     const event = normalizer.runFailed(
-      { stop_reason: stopReason, api_error_status: null, total_cost_usd: null, usage },
+      {
+        stop_reason: stopReason,
+        api_error_status: null,
+        // A failed run still consumed tokens, so it still has a cost.
+        total_cost_usd: this.cost(spec, usage),
+        usage,
+        // Was `_message` — accepted and discarded. Every `settle_failed` message the loop
+        // composed was thrown away here, so the room saw "run failed" and nothing else
+        // (contract 1.12).
+        explanation: message ?? null,
+      },
       this.now(),
     );
     this.terminate(spec, event, { outcome: "failed", uncertain: false, stopReason });
@@ -731,6 +761,17 @@ export class RunLoop {
    * nothing left to refuse, and letting it fail the terminal transaction would
    * strand the run, which is the exact failure this whole feature removes.
    */
+  /**
+   * What this run cost, or null when the host has no price for the model.
+   *
+   * The table is read ONCE per loop (`priceTable`), not per turn: a run must not change its
+   * pricing halfway through because someone edited the file mid-run, and the figure a run reports
+   * should come from one consistent source.
+   */
+  private cost(spec: RunSpec, usage: Usage): number | null {
+    return costOf(spec.model, usage, this.priceTable);
+  }
+
   private async notifyComplete(
     spec: RunSpec,
     result: { outcome: "finished" | "failed" | "interrupted"; uncertain: boolean; turns: number },

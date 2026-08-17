@@ -52,6 +52,12 @@ jobs:
       - name: Host-topology gate (test:security)
         run: npm run test:security
 
+      # Run ALONE, which is the point. Excluded from the default suite because a
+      # wall-clock percentile measured while 77 other test files compete for the same disk
+      # measures the machine, not the store.
+      - name: Durable-write cost gate (p99 < 5ms per step)
+        run: npm run test:perf
+
       # Gate 1 (scenario S3). Its own REQUIRED step because it is the only thing that
       # exercises a real SIGKILL: it spawns a child, kills it at every commit boundary,
       # and asserts no `never` tool ran twice and no call went unanswered. It has already

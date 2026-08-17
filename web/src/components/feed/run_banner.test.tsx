@@ -186,3 +186,61 @@ describe("a run that withheld every tool", () => {
     expect(screen.queryByTestId("run-answer-only")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Why the run failed, in the room (contract 1.12).
+ *
+ * The loop composed these sentences since M4 and `RunLoop.fail()` discarded them, so the banner
+ * read "run failed" and nothing else. On a provider that returns no explanation with a refusal,
+ * this line is the only account of it that will ever exist.
+ */
+describe("a failed run explains itself", () => {
+  const failed = (explanation: string | null): EventEnvelope =>
+    ({
+      id: 9,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: 9,
+      type: "run_failed",
+      actor: { kind: "system" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: {
+        stop_reason: "refusal",
+        api_error_status: null,
+        total_cost_usd: null,
+        explanation,
+      },
+    }) as unknown as EventEnvelope;
+
+  it("shows the explanation the harness recorded", () => {
+    render(
+      <RunBanner
+        event={failed("The model declined, and this provider says no more.")}
+        names={new Map()}
+      />,
+    );
+
+    expect(screen.getByTestId("run-failed-explanation")).toHaveTextContent(
+      /this provider says no more/,
+    );
+  });
+
+  it("still says the run failed", () => {
+    render(<RunBanner event={failed("anything")} names={new Map()} />);
+    expect(screen.getByTestId("feed-run-banner")).toHaveTextContent("run failed");
+  });
+
+  it("renders no explanation line when there is nothing to add", () => {
+    render(<RunBanner event={failed(null)} names={new Map()} />);
+
+    // `null` is a written value meaning "considered, nothing to say" — not a blank line.
+    expect(screen.queryByTestId("run-failed-explanation")).not.toBeInTheDocument();
+  });
+
+  it("adds no explanation line to a run that SUCCEEDED", () => {
+    const finished = { ...failed("ignored"), type: "run_finished" } as EventEnvelope;
+    render(<RunBanner event={finished} names={new Map()} />);
+
+    expect(screen.queryByTestId("run-failed-explanation")).not.toBeInTheDocument();
+  });
+});

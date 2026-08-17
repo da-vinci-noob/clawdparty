@@ -246,6 +246,25 @@ export function runConformanceSuite(opts: ConformanceOptions): void {
       expect(result.credentialSource).toMatch(/^(env|file|profile|keychain|none)/);
     }
   });
+
+  it("14. declares an entitlement posture, with a reason a human can act on", async () => {
+    const h = await build();
+    const { entitlement } = h.adapter;
+
+    // Recorded with the adapter, never assumed. `docs/contracts/harness_protocol.md` §6 restates
+    // these for sign-off, and a posture that could go missing would make that table a guess.
+    expect(entitlement.credentialKind).toMatch(
+      /^(api_key|cloud_marketplace|subscription|enterprise_sso)$/,
+    );
+    // `owner_decision_required` is a REAL value and must stay distinguishable from "no" — the
+    // subscription path is one  explicitly asks for, and flattening it to a refusal would
+    // remove it.
+    expect(["yes", "no", "owner_decision_required"]).toContain(
+      entitlement.thirdPartyClientPermitted,
+    );
+    // The note is what a human reads when deciding. An empty one makes the posture unauditable.
+    expect(entitlement.note.length).toBeGreaterThan(20);
+  });
 }
 
 /**

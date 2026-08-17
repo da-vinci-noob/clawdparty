@@ -271,3 +271,87 @@ shared `packages/contracts` constant, not discovered):
 
 Neither starts a run. Missing/unparseable config degrades to an empty list with an unavailable
 `source` (still `200`); it never throws.
+
+## 6. Entitlement postures, per adapter
+
+ requires each adapter to **document** whether the credential kind it consumes may be used
+by a third-party client under that vendor's terms, and requires that posture to be **recorded with
+the adapter, not assumed**. It is a per-adapter question and deliberately not a blanket one: an API
+key and a cloud-marketplace agreement are unambiguous, while a subscription or enterprise-identity
+seat is typically scoped by its vendor to that vendor's own clients.
+
+Each posture below is the literal `entitlement` field on the adapter class, which is the single
+source — this table restates it, and `test/adapters/conformance.ts` asserts every adapter declares
+one. `owner_decision_required` is a real, expected value and MUST stay distinguishable from `"no"`;
+flattening it to a refusal would remove a path the requirement explicitly asks for.
+
+| adapter | `credentialKind` | `thirdPartyClientPermitted` | why |
+|---|---|---|---|
+| `anthropic-direct` | `api_key` | **yes** | A first-party API key or auth token under standard API terms. Nothing is borrowed. |
+| `anthropic-oauth` | `subscription` | **owner_decision_required** ⚠ | The host developer's Claude subscription or enterprise SSO seat. Whether a third-party client may drive it is the account owner's decision, not this app's. |
+| `anthropic-bedrock` | `cloud_marketplace` | **yes** | The customer's own AWS account under their own agreement, so no third party borrows a seat. |
+| `bedrock-converse` | `cloud_marketplace` | **yes** | Same AWS account and agreement as above, reached through Converse instead of the Messages surface. |
+
+### ⚠ The one posture needing owner sign-off
+
+**`anthropic-oauth` is the only `owner_decision_required` adapter**, and it is the one 's
+sign-off requirement is about. Two consequences that are already true in the code:
+
+- The harness does not decide for the owner. The adapter is registered and discoverable; whether to
+  use it is a choice made per run by picking a model under that provider, and the composer groups
+  models by provider precisely so that choice is visible .
+- The credential is never minted or stored by this app . On macOS a subscription/enterprise
+  OAuth token lives in the **Keychain** rather than a file, which is why the runbook has the
+  developer run `claude setup-token` once and export `CLAUDE_CODE_OAUTH_TOKEN` — the app reads what
+  is already there and nothing else.
+
+Adding an adapter whose posture is `no` would be a **product decision, not an implementation
+detail**: the registry would happily load it, and nothing in the loop consults `entitlement` to
+gate a run. That is deliberate — the field exists to be READ BY A HUMAN before an adapter ships,
+and a runtime check would imply the harness can adjudicate vendor terms, which it cannot.
+
+## 7. Run cost — the host's price table
+
+`run_finished` / `run_failed` carry `total_cost_usd`. It is **`null` when the model has no price**,
+never `0`: zero would claim a request that was actually made was free, and that claim would be
+believed. A priced model with genuinely zero tokens does report `0` — the two are different facts.
+
+Prices come from a file the HOST owns, not from this repo:
+
+```
+~/.config/clawdparty/pricing.json          # default
+HARNESS_PRICING_FILE=/path/to/pricing.json # override
+```
+
+```json
+{
+  "claude-sonnet-4-6": { "input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75 },
+  "claude-opus-4-8":   { "input": 15, "output": 75 }
+}
+```
+
+Rates are **dollars per million tokens**, the unit every vendor publishes. `cacheRead` and
+`cacheWrite` are optional and fall back to the `input` rate — the conservative reading of an
+incomplete row, and stated rather than silently zero. On a long session cache reads dominate, so a
+table that omits them overstates the cost of exactly the sessions this app is for.
+
+**Key matching.** An exact model id wins; otherwise the **longest** key the id contains wins, so one
+entry covers a model across access paths (`claude-sonnet-4-6` also prices
+`global.anthropic.claude-sonnet-4-6` and `us.anthropic.claude-sonnet-4-6-…`). Longest-match is
+deliberate: with both `claude-opus-4` and `claude-opus-4-8` present, first-match would price Opus
+4.8 at Opus 4's rate.
+
+**Failure is always the safe direction.** No file, malformed JSON, a directory where the file should
+be, a row missing a rate, a negative rate — each degrades to "this model is unpriced", i.e. `null`.
+A bad price file never fails a run.
+
+**No prices ship in this repo, deliberately.** They vary by region and by contract, they change, and
+a figure nobody verified would be reported as fact. The table is visibly the host's to maintain.
+
+**On automating it.** The AWS Price List API *does* serve Bedrock — service code `AmazonBedrock`;
+the earlier note that Bedrock exposes no pricing API was wrong. Measured on this host it returns
+`AccessDeniedException … not authorized to perform: pricing:GetProducts`, an authorization failure
+rather than an unknown service. So the path is real: grant `pricing:GetProducts`, add
+`@aws-sdk/client-pricing`, and populate the table per region from the API. It is not done here
+because it needs an IAM change this host does not have, and it would price only the Bedrock paths —
+the first-party ones still need a table.

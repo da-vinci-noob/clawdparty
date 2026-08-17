@@ -207,6 +207,35 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [1.12.0] — `run_failed.explanation`: why the run failed, in words (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 12 }`.** Additive `minor` bump: one new REQUIRED field on
+`RunFailedPayload`.
+
+`explanation: string | null` carries what the participant needs to know. The loop has composed these
+sentences since M4 — "the response hit its output limit and is incomplete", "a server-side tool did
+not finish after 5 resumes", the refusal message — and `RunLoop.fail()` took the argument as
+`_message` and **discarded it**. `run_failed` carried only `stop_reason`, so the room read "run
+failed" and nothing more.
+
+**Required, not optional, so the value must be STATED.** `null` means "considered, nothing to add";
+an absent key and a null one read the same to a consumer, but only one of them proves the producer
+answered the question. Same rule as `total_cost_usd` at 1.7.0 and `thinkingBudgetTokens` at 1.11.0.
+
+**Why it matters most on Bedrock and Converse.** Both declare `serverSideRefusalFallback: false`,
+which means a refusal arrives as HTTP 200 with a bare stop reason and NO content — so this string is
+the only account of it that will ever exist. The harness now varies the message on that capability
+(which previously had no reader at all): where the fallback exists it points at the model's own
+words, and where it does not it says outright that the provider gave no reason and suggests
+rephrasing or another provider.
+
+Producers must add the field (a compile error until they do). Consumers may ignore it; `RunBanner`
+renders it on its own line, because these are full sentences with an action in them and appending
+one to a "run failed ·" line is how it gets ignored.
+
+**Not** carried as a fabricated `ai_text`: that would attribute harness-authored prose to Claude and
+fold it into the model-visible surface as though the model had said it.
+
 ## [compaction-request] — `ProviderRequest.compaction` is now actually sent (clarifying)
 
 **No version bump: no type, field, or endpoint changed.** `ProviderRequest.compaction` has existed

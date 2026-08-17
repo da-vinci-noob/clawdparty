@@ -37,7 +37,42 @@ export type LoopAction =
  */
 export const MAX_PAUSE_RESUMES = 5;
 
-export function decide(reason: StopReason, resumeAttempt = 0): LoopAction {
+/**
+ * The refusal explanation, which DEPENDS ON THE PROVIDER.
+ *
+ * `serverSideRefusalFallback` had no reader anywhere in the harness — it was declared by every
+ * adapter and consulted by nothing, so a refusal produced the same sentence regardless of
+ * whether the provider had explained itself.
+ *
+ * The difference is real. Where the fallback exists, the provider returns its own explanation as
+ * content, so the participant has something to read and the harness only needs to frame it.
+ * Where it does not (Bedrock and Converse both declare `false`), a refusal is a bare stop reason
+ * with HTTP 200 and no content at all — the harness's sentence is the ONLY thing that will ever
+ * be said about it, so it has to carry the whole explanation and admit that the provider gave
+ * no reason. "The model declined to continue this request." in that situation leaves a
+ * participant with a run that stopped for no stated cause and no idea what to do next.
+ */
+export function refusalExplanation(serverSideRefusalFallback: boolean): string {
+  if (serverSideRefusalFallback) {
+    return "The model declined to continue this request. Its own explanation is in the reply above.";
+  }
+  return (
+    "The model declined to continue this request, and this provider returns no explanation " +
+    "with a refusal — so there is nothing further it said. Rephrasing the request, or running " +
+    "it on a different provider, is usually the way forward."
+  );
+}
+
+export function decide(
+  reason: StopReason,
+  resumeAttempt = 0,
+  /**
+   * Defaults to TRUE, the less alarming message, because a caller that did not pass
+   * capabilities does not know the provider — and claiming "this provider says nothing" about a
+   * provider that does would be the worse of the two wrong answers.
+   */
+  serverSideRefusalFallback = true,
+): LoopAction {
   switch (reason) {
     case "end_turn":
       return { kind: "settle", outcome: "finished", stopReason: reason };
@@ -70,7 +105,7 @@ export function decide(reason: StopReason, resumeAttempt = 0): LoopAction {
       return {
         kind: "settle_failed",
         stopReason: reason,
-        message: "The model declined to continue this request.",
+        message: refusalExplanation(serverSideRefusalFallback),
       };
 
     case "model_context_window_exceeded":

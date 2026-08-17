@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 11 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 12 } as const;
 
 /**
  * The 31 frozen event type names. Adding or removing a name is a CONTRACT
@@ -348,6 +348,20 @@ export interface RunFailedPayload {
   /** `null` when no price was computed — see `RunFinishedPayload.total_cost_usd`. */
   total_cost_usd: number | null;
   usage: TokenUsage;
+  /**
+   * What the participant needs to know about the failure, or `null` when there is nothing to
+   * add beyond the stop reason.
+   *
+   * REQUIRED rather than optional so the value must be STATED. The loop had been computing
+   * these strings since M4 — "the response hit its output limit and is incomplete", "a
+   * server-side tool did not finish after 5 resumes" — and `RunLoop.fail()` took the argument
+   * as `_message` and discarded it. The room saw "run failed" and nothing else.
+   *
+   * On a provider whose `serverSideRefusalFallback` is false this is the ONLY explanation that
+   * will ever exist: a refusal there arrives as a bare stop reason with no content, so a
+   * generic message leaves the participant with a run that stopped for no stated reason.
+   */
+  explanation: string | null;
 }
 export type RunInterruptedPayload = Record<string, never>;
 export interface ChangesetReadyPayload {

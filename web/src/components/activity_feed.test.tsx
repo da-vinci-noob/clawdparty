@@ -307,3 +307,72 @@ describe("ActivityFeed auto-scroll", () => {
     expect(scroller.scrollTop).toBe(0);
   });
 });
+
+/**
+ * Consecutive thinking blocks are NOT merged into one box, and the reason is in the data.
+ *
+ * The question was whether a turn with several thinking blocks should render as one box, on the
+ * theory that N boxes read as fragmentation when the blocks are one continuous train of thought.
+ * Measured against the real record instead of judged by eye: 7 runs contain `ai_thinking`, 2
+ * contain more than one (4 and 7 blocks) — and **0 adjacent `ai_thinking` pairs exist anywhere**.
+ * Every multi-block run has the shape
+ *
+ *   ai_thinking → tool_started … tool_finished → ai_thinking → tool_started …
+ *
+ * which is INTERLEAVED thinking: Claude reasoned, acted, saw the result, and reasoned again.
+ * Merging those would splice reasoning from before and after a tool call into one box and hide
+ * that a new thought followed the result — so the current rendering is not merely defensible,
+ * it is the only faithful one, and the premise for grouping does not occur.
+ *
+ * This test exists so a later "tidy up the thinking boxes" change cannot quietly merge them.
+ */
+describe("interleaved thinking stays separate", () => {
+  const event = (id: number, type: string, payload: object): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: id,
+      type,
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:00Z",
+      payload,
+    }) as unknown as EventEnvelope;
+
+  // The measured shape, in miniature.
+  const interleaved: EventEnvelope[] = [
+    event(1, "ai_thinking", { block: "b1", text: "First I should look at the file." }),
+    event(2, "tool_started", { tool_use_id: "t1", name: "read", input: {} }),
+    event(3, "tool_finished", { tool_use_id: "t1", output: "contents" }),
+    event(4, "ai_thinking", { block: "b2", text: "Now that I have read it, the fix is clear." }),
+  ];
+
+  it("renders one box per thinking block", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    expect(screen.getAllByTestId("feed-thinking")).toHaveLength(2);
+  });
+
+  it("keeps each block's text in its OWN box, not concatenated", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    const boxes = screen.getAllByTestId("feed-thinking");
+    // Merging would put "First I should look" and "Now that I have read it" in one box, reading
+    // as a single thought that never happened.
+    expect(boxes[0]).toHaveTextContent(/First I should look at the file/);
+    expect(boxes[0]).not.toHaveTextContent(/Now that I have read it/);
+    expect(boxes[1]).toHaveTextContent(/Now that I have read it/);
+  });
+
+  it("keeps the tool call BETWEEN them, which is what makes them separate thoughts", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    // Order is the evidence: thinking, then the action, then thinking about the result.
+    const rendered = screen.getByTestId("activity-feed").textContent ?? "";
+    expect(rendered.indexOf("First I should look")).toBeLessThan(rendered.indexOf("read"));
+    expect(rendered.indexOf("read")).toBeLessThan(rendered.indexOf("Now that I have read it"));
+  });
+});
