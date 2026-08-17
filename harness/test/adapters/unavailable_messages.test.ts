@@ -3,6 +3,7 @@ import { AnthropicBedrockAdapter } from "../../src/providers/anthropic_bedrock.j
 import { AnthropicDirectAdapter } from "../../src/providers/anthropic_direct.js";
 import { AnthropicOauthAdapter } from "../../src/providers/anthropic_oauth.js";
 import type { ProbeResult } from "../../src/providers/contract.js";
+import { forgetKeychainFailure } from "../../src/providers/credentials/keychain.js";
 import { listProviders } from "../../src/providers/discovery.js";
 
 /**
@@ -140,6 +141,9 @@ describe("the wrong provider for the credential that won", () => {
   });
 
   it("oauth: does NOT report unavailable when the Keychain token is readable", async () => {
+    // The unreadable case above sets the process-wide negative cache, so without this the readable
+    // case reads nothing and the test passes or fails on ORDER. Same hazard, one file over.
+    forgetKeychainFailure();
     const adapter = new AnthropicOauthAdapter({
       discovery: { source: "keychain:anthropic-oauth", usable: true },
       readKeychain: () => "sample-not-real",

@@ -147,6 +147,40 @@ describe("after running the test", () => {
     );
   });
 
+  it("shows the remedy AND the raw error when a good credential's request fails", async () => {
+    // Screenshotted from the running app: the host-login card showed
+    // `429 {"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":…}`
+    // and nothing else. The harness had started classifying that (reason `api_error`, remedy "Wait
+    // and retry") but the render guard was `verdict.reason && !verdict.error` — so the raw JSON
+    // SUPPRESSED the actionable words. The vendor's own `message` there is the word "Error".
+    providers([available("anthropic-oauth", "Anthropic (host login)")]);
+    verdicts({
+      providers: [
+        {
+          id: "anthropic-oauth",
+          displayName: "Anthropic (host login)",
+          ok: false,
+          model: "claude-opus-5",
+          credentialSource: "keychain:anthropic-oauth",
+          reason: "api_error",
+          remedy: "Wait and retry; reduce concurrent runs if this persists.",
+          error:
+            '429 {"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":"req_011Ce8"}',
+        },
+      ],
+    });
+    renderWithQuery(<AuthTestTab />);
+    fireEvent.click(await screen.findByTestId("auth-test-run"));
+
+    // The actionable sentence must be present, not replaced by the payload.
+    expect(await screen.findByTestId("auth-reason-anthropic-oauth")).toHaveTextContent(
+      /wait and retry/i,
+    );
+    // And the raw text stays, because the `request_id` is the one thing a vendor support thread
+    // needs and no classifier can reconstruct it.
+    expect(screen.getByTestId("auth-error-anthropic-oauth")).toHaveTextContent(/req_011Ce8/);
+  });
+
   it("shows the reason and remedy when it was never attempted", async () => {
     providers([unavailable("anthropic-direct", "Anthropic (direct)")]);
     verdicts({

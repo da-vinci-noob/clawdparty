@@ -96,6 +96,27 @@ const defaultReader: SecretReader = (bin, args) => {
 };
 
 /**
+ * A read that FAILED, remembered process-wide.
+ *
+ * `buildAdapters` returns fresh instances per call, so per-instance memoisation still means one spawn
+ * per `/api/models`, per `/verify` and per run start. Fine when the read succeeds quietly; not fine
+ * when the item's ACL PROMPTS — that would be a macOS confirmation dialog on every page load, from a
+ * process the developer cannot see.
+ *
+ * Only the FAILURE is cached, never the token: remembering "this did not work" costs nothing, while
+ * remembering the value would keep a credential in memory long after the client that needed it was
+ * built. The cost of the asymmetry is that a Keychain fixed mid-run is not retried until
+ * `bin/harness` restarts — acceptable, because the remedy tells the developer to export a token and
+ * restart anyway, and `forgetKeychainFailure()` exists for the cases that should not have to.
+ */
+let readFailed = false;
+
+/** Clear the negative cache. For tests, and for a caller that has reason to believe it changed. */
+export function forgetKeychainFailure(): void {
+  readFailed = false;
+}
+
+/**
  * The Claude OAuth token from the Keychain, or null.
  *
  * Handles BOTH stored shapes. Claude Code stores a JSON blob (the same `claudeAiOauth` object it
@@ -106,17 +127,21 @@ const defaultReader: SecretReader = (bin, args) => {
  * a 401 the participant then has to interpret, when discovery could have said so up front.
  */
 export function readKeychainToken(reader: SecretReader = defaultReader): string | null {
-  if (process.platform !== KEYCHAIN_SOURCE.supportedOn) {
+  if (process.platform !== KEYCHAIN_SOURCE.supportedOn || readFailed) {
     return null;
   }
   let raw: string | null;
   try {
     raw = reader(SECURITY_BIN, KEYCHAIN_READ_QUERY);
   } catch {
+    readFailed = true;
     return null;
   }
   const value = raw?.trim();
-  if (!value) return null;
+  if (!value) {
+    readFailed = true;
+    return null;
+  }
 
   if (value.startsWith("{")) {
     try {
@@ -125,10 +150,16 @@ export function readKeychainToken(reader: SecretReader = defaultReader): string 
       };
       const block = parsed.claudeAiOauth;
       const token = block?.accessToken?.trim();
-      if (!token) return null;
+      if (!token) {
+        readFailed = true;
+        return null;
+      }
+      // An EXPIRED token is not cached as a failure: it becomes valid again the moment the developer
+      // re-runs `claude setup-token`, and making them restart the harness for that would be gratuitous.
       if (typeof block?.expiresAt === "number" && block.expiresAt <= Date.now()) return null;
       return token;
     } catch {
+      readFailed = true;
       return null;
     }
   }

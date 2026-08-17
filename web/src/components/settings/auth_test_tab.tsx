@@ -105,17 +105,26 @@ export const AuthTestTab: FC = () => {
                       ` · ${verdict.usage.input_tokens ?? 0} in / ${verdict.usage.output_tokens ?? 0} out`}
                   </div>
                 )}
-                {/* The provider's own words: "AccessDeniedException", "expired", "invalid_token"
-                    are the whole diagnostic, and paraphrasing throws away the actionable part. */}
-                {verdict?.error && (
-                  <div data-testid={`auth-error-${row.id}`} className="text-[#f0a8a8]">
-                    {verdict.error}
-                  </div>
-                )}
-                {verdict?.reason && !verdict.error && (
+                {/* The CLASSIFICATION first, whether or not there is raw text beside it. This used
+                    to be `reason && !error`, so a raw payload suppressed the actionable words — and a
+                    real 429 rendered as `{"error":{"type":"rate_limit_error","message":"Error"}}`
+                    with no statement of what to do, the vendor's own message being "Error". */}
+                {verdict?.reason && (
                   <div data-testid={`auth-reason-${row.id}`} className="text-[#c9a227]">
                     {verdict.reason}
                     {verdict.remedy ? ` — ${verdict.remedy}` : ""}
+                  </div>
+                )}
+                {/* The provider's own words, KEPT but secondary: "AccessDeniedException", "expired",
+                    "invalid_token" and the `request_id` are the diagnostic a support thread needs,
+                    and no classifier can reconstruct them. Dimmer, because it is detail rather than
+                    instruction — and it is the only line when nothing classified the failure. */}
+                {verdict?.error && (
+                  <div
+                    data-testid={`auth-error-${row.id}`}
+                    className={verdict.reason ? "text-[#8a6f6f]" : "text-[#f0a8a8]"}
+                  >
+                    {verdict.error}
                   </div>
                 )}
                 {!verdict && (

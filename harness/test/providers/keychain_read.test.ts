@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { AnthropicOauthAdapter } from "../../src/providers/anthropic_oauth.js";
 import {
   KEYCHAIN_READ_QUERY,
   SECURITY_BIN,
+  forgetKeychainFailure,
   readKeychainToken,
 } from "../../src/providers/credentials/keychain.js";
 import { KEYCHAIN_SOURCE } from "../../src/providers/credentials/sources.js";
@@ -29,6 +30,14 @@ import { KEYCHAIN_SOURCE } from "../../src/providers/credentials/sources.js";
  */
 
 const SAMPLE = "sample-keychain-token-not-real";
+
+/**
+ * The negative cache is module state, so it leaks between tests unless reset — which it promptly did:
+ * a failing case earlier in the file made every later read return null. Explicit rather than ordered.
+ */
+beforeEach(() => {
+  forgetKeychainFailure();
+});
 
 /** What Claude Code actually stores: a JSON blob, not a bare token. Both shapes are handled. */
 const JSON_BLOB = JSON.stringify({
@@ -129,5 +138,66 @@ describe("the adapter uses it", () => {
     const probe = await adapter.probe();
     expect(JSON.stringify(probe)).not.toContain(SAMPLE);
     expect(probe).toMatchObject({ available: true, credentialSource: KEYCHAIN_SOURCE.id });
+  });
+});
+
+/**
+ * The read must not become a prompt storm.
+ *
+ * `buildAdapters` returns FRESH instances per call — deliberately, so one session's model cache
+ * cannot serve another — so per-instance memoisation means one `/usr/bin/security` spawn per
+ * `/api/models` request, per `/verify`, and per run start. That is tolerable when the read succeeds
+ * quietly. It is not tolerable when the item's ACL PROMPTS: the developer would get a macOS
+ * confirmation dialog on every page load, from a process they cannot see.
+ *
+ * So a FAILED read is remembered process-wide and a successful one is not. The asymmetry is the
+ * point: remembering "this did not work" costs nothing, and remembering the token would keep a
+ * credential in memory long after the client that needed it was built.
+ */
+describe("a failing read is not retried on every request", () => {
+  it("asks once across many adapter instances, then stops asking", () => {
+    let calls = 0;
+    const failing = () => {
+      calls += 1;
+      throw new Error("User interaction is not allowed.");
+    };
+    forgetKeychainFailure();
+
+    for (let i = 0; i < 5; i += 1) {
+      expect(readKeychainToken(failing)).toBeNull();
+    }
+
+    expect(calls).toBe(1);
+  });
+
+  it("does NOT cache a successful read, so no token is retained", () => {
+    let calls = 0;
+    const succeeding = () => {
+      calls += 1;
+      return SAMPLE;
+    };
+    forgetKeychainFailure();
+
+    expect(readKeychainToken(succeeding)).toBe(SAMPLE);
+    expect(readKeychainToken(succeeding)).toBe(SAMPLE);
+
+    // Read again each time: the token is used to build a client and then dropped.
+    expect(calls).toBe(2);
+  });
+
+  it("can be reset, so a fixed Keychain does not need a process restart to be retried", () => {
+    let calls = 0;
+    const failing = () => {
+      calls += 1;
+      return null;
+    };
+    forgetKeychainFailure();
+    readKeychainToken(failing);
+    readKeychainToken(failing);
+    expect(calls).toBe(1);
+
+    forgetKeychainFailure();
+    readKeychainToken(failing);
+    expect(calls).toBe(2);
   });
 });
