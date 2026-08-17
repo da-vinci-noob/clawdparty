@@ -229,6 +229,17 @@ class HarnessStore implements HarnessStoreApi {
         }
       });
 
+      // The lane's leaf advances IN THIS TRANSACTION. Only when the commit actually
+      // produced an entry: a register-only commit changes no history, so advancing the leaf for it
+      // would claim history this lane does not have.
+      const highest = storeSeqs.reduce<number | null>(
+        (max, seq) => (seq !== null && (max === null || seq > max) ? seq : max),
+        null,
+      );
+      if (tx.lane !== undefined && highest !== null) {
+        this.setRegister("lane.leaf", tx.lane, { storeSeq: highest });
+      }
+
       const first = storeSeqs.find((s): s is number => s !== null);
       return { firstStoreSeq: first ?? this.maxStoreSeq(), storeSeqs, skipped };
     });

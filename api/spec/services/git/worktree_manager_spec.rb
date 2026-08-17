@@ -284,4 +284,66 @@ RSpec.describe(Git::WorktreeManager) do
       expect(manager.remove_worktree!(force: true)).to(eq(:failed))
     end
   end
+
+  # Per-lane paths and branches.
+  describe 'lanes' do
+    it 'keeps the main lane on its existing path and branch' do
+      # Load-bearing for every session that existed before lanes: a suffix here would orphan the
+      # worktree already on disk and abandon the branch holding its approved changesets.
+      mgr = described_class.new(session, repo_root: @repo, lane: 'main')
+
+      expect(mgr.worktree_path).to(end_with("session-#{session.id}"))
+      expect(mgr.branch_name).to(eq("clawd/session-#{session.id}"))
+    end
+
+    it 'defaults to the main lane when none is given' do
+      expect(described_class.new(session, repo_root: @repo).branch_name)
+        .to(eq(described_class.new(session, repo_root: @repo, lane: 'main').branch_name))
+    end
+
+    it 'suffixes another lane with a HYPHEN, never a slash' do
+      # A slash makes the ref a directory, and git refuses to have both:
+      #   fatal: cannot lock ref 'refs/heads/clawd/session-7':
+      #          'refs/heads/clawd/session-7/review' exists
+      # Since `main` stays un-suffixed for backwards compatibility, the slash is ruled out — and
+      # this only shows up the first time a SECOND lane is opened.
+      mgr = described_class.new(session, repo_root: @repo, lane: 'review')
+
+      expect(mgr.branch_name).to(eq("clawd/session-#{session.id}-review"))
+      expect(mgr.branch_name).not_to(include("#{session.id}/"))
+    end
+
+    it 'actually creates two coexisting worktrees, which is what the slash prevented' do
+      main = described_class.new(session, repo_root: @repo, lane: 'main')
+      review = described_class.new(session, repo_root: @repo, lane: 'review')
+
+      main.ensure_worktree!
+      expect { review.ensure_worktree! }.not_to(raise_error)
+      expect(Dir.exist?(main.worktree_path)).to(be(true))
+      expect(Dir.exist?(review.worktree_path)).to(be(true))
+      expect(main.worktree_path).not_to(eq(review.worktree_path))
+    end
+
+    it 'refuses a lane name that would escape the worktree root' do
+      # `lane` reaches a filesystem path AND a ref name, and it originates from a client request.
+      ['../evil', 'a/b', '-flag', 'UPPER', 'with space', 'trail-', 'with.lock', 'x' * 33].each do |lane|
+        expect { described_class.new(session, repo_root: @repo, lane: lane) }
+          .to(raise_error(described_class::InvalidLane), "accepted #{lane.inspect}")
+      end
+    end
+
+    it 'accepts the ordinary lane shapes' do
+      %w[main review lane-2 a].each do |lane|
+        expect { described_class.new(session, repo_root: @repo, lane: lane) }.not_to(raise_error)
+      end
+    end
+
+    it 'treats a BLANK lane as unspecified, not as an invalid name' do
+      # `nil`/`""` mean "the caller named no lane", which is the default rather than an error — and
+      # it cannot escape anything, since it normalises before it reaches a path.
+      ['', nil].each do |blank|
+        expect(described_class.new(session, repo_root: @repo, lane: blank).lane).to(eq('main'))
+      end
+    end
+  end
 end

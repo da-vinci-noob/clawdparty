@@ -17,7 +17,10 @@ module Runs
     def initialize(run:, reviewed_by:, worktree: nil)
       @run = run
       @reviewed_by = reviewed_by
-      @worktree = worktree || Git::WorktreeManager.new(run.session)
+      # The RUN's lane. This one is the dangerous direction: reject runs `reset --hard` +
+      # `clean -fd`, so resolving the wrong worktree would DESTROY another lane's unreviewed
+      # work — which is the reason per-lane trees were chosen at all.
+      @worktree = worktree || Git::WorktreeManager.new(run.session, lane: run.lane)
     end
 
     def call

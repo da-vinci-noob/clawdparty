@@ -8,9 +8,10 @@ import { attachConnectors } from "./mcp/connectors.js";
 import type { EffortLevel, ProviderAdapter } from "./providers/contract.js";
 import { ADAPTER_IDS, adapterById, buildAdapters } from "./providers/index.js";
 import { composeSystemPrompt, resolveSkills } from "./skills.js";
+import { claimLane, laneScoped } from "./store/lane_scope.js";
 import { type RecoveryOutcome, recoverSession } from "./store/recovery.js";
 import { afterCursorToFrom, openStore } from "./store/store.js";
-import type { Entry, HarnessStoreApi } from "./store/types.js";
+import type { Entry, HarnessStoreApi, LoopStore } from "./store/types.js";
 import { BashTool } from "./tools/bash.js";
 import * as glob from "./tools/glob.js";
 import * as grep from "./tools/grep.js";
@@ -100,9 +101,15 @@ export interface SupervisorOptions {
   mcpConnect?: McpConnect;
   adapters?: Record<string, ProviderAdapter>;
   extensions?: ExtensionRegistry;
-  /** Injected in tests so a run does not need a live provider. */
+  /**
+   * Injected in tests so a run does not need a live provider.
+   *
+   * `LoopStore`, not `HarnessStoreApi`: the loop is deliberately denied `allocateSeq` so it cannot
+   * mint a seq behind the normalizer's back, and what it receives here is a lane-scoped VIEW rather
+   * than the raw store. Declaring the wider type let a test builder reach past both restrictions.
+   */
   buildLoop?: (deps: {
-    store: HarnessStoreApi;
+    store: LoopStore;
     adapter: ProviderAdapter;
     emit: (e: EventEnvelope[]) => void;
   }) => RunLoop;
@@ -232,9 +239,15 @@ export class Supervisor {
     const extraTools = [...mcp.tools, ...(skills.tool ? [skills.tool] : [])];
     const tools = extraTools.length === 0 ? this.tools : registryWith(extraTools);
 
+    // The loop writes through a LANE-SCOPED view. One store serves every lane in the
+    // session, so the lane cannot live on the store — and stamping it at each of the loop's eleven
+    // commit sites is a design where missing one is silent: the leaf simply stops advancing.
+    const laneStore = laneScoped(store, lane);
+    claimLane(laneStore, lane, input.run_id);
+
     const loop = this.opts.buildLoop
-      ? this.opts.buildLoop({ store, adapter, emit })
-      : new RunLoop({ store, adapter, tools, emit, extensions: this.extensions });
+      ? this.opts.buildLoop({ store: laneStore, adapter, emit })
+      : new RunLoop({ store: laneStore, adapter, tools, emit, extensions: this.extensions });
 
     const spec: RunSpec = {
       runId: input.run_id,
@@ -273,6 +286,10 @@ export class Supervisor {
       .then(() => undefined)
       .finally(async () => {
         this.runs.delete(input.run_id);
+        // Release the lane in the RECORD, not just in memory: the in-memory map dies with the
+        // process, and a `lane.state` still naming a finished run would make recovery think the
+        // lane was occupied.
+        claimLane(laneStore, lane, null);
         // Before releasing the store, so a stdio server never outlives the run that spawned it.
         await mcp.close();
         void this.releaseStore(input.session_id);

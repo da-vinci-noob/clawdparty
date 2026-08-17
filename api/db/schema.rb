@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_01_000011) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_01_000012) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -25,6 +25,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000011) do
     t.string "credential_source"
     t.jsonb "diff_stats"
     t.bigint "harness_store_seq"
+    t.string "lane", default: "main", null: false
     t.datetime "last_heartbeat_at"
     t.string "model", null: false
     t.text "prompt", null: false
@@ -38,8 +39,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000011) do
     t.jsonb "usage"
     t.index ["requested_by_id"], name: "index_ai_runs_on_requested_by_id"
     t.index ["reviewed_by_id"], name: "index_ai_runs_on_reviewed_by_id"
+    t.index ["session_id", "lane"], name: "index_ai_runs_one_active_per_lane", unique: true, where: "(status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))"
     t.index ["session_id"], name: "index_ai_runs_on_session_id"
-    t.index ["session_id"], name: "index_ai_runs_one_active_per_session", unique: true, where: "(status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))"
     t.index ["status", "last_heartbeat_at"], name: "index_ai_runs_on_status_and_last_heartbeat_at"
   end
 

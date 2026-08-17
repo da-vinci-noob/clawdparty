@@ -355,3 +355,89 @@ rather than an unknown service. So the path is real: grant `pricing:GetProducts`
 `@aws-sdk/client-pricing`, and populate the table per region from the API. It is not done here
 because it needs an IAM change this host does not have, and it would price only the Bedrock paths —
 the first-party ones still need a table.
+
+## 8. Lanes
+
+A **lane** is a named cursor into a session's shared history that owns its own position and at most
+one active run. Every session has a `main` lane; a second lane is what lets two people work at once
+instead of taking turns.
+
+### One active run per LANE
+
+`POST /runs` refuses a second run **in the same lane** with `409 { "error": "run_active" }`, and
+accepts one in a different lane. Rails enforces the same rule and the database is the backstop:
+`index_ai_runs_one_active_per_lane` is unique on `(session_id, lane)` where the status is
+`queued`/`running`/`awaiting_review`. It replaces `index_ai_runs_one_active_per_session` — keeping
+both would re-impose exactly the constraint  lifts.
+
+### Lane names are validated, because they reach a path and a ref
+
+`lane` must match `/\A[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\z/` — one segment, lowercase
+alphanumeric with internal hyphens, 1-32 characters. An invalid lane is **`422`** naming the rule.
+
+This is a security boundary, not tidiness: the lane becomes part of a filesystem path AND a git
+branch name, so `../evil` would resolve a worktree outside `.clawdparty/worktrees`. Names are
+**rejected rather than sanitised** — a sanitised name silently addresses a different lane than the
+caller asked for. A blank or absent lane means "unspecified" and normalises to `main`.
+
+### One worktree and one branch per lane
+
+| lane | worktree | branch |
+|---|---|---|
+| `main` | `<REPO_ROOT>/.clawdparty/worktrees/session-<id>` | `clawd/session-<id>` |
+| other | `<REPO_ROOT>/.clawdparty/worktrees/session-<id>-<lane>` | `clawd/session-<id>-<lane>` |
+
+`main` is deliberately un-suffixed so every session that predates lanes keeps the worktree already on
+disk and the branch holding its approved changesets.
+
+**The branch suffix is a HYPHEN, not a slash, and that is not cosmetic.** `clawd/session-7/review`
+was the first attempt, and git refuses it — a ref cannot be both a file and a directory:
+
+```
+fatal: cannot lock ref 'refs/heads/clawd/session-7': 'refs/heads/clawd/session-7/review' exists
+```
+
+Because `main` stays un-suffixed, the slash form is ruled out entirely. The failure would have
+arrived the first time anyone opened a second lane.
+
+**Why per-lane trees at all**: a shared worktree cannot satisfy. Finalize computes a changeset
+from the whole working tree, so one lane's review would contain another's in-flight edits; and
+reject runs `reset --hard && clean -fd`, which would DELETE another lane's unreviewed work.
+
+### `lane.leaf` and `lane.state`
+
+Two store registers, keyed by lane name:
+
+- **`lane.leaf`** `{ storeSeq }` — where this lane's history ends. Advanced to the transaction's
+  highest `store_seq` **inside that same transaction**, which is what "serialize lanes at the commit
+  boundary, not the run boundary" means: a concurrent lane can never observe entries no leaf covers,
+  nor a leaf pointing past entries that rolled back. Only advanced when the commit actually wrote
+  history — a register-only or fully-deduplicated commit leaves it alone rather than claiming
+  history the lane does not have.
+- **`lane.state`** `{ currentRunId, pendingNext }` — who owns the lane right now. Claimed at run
+  start and released at run end **in the record**, so a crash does not leave a lane owned by a
+  finished run. `pendingNext` is reserved for the queue-behind case and stays `null`.
+
+Both are written through `laneScoped(store, lane)`, a view that stamps the lane on every commit. One
+store serves every lane in a session (refcounted), so the lane cannot live on the store — and the
+loop has eleven commit sites, which makes per-site stamping a design where missing one is silent.
+
+### Cross-lane conflicts are REPORTED, never resolved
+
+`GET /api/runs/:id/diff` gains `lane` and `conflicts`:
+
+```json
+{ "lane": "review",
+  "conflicts": [{ "path": "app/models/user.rb", "lane": "main", "kind": "unreviewed" }] }
+```
+
+`kind` is `unreviewed` (another lane's changeset is still waiting on that file) or `approved` (its
+change is already committed, so this changeset is built on a version the session has moved past).
+`conflicts` is always present and empty for a single-lane session, so a client need not distinguish
+"none" from "not reported".
+
+Nothing merges them. With a tree and a branch per lane, git never sees the two changes meet — no
+merge conflict, no warning — so this report is the only place the overlap becomes visible, and the
+reviewer decides. An unreadable sibling lane (pruned by `bin/worktrees`, moved, never created)
+contributes nothing rather than failing the diff.
+

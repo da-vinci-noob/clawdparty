@@ -7,6 +7,8 @@
 module RunErrorResponses
   extend ActiveSupport::Concern
 
+  LANE_RULE = 'A lane is 1-32 chars: lowercase letters, digits and internal hyphens.'
+
   included do
     rescue_from Runs::Start::ActiveRunExists, Harness::Client::ActiveRunConflict do
       render_error('A run is already active for this session', :conflict)
@@ -16,6 +18,12 @@ module RunErrorResponses
     end
     rescue_from Runs::Start::SessionArchived do
       render_error('Session is archived; cannot start a run', :conflict)
+    end
+    # A caller error, and one worth refusing loudly: `lane` reaches a filesystem path and a git
+    # branch name, and the controller had been forwarding `params[:lane]` unvalidated — so a lane
+    # of `../evil` would have resolved a worktree outside `.clawdparty/worktrees`.
+    rescue_from Git::WorktreeManager::InvalidLane do |error|
+      render_error("#{error.message}. #{LANE_RULE}", :unprocessable_content)
     end
     rescue_from Harness::Client::UnknownRun do
       render_not_found

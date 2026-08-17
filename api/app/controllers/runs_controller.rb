@@ -18,6 +18,10 @@ class RunsController < ApplicationController
     raise(ActiveRecord::RecordNotFound) if session.nil?
 
     participant = authorize_action!(:run, session)
+    # BEFORE model resolution, which reaches a provider over the network. A malformed lane is a
+    # client error knowable from the request alone, and resolving a model first meant an invalid
+    # lane surfaced as a provider failure — the wrong error, after a round trip nobody needed.
+    validate_lane!
     result = start_run!(session, participant)
     render(json: { id: result.ai_run.id.to_s, status: result.ai_run.status }, status: :accepted)
   end
@@ -53,9 +57,13 @@ class RunsController < ApplicationController
     result = Git::Diff.new(run).call
     render(json: {
              run_id: run.id.to_s,
+             lane: run.lane,
              base_sha: result.base_sha,
              files: result.files.map(&:to_h),
-             patch: result.patch
+             patch: result.patch,
+             # Always present (empty for a single-lane session) so a client does
+             # not have to distinguish "no conflicts" from "this server does not report them".
+             conflicts: result.conflicts.map(&:to_h)
            }, status: :ok)
   end
 
@@ -84,6 +92,17 @@ class RunsController < ApplicationController
   # Validated run start: permission mode + capability selection (both gated
   # behind the :run authorization already resolved in #create) threaded into
   # Runs::Start. Kept out of #create to keep that action's ABC size honest.
+  # Raises `InvalidLane`, which `RunErrorResponses` renders as a 422 naming the rule. Validated in
+  # the controller as well as in `WorktreeManager` because a `chat` session never builds a worktree
+  # — so the constructor's guard would never run, and the lane would still reach the harness and
+  # the `ai_runs` row unchecked.
+  def validate_lane!
+    lane = params[:lane].presence
+    return if lane.nil? || Git::WorktreeManager.valid_lane?(lane)
+
+    raise(Git::WorktreeManager::InvalidLane, "invalid lane name: #{lane.inspect}")
+  end
+
   def start_run!(session, participant)
     provider = effective_provider(session)
     Runs::Start.call(

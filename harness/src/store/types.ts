@@ -204,6 +204,21 @@ export type Write =
 
 export interface Transaction {
   writes: Write[];
+  /**
+   * The lane these writes belong to.
+   *
+   * When set, `commit` advances `lane.leaf` to the highest `store_seq` this transaction produced,
+   * INSIDE the same transaction. That atomicity is the whole point of "serialize lanes at the
+   * COMMIT boundary, not the run boundary": two lanes progress concurrently, and what has to be
+   * indivisible is one lane's entries together with the marker saying where that lane now ends.
+   * Advancing the leaf in a second transaction would let the other lane observe entries that no
+   * leaf yet covers, or a leaf pointing past entries that were rolled back.
+   *
+   * Omitted by callers that are not lane-scoped (recovery bookkeeping, session locks), which is
+   * why it is optional rather than defaulted to "main" — a default would silently attribute
+   * session-level writes to a lane.
+   */
+  lane?: string;
 }
 
 export interface CommitResult {

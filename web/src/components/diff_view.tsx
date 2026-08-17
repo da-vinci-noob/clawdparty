@@ -14,11 +14,29 @@ interface DiffFile {
   binary: boolean;
 }
 
+/**
+ * A file another lane has also changed.
+ *
+ * With one worktree and one branch per lane, git never sees the two changes meet — so nothing
+ * surfaces the overlap on its own, and approving both leaves two divergent versions of the file.
+ * `unreviewed` means another lane's changeset is still waiting on this file; `approved` means its
+ * change is already committed, so this changeset is built on a version the session has moved past.
+ */
+interface LaneConflict {
+  path: string;
+  lane: string;
+  kind: "unreviewed" | "approved";
+}
+
 interface DiffResponse {
   run_id: string;
+  /** Absent from a pre-lane server; the badge is simply not shown. */
+  lane?: string;
   base_sha: string;
   files: DiffFile[];
   patch: string;
+  /** Always present from a lane-aware server, and empty for a single-lane session. */
+  conflicts?: LaneConflict[];
 }
 
 type LoadState =
@@ -118,6 +136,7 @@ function parsedPath(file: ParsedFile): string {
 const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) => {
   const { can } = useCurrentParticipant();
   const { files, patch } = data;
+  const conflicts = data.conflicts ?? [];
   const parsed = patch.trim() ? parseDiff(patch) : [];
   // Per-path stats from the API's numstat, so each card header can show +/−.
   const statByPath = new Map(files.map((f) => [f.path, f]));
@@ -175,6 +194,16 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
       <div className="flex items-center justify-between">
         <div className="flex items-baseline gap-3">
           <h3 className="text-xs font-semibold text-[#aeb4ae]">Review changes</h3>
+          {/* Which lane is being reviewed. Only shown for a NON-default lane: labelling every
+              single-lane session "main" is noise that teaches nothing. */}
+          {data.lane && data.lane !== "main" && (
+            <span
+              data-testid="diff-lane"
+              className="rounded-[5px] bg-[#0f1c2b] px-[6px] py-[2px] font-mono text-[10px] uppercase tracking-[1px] text-[#3b9dff]"
+            >
+              {data.lane}
+            </span>
+          )}
           <span data-testid="diff-summary" className="font-mono text-[11px] text-[#6b726b]">
             {files.length} {files.length === 1 ? "file" : "files"}{" "}
             <span className="text-[#3b9dff]">+{totalInsertions}</span>{" "}
@@ -192,6 +221,36 @@ const DiffBody: FC<{ data: DiffResponse; runId: string }> = ({ data, runId }) =>
           </button>
         )}
       </div>
+
+      {/* Cross-lane conflicts, ABOVE the file list so it is read before anything is approved
+. Never auto-resolved: two lanes changing one file is a decision for a
+          human, and this is the only place it becomes visible — git never sees the two changes
+          meet, because each lane has its own worktree and branch. */}
+      {conflicts.length > 0 && (
+        <div
+          data-testid="diff-conflicts"
+          className="rounded-[8px] border border-[#3a2a17] bg-[#1a1206] px-3 py-2 text-[12px]"
+        >
+          <div className="text-[#e0a04a]">
+            {conflicts.length === 1 ? "1 file is" : `${conflicts.length} files are`} also changed by
+            another lane
+          </div>
+          <ul className="mt-1 space-y-[2px] text-[#a8987a]">
+            {conflicts.map((conflict) => (
+              <li key={`${conflict.path}:${conflict.lane}`} data-testid="diff-conflict-row">
+                <span className="font-mono">{conflict.path}</span> — lane{" "}
+                <span className="font-semibold">{conflict.lane}</span>
+                {conflict.kind === "approved"
+                  ? " has already approved a change to it"
+                  : " has an unreviewed change to it"}
+              </li>
+            ))}
+          </ul>
+          <div data-testid="diff-conflicts-note" className="mt-1 text-[#7a7060]">
+            Approving both leaves two versions of these files; nothing merges them for you.
+          </div>
+        </div>
+      )}
 
       {/* File-list summary: accent chips that jump to each file's card. */}
       <ul data-testid="diff-file-list" className="flex flex-wrap gap-[6px]">

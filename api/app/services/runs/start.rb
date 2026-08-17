@@ -21,9 +21,10 @@ module Runs
     # These were the Agent SDK's capitalized names originally. Nothing answered to
     # them once the SDK left, so `disallowed_tools` silently matched no tool at all.
     BUILTIN_TOOLS = %w[read str_replace_based_edit_tool bash glob grep web_search web_fetch].freeze
-    # Until M7 a session has exactly one lane, so this is the whole lane space.
-    # Named rather than inlined because the harness enforces one-active-run PER
-    # LANE, and a bare "main" at the call site would hide where that comes from.
+    # The lane a run belongs to when the caller names none — and the lane every pre-M7 session is
+    # implicitly in, which is why its worktree path and branch keep their un-suffixed form.
+    # Named rather than inlined because one-active-run is enforced per (session, lane) on both
+    # sides now, and a bare "main" at the call site would hide where that comes from.
     DEFAULT_LANE = 'main'
     DEFAULT_PROVIDER = 'anthropic-direct'
 
@@ -53,14 +54,19 @@ module Runs
       @connectors = connectors
       @skills = skills
       @client = client
-      @worktree = worktree || Git::WorktreeManager.new(session)
+      # Per-lane worktree: two lanes cannot share a checkout, because finalize reads the
+      # whole working tree and reject reverts it.
+      @worktree = worktree || Git::WorktreeManager.new(session, lane: @lane)
     end
 
     def call
       preflight!
 
       revise = @mode == 'revise'
-      prior = @session.ai_runs.active.first
+      # PER LANE. One active run per session was the MVP rule and the DB index was the
+      # backstop; both are now per (session, lane), so a second lane is startable while the first
+      # is still running — which is the whole of.
+      prior = @session.ai_runs.active.where(lane: @lane).first
       raise(ActiveRunExists) if prior && !revise
 
       # `chat` sessions run Claude in a plain working directory — no worktree, no
@@ -108,8 +114,11 @@ module Runs
     # the worktree, so the recorded conversation describes edits that no longer
     # exist. Resuming it would have Claude reason about files it cannot see
     #. `revise` deliberately does resume — it keeps the dirty tree.
+    # Scoped to THIS LANE. A reject severs the rejected lane's context and must
+    # not leak into another: reading the session's latest run across all lanes would let lane B's
+    # rejection sever lane A, and would resume lane A's conversation into lane B.
     def resume_context?(revise)
-      last = @session.ai_runs.order(:id).last
+      last = @session.ai_runs.where(lane: @lane).order(:id).last
       return false if last.nil?
       return false if !revise && last.status == 'rejected'
 
@@ -135,7 +144,8 @@ module Runs
         status: 'queued',
         requested_by: @requested_by,
         prompt: @prompt,
-        model: @model
+        model: @model,
+        lane: @lane
       )
     end
 

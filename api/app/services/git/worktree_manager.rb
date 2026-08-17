@@ -32,12 +32,35 @@ module Git
       ENV.fetch('REPO_ROOT', '/repo')
     end
 
-    def initialize(session, repo_root: self.class.repo_root)
-      @session = session
-      @repo_root = repo_root
+    # The DEFAULT lane, and the reason `main` gets no path suffix below: every session that
+    # existed before lanes was implicitly in it, so its worktree must keep the exact path and
+    # branch it already has. A suffix here would orphan every live worktree on disk.
+    DEFAULT_LANE = 'main'
+
+    # A lane name reaches a FILESYSTEM PATH and a GIT BRANCH NAME, and it originates from a client
+    # request — so it is validated here, at the point of use, rather than trusted from the caller.
+    #
+    # One path segment, lowercase alphanumeric plus internal hyphens, 1-32 chars. This rejects the
+    # things that actually matter: `..` and `/` (which would escape `.clawdparty/worktrees` and
+    # write anywhere the container can reach), a leading `-` (which git reads as a flag), and the
+    # `.lock` suffix and `@{` sequence git refuses in a ref name. Rejecting rather than sanitising
+    # is deliberate: a sanitised name silently addresses a different lane than the caller asked for.
+    LANE_NAME = /\A[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\z/
+
+    class InvalidLane < StandardError; end
+
+    def self.valid_lane?(lane)
+      LANE_NAME.match?(lane.to_s)
     end
 
-    attr_reader :session, :repo_root
+    def initialize(session, repo_root: self.class.repo_root, lane: DEFAULT_LANE)
+      @session = session
+      @repo_root = repo_root
+      @lane = lane.presence || DEFAULT_LANE
+      raise(InvalidLane, "invalid lane name: #{@lane.inspect}") unless self.class.valid_lane?(@lane)
+    end
+
+    attr_reader :session, :repo_root, :lane
 
     # The git repository the worktree is created FROM: the session's SELECTED
     # repo (repository_path) when set, else the mount root. This is distinct from
@@ -48,12 +71,29 @@ module Git
       session.repository_path.presence || repo_root
     end
 
+    # One worktree PER LANE. Two lanes cannot share one checkout: `Runs::Finalize` computes
+    # a changeset from the whole working tree, so a shared tree would put one lane's in-flight
+    # edits into the other's review — and `Runs::Reject` runs `reset --hard && clean -fd`, which
+    # would DELETE the other lane's unreviewed work.
+    #
+    # `main` is deliberately un-suffixed so pre-lane sessions keep their existing path.
     def worktree_path
-      File.join(repo_root, '.clawdparty', 'worktrees', "session-#{session.id}")
+      File.join(repo_root, '.clawdparty', 'worktrees', "session-#{session.id}#{lane_suffix}")
     end
 
+    # The SAME `-<lane>` suffix as the path, and a hyphen rather than a `/` on purpose.
+    #
+    # `clawd/session-<id>/<lane>` was the first attempt and git refuses it: a ref cannot be both a
+    # file and a directory, so `refs/heads/clawd/session-7` and `refs/heads/clawd/session-7/review`
+    # cannot coexist —
+    #
+    #   fatal: cannot lock ref 'refs/heads/clawd/session-7':
+    #          'refs/heads/clawd/session-7/review' exists
+    #
+    # Keeping `main` un-suffixed for backwards compatibility therefore rules the slash out entirely,
+    # and the failure would have arrived the first time anyone opened a second lane.
     def branch_name
-      "clawd/session-#{session.id}"
+      "clawd/session-#{session.id}#{lane_suffix}"
     end
 
     # Create the worktree (idempotent: reuse if it already exists) and return its
@@ -157,6 +197,10 @@ module Git
     end
 
     private
+
+    def lane_suffix
+      @lane == DEFAULT_LANE ? '' : "-#{@lane}"
+    end
 
     def run_git!(*args, dir:)
       stdout, stderr, status = Open3.capture3('git', '-C', dir, *args)

@@ -21,6 +21,7 @@
     "test:security": "vitest run test/security",
     "test:perf": "vitest run --config vitest.perf.config.ts",
     "scan:credentials": "node scripts/scan_stored_credentials.mjs",
+    "spike:worker-isolation": "node scripts/spike_worker_isolation.mjs",
     "capture:fixture": "node --import tsx scripts/capture_fixture.ts --write",
     "capture:converse": "node --import tsx scripts/capture_converse.ts",
     "probe:converse": "node --import tsx scripts/probe_converse_models.ts",

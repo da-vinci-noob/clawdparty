@@ -123,7 +123,7 @@ module Runs
     end
 
     def worktree_dirty?(run)
-      Git::WorktreeManager.new(run.session).dirty?
+      Git::WorktreeManager.new(run.session, lane: run.lane).dirty?
     rescue Git::WorktreeManager::GitError
       # If the worktree can't be inspected (e.g. not created in a test), treat as
       # clean so finalize is deterministic rather than raising mid-ingest.

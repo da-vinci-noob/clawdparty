@@ -207,6 +207,31 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [lanes] — one active run per LANE; diff reports cross-lane conflicts (B5 lands)
+
+**No `CONTRACT_VERSION` bump: no event type or payload changed.** This is the endpoint + schema half
+of B5, which the migration window declared from the start ("one-active-run-per-session is lifted").
+
+**Breaking, in-window (B5).** `ai_runs` gains `lane` (NOT NULL, default `main`) and
+`index_ai_runs_one_active_per_session` is REPLACED by `index_ai_runs_one_active_per_lane` on
+`(session_id, lane)`. A client that assumed at most one active run per session is wrong afterwards —
+which is the point. No backfill: every existing run is already in the lane it was implicitly in.
+
+**Additive on the wire.** `POST /runs` already accepted `lane` (B1); it is now enforced rather than
+carried. `GET /api/runs/:id/diff` gains two keys:
+
+- `lane` — which lane the changeset belongs to;
+- `conflicts` — `[{ path, lane, kind }]`, `kind` ∈ `unreviewed` | `approved`. Always present, empty
+  for a single-lane session, so a client need not distinguish "none" from "not reported".
+
+**New refusal.** An invalid `lane` is `422`. Lane names reach a filesystem path and a git ref, so
+they are validated against `/\A[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\z/` and **rejected rather than
+sanitised** — a sanitised name silently addresses a different lane than the caller asked for.
+
+See `harness_protocol.md` §8 for the worktree/branch layout, the `lane.leaf`/`lane.state` registers,
+and why the branch suffix is a hyphen (a slash makes the ref a directory and git refuses to have
+both `refs/heads/clawd/session-7` and `refs/heads/clawd/session-7/review`).
+
 ## [1.12.0] — `run_failed.explanation`: why the run failed, in words (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 12 }`.** Additive `minor` bump: one new REQUIRED field on

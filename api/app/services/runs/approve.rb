@@ -16,7 +16,9 @@ module Runs
     def initialize(run:, reviewed_by:, worktree: nil)
       @run = run
       @reviewed_by = reviewed_by
-      @worktree = worktree || Git::WorktreeManager.new(run.session)
+      # The RUN's lane, not the session's: approve commits into the tree that lane edited, and
+      # with per-lane worktrees the wrong one would commit a different lane's work.
+      @worktree = worktree || Git::WorktreeManager.new(run.session, lane: run.lane)
     end
 
     def call
