@@ -1,7 +1,7 @@
 import type { ConverseCommandOutput, ConverseStreamOutput } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
-import { inferContextWindow } from "../models.js";
-import { isAnthropicProfileId } from "./bedrock_routing.js";
+
+import { inferContextWindow, isAnthropicProfileId } from "./bedrock_routing.js";
 import type {
   Capabilities,
   EntitlementPosture,

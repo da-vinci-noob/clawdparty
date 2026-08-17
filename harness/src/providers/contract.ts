@@ -50,6 +50,30 @@ export type ProbeResult =
   | { available: true; credentialSource: CredentialSourceId }
   | { available: false; reason: ProviderUnavailableReason; remedy: string };
 
+/**
+ * A discovery failure the ADAPTER has classified.
+ *
+ * `listModels()` throwing is how an adapter reports "I cannot tell you what I serve", and
+ * `listProviders` reports every such throw as `unreachable` with `String(err)` as the remedy.
+ * That is right for a network fault and wrong for an expired credential: the participant got
+ * `unreachable` plus a stringified AWS exception instead of `credential_expired` plus the
+ * command that fixes it, which is precisely what  asks for.
+ *
+ * Only the adapter can classify — the reason lives in a vendor's error shape, and teaching the
+ * provider-agnostic discovery layer to read AWS exception names would put vendor knowledge
+ * exactly where the seam exists to keep it out.
+ */
+export class ProviderDiscoveryError extends Error {
+  constructor(
+    message: string,
+    readonly reason: ProviderUnavailableReason,
+    readonly remedy: string,
+  ) {
+    super(message);
+    this.name = "ProviderDiscoveryError";
+  }
+}
+
 export interface ModelInfo {
   id: string;
   displayName: string;

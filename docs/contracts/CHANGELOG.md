@@ -207,6 +207,49 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [compaction-request] — `ProviderRequest.compaction` is now actually sent (clarifying)
+
+**No version bump: no type, field, or endpoint changed.** `ProviderRequest.compaction` has existed
+since M4 and `context_compacted` since 1.5.0. What changed is that the field now reaches a provider.
+
+`request_builder` set `compaction: true` whenever `capabilities().serverSideCompaction` was true,
+and no adapter translated it into anything — the Anthropic `stream()` calls omitted it. So the
+loop's `model_context_window_exceeded` → `{kind:"compact"}` → retry path was retrying a request
+identical to the one that had just overflowed. `src/context/compaction.ts` now builds
+`context_management.edits:[{type:"compact_20260112"}]` with beta `compact-2026-01-12` and the two
+first-party adapters send it.
+
+**Consumers unaffected, but one capability's MEANING changed.** `serverSideCompaction` was derived
+as `context_management != null`, and that field is non-optional on the SDK's capability object — so
+it was true for every model with capabilities at all. It now requires
+`context_management.compact_20260112.supported`, so a client reading the capability to decide
+whether to show a compaction affordance will see it false on models where it was previously (and
+wrongly) true.
+
+**The live request is unverified.** This host serves neither first-party Anthropic path, and
+Bedrock declares no support, so the directive's acceptance by a real model has not been executed.
+Everything downstream of the request is covered.
+
+## [discovery-classification] — an adapter may name its own discovery failure (clarifying)
+
+**No version bump: no type, field, or endpoint changed.** `ProviderStatus.reason` already carried
+the full `ProviderUnavailableReason` union; what changed is which value a real host produces.
+
+`GET /models` reports an unavailable provider with a `reason` and a `remedy`. When an
+adapter's `listModels()` threw, discovery reported `reason: "unreachable"` with `String(err)` as the
+remedy — correct for a network fault, wrong for a credential. On this host that meant an expired
+AWS SSO session told the developer to check their network, when the fix was `aws sso login`.
+
+An adapter may now throw `ProviderDiscoveryError(message, reason, remedy)` and discovery reports
+those verbatim; anything else still becomes `unreachable`, which stays the honest answer for a
+fault the code cannot name. **Only the adapter can classify** — the reason lives in a vendor's
+error shape, and teaching the provider-agnostic layer to read AWS exception names would put vendor
+knowledge exactly where the seam exists to keep it out.
+
+Consumers need no change: they already render whatever `reason`/`remedy` arrive. What they gain is
+that `credential_expired` and `not_entitled` now actually occur where previously only
+`unreachable` did.
+
 ## [ephemeral-ordering] — delivery order and settled-block terminality (clarifying)
 
 **No version bump: no type, field, or endpoint changed.** This records two obligations that were

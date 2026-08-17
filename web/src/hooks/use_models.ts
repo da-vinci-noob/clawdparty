@@ -75,9 +75,9 @@ function toModels(providers: ProviderStatus[]): ModelInfo[] {
         provider.models.map((model) => ({
           id: model.id,
           label: model.displayName,
-          // The REAL per-model window, from the provider. Previously a family-name guess in
-          // `models.ts`, which silently returned 200K for anything it did not recognise —
-          // and this number is the denominator of the live context bar.
+          // The REAL per-model window, from the provider. Previously a family-name guess in a
+          // harness module (since deleted) that silently returned 200K for anything it did not
+          // recognise — and this number is the denominator of the live context bar.
           context_window: model.capabilities.contextWindow,
           provider: provider.id,
           providerLabel: provider.displayName,

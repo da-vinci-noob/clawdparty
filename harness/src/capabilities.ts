@@ -1,5 +1,5 @@
 // capabilities.ts — read-only, cwd-scoped discovery of the host's connectors
-// (MCP servers) and skills, mirroring models.ts. The harness is the ONLY process
+// (MCP servers) and skills, mirroring provider discovery. The harness is the ONLY process
 // that reads host config; discovery reflects only what the host already configured
 // (a browser user can enable/disable but never define a capability). Every function
 // is defensive: a missing/unparseable source yields an empty list tagged

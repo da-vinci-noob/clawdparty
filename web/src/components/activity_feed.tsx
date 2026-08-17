@@ -2,6 +2,7 @@ import type { EventEnvelope } from "@clawdparty/contracts";
 import { type FC, useEffect, useRef } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
 import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
+import { ContextCompactedRow } from "./feed/context_compacted_row";
 import { FileChangedRow } from "./feed/file_changed_row";
 import { ProviderErrorRow } from "./feed/provider_error_row";
 import { RawFallback } from "./feed/raw_fallback";
@@ -172,6 +173,11 @@ function renderEvent(
       // Not a RUN_LIFECYCLE banner: the credential failed, the session did not, and a
       // "run failed" framing would send the room off to create a new one.
       return <ProviderErrorRow event={event} />;
+    case "context_compacted":
+      // The one occurrence that changes what Claude can still remember. With no row, a session
+      // silently loses its early turns and the only clue is Claude later behaving as if it had
+      // never read them.
+      return <ContextCompactedRow event={event} />;
     case "terminal_output":
       return <TerminalBlock event={event} />;
     case "file_changed":

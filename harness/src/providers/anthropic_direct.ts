@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { EffortLevel } from "@clawdparty/contracts";
+import { compactionDirective } from "../context/compaction.js";
 import {
   DEFAULT_THINKING_BUDGET_TOKENS,
   type RawStream,
@@ -162,6 +163,11 @@ export class AnthropicDirectAdapter implements ProviderAdapter {
         tools: req.tools as Anthropic.ToolUnion[],
         ...(req.thinking ? { thinking: req.thinking } : {}),
         ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+        // Server-side compaction, when BOTH the request asked and this model reported the edit
+        // type. `req.compaction` was set here since M4 and read by nobody, so a session
+        // past the window looped on `model_context_window_exceeded` forever having never once
+        // asked to be compacted.
+        ...(compactionDirective(this.capabilities(req.model), req.compaction) ?? {}),
       },
       { signal: req.signal },
     );
@@ -229,7 +235,13 @@ function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
     effortLevels,
     promptCaching: DECLARED_FIRST_PARTY.promptCaching,
     minCacheablePrefixTokens: DECLARED_FIRST_PARTY.minCacheablePrefixTokens,
-    serverSideCompaction: contextManagement != null,
+    // The SPECIFIC edit type, not merely "context management exists". `context_management` is a
+    // non-optional field on the SDK's capability object, so `!= null` was true for every model
+    // with capabilities at all — it reported compaction support universally, and once the
+    // directive was actually wired that would have sent `compact_20260112` to models
+    // that do not accept it, 400-ing the whole turn. `compact_20260112` is the SDK's own name
+    // for the key, sibling to `clear_tool_uses_20250919` read on the next line.
+    serverSideCompaction: contextManagement?.compact_20260112?.supported === true,
     contextEditing: contextManagement?.clear_tool_uses_20250919?.supported === true,
     serverSideTools: {
       webSearch: DECLARED_FIRST_PARTY.serverSideTools.webSearch,

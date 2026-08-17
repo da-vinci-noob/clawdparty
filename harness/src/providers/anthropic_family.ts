@@ -1,3 +1,4 @@
+import { isCompactionType } from "../context/compaction.js";
 import type { ProviderEvent, StopReason, Usage } from "./contract.js";
 
 /**
@@ -64,7 +65,7 @@ function usageFrom(usage: RawUsage | undefined): Usage {
 export function blockKind(type: string): "text" | "thinking" | "tool_use" | "compaction" {
   if (type === "text") return "text";
   if (type === "thinking" || type === "redacted_thinking") return "thinking";
-  if (type.startsWith("compaction")) return "compaction";
+  if (isCompactionType(type)) return "compaction";
   return "tool_use";
 }
 

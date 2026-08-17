@@ -1,6 +1,6 @@
 import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
-import { dedupeByModel, inferContextWindow } from "../models.js";
+
 import {
   isServableAnthropicProfile,
   supportsAdaptiveThinking,
@@ -8,7 +8,7 @@ import {
 } from "./anthropic_bedrock_capabilities.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
 import { toAnthropicMessages } from "./anthropic_request.js";
-import { isAnthropicProfileId } from "./bedrock_routing.js";
+import { dedupeByModel, inferContextWindow, isAnthropicProfileId } from "./bedrock_routing.js";
 import type {
   Capabilities,
   EntitlementPosture,
@@ -18,6 +18,7 @@ import type {
   ProviderEvent,
   ProviderRequest,
 } from "./contract.js";
+import { ProviderDiscoveryError } from "./contract.js";
 import { type Discovery, discoverAwsCredential } from "./credentials/discover.js";
 
 /**
@@ -43,11 +44,11 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
 /**
  * Bedrock capabilities are STATIC, and that is correct rather than degraded.
  *
- * The Models API is first-party only, so there is nothing to query. `models.ts`'s fallback
- * table stopped being a degraded path for this adapter and became the real one — which is
- * why `liveModelDiscovery` is false here even though the model LIST is enumerable from the
- * AWS control plane. The flag is about live CAPABILITY discovery, not about whether ids can
- * be listed.
+ * The Models API is first-party only, so there is nothing to query — which is why
+ * `liveModelDiscovery` is false here even though the model LIST is enumerable from the AWS
+ * control plane. The flag is about live CAPABILITY discovery, not about whether ids can be
+ * listed. The per-model measured tables in `anthropic_bedrock_capabilities.ts` are the source
+ * for everything that does vary by model.
  */
 const BEDROCK_CAPABILITIES: Omit<
   Capabilities,
@@ -126,6 +127,50 @@ const DISCOVERY_FAILED =
   "cannot be guessed. Run `aws sso login`, check the region, and confirm the role has " +
   "Bedrock read access";
 
+/**
+ * AWS exception names that mean the CREDENTIAL is the problem, not the network.
+ *
+ * Measured, not assumed: a request signed with a bogus key returns
+ * `UnrecognizedClientException` with HTTP 403 and "The security token included in the request
+ * is invalid." An expired SSO session returns `ExpiredTokenException`; a role without the
+ * permission returns `AccessDeniedException`. Reporting all three as `unreachable` sent a
+ * developer to check their network when the fix was `aws sso login`.
+ */
+const CREDENTIAL_ERROR_NAMES = new Set([
+  "UnrecognizedClientException",
+  "ExpiredTokenException",
+  "ExpiredToken",
+  "InvalidClientTokenId",
+  "CredentialsProviderError",
+  "InvalidGrantException",
+]);
+
+const NOT_ENTITLED_ERROR_NAMES = new Set(["AccessDeniedException", "AccessDenied"]);
+
+function classifyEnumerationFailure(err: unknown, profile: string | undefined): Error {
+  const name = (err as { name?: string } | null)?.name ?? "";
+  const where = profile ? ` --profile ${profile}` : "";
+
+  if (CREDENTIAL_ERROR_NAMES.has(name)) {
+    return new ProviderDiscoveryError(
+      `${DISCOVERY_FAILED} (${String(err)})`,
+      "credential_expired",
+      `The AWS credential${profile ? ` for profile ${profile}` : ""} is not valid. ` +
+        `Run \`aws sso login${where}\` (or refresh the key) and reload.`,
+    );
+  }
+  if (NOT_ENTITLED_ERROR_NAMES.has(name)) {
+    return new ProviderDiscoveryError(
+      `${DISCOVERY_FAILED} (${String(err)})`,
+      "not_entitled",
+      `The AWS role${profile ? ` for profile ${profile}` : ""} is missing \`bedrock:ListInferenceProfiles\`. Grant Bedrock read access to that role.`,
+    );
+  }
+  // Genuinely unclassified: kept as a plain Error so discovery reports `unreachable`, which is
+  // the honest answer for a fault this code cannot name.
+  return new Error(`${DISCOVERY_FAILED} (${String(err)})`);
+}
+
 export interface AnthropicBedrockOptions {
   client?: AnthropicBedrock;
   discovery?: Discovery;
@@ -174,14 +219,19 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
   }
 
   /**
-   * PRESENCE-ONLY, and weaker than the other adapters on purpose — stated so nobody
-   * mistakes it for equivalent evidence.
+   * PRESENCE-ONLY — but the credential IS validated, one step later.
    *
-   * The Mantle client exposes only `messages`, so there is no free authenticated endpoint
-   * to prove a credential with; the cheapest real check would be a billed request, on
-   * every `/models` call. So a live-but-expired SSO session reports available here and
-   * fails at run start instead, where `provider_error` carries the real reason. The
-   * remedy below names SSO expiry up front for exactly that case.
+   * The earlier reason given here was wrong, and it was wrong in the direction that matters:
+   * it said no free authenticated endpoint exists, so nothing but a billed request could
+   * prove a credential. `bedrock:ListInferenceProfiles` is exactly such an endpoint, it is
+   * free, and `listModels()` already calls it on every `/models` request — measured to return
+   * 403 `UnrecognizedClientException` for a bad key.
+   *
+   * So the check stays here rather than being duplicated: `listProviders` calls `probe()` and
+   * then `listModels()`, and a failure in the second is now CLASSIFIED
+   * (`classifyEnumerationFailure`) instead of collapsing to `unreachable`. What this method
+   * genuinely cannot catch is an SSO session that expires between enumeration and the request —
+   * that window is real, and `provider_error` is what names it.
    */
   async probe(): Promise<ProbeResult> {
     const discovery = this.discover();
@@ -299,7 +349,7 @@ export class AnthropicBedrockAdapter implements ProviderAdapter {
     try {
       found = await source();
     } catch (err) {
-      throw new Error(`${DISCOVERY_FAILED} (${String(err)})`);
+      throw classifyEnumerationFailure(err, this.awsProfile);
     }
 
     // An account with no Anthropic profiles enabled returns an EMPTY list rather than an

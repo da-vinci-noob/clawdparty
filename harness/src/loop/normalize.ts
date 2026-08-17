@@ -1,5 +1,6 @@
 import type { Actor, EnvelopeType, EventEnvelope } from "@clawdparty/contracts";
 import { EPHEMERAL_EVENT_TYPES } from "@clawdparty/contracts";
+import { isCompactionType } from "../context/compaction.js";
 import type { ProviderEvent, Usage } from "../providers/contract.js";
 import { boundRawPayload, isoMs, summarizeToolInput } from "../redaction.js";
 
@@ -408,7 +409,7 @@ function inferKind(shape: Record<string, unknown>): BlockAccumulator["kind"] {
   const type = String(shape.type ?? "");
   if (type === "text") return "text";
   if (type === "thinking" || type === "redacted_thinking") return "thinking";
-  if (type.startsWith("compaction")) return "compaction";
+  if (isCompactionType(type)) return "compaction";
   return "tool_use";
 }
 

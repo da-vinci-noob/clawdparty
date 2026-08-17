@@ -1,5 +1,5 @@
 import type { ProviderStatus } from "@clawdparty/contracts";
-import type { ProviderAdapter } from "./contract.js";
+import { type ProviderAdapter, ProviderDiscoveryError } from "./contract.js";
 import { buildAdapters } from "./index.js";
 
 /**
@@ -56,6 +56,20 @@ async function describe(adapter: ProviderAdapter): Promise<ProviderStatus> {
   } catch (err) {
     // A provider that throws is still reported. The alternative — a 500 from
     // /models — takes down the picker for EVERY provider because one misbehaved.
+    //
+    // An adapter that CLASSIFIED its own failure is believed. `unreachable` plus a
+    // stringified vendor exception is the right answer for a network fault and the wrong one
+    // for an expired credential, and only the adapter can tell those apart.
+    if (err instanceof ProviderDiscoveryError) {
+      return {
+        id: adapter.id,
+        displayName: adapter.displayName,
+        available: false,
+        reason: err.reason,
+        remedy: err.remedy,
+        models: [],
+      };
+    }
     return {
       id: adapter.id,
       displayName: adapter.displayName,
