@@ -85,17 +85,33 @@ class RunsController < ApplicationController
   # behind the :run authorization already resolved in #create) threaded into
   # Runs::Start. Kept out of #create to keep that action's ABC size honest.
   def start_run!(session, participant)
+    provider = effective_provider(session)
     Runs::Start.call(
       session: session,
       requested_by: participant,
       prompt: params.require(:prompt),
-      model: Runs::ResolveModel.call(provider: provider_param, requested: params[:model]),
+      model: effective_model(session, provider),
       mode: params[:mode].presence || 'fresh',
-      provider: provider_param,
+      provider: provider,
       lane: params[:lane].presence || Runs::Start::DEFAULT_LANE,
       effort: params[:effort].presence,
       **capability_params(session)
     )
+  end
+
+  # Precedence, and the ORDER is the whole point: the composer's explicit pick, then the session's
+  # Settings default, then the built-in. Computing `ResolveModel` first — as this did — always
+  # produced a model, so `Runs::Start`'s fallback to the session default could never be reached and
+  # the setting was unreachable through the only path that matters.
+  def effective_provider(session)
+    params[:provider].presence || session.default_provider.presence || Runs::Start::DEFAULT_PROVIDER
+  end
+
+  # Resolved WITHIN the effective provider: a model id only means something relative to the provider
+  # that serves it.
+  def effective_model(session, provider)
+    params[:model].presence || session.default_model.presence ||
+      Runs::ResolveModel.call(provider: provider, requested: nil)
   end
 
   def find_run!
@@ -126,9 +142,5 @@ class RunsController < ApplicationController
 
     authorize!(action, session)
     participant
-  end
-
-  def provider_param
-    params[:provider].presence || Runs::Start::DEFAULT_PROVIDER
   end
 end

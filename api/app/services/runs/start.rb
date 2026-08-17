@@ -33,15 +33,19 @@ module Runs
     end
 
     def initialize(session:, requested_by:, prompt:, model:, mode: 'fresh',
-                   provider: DEFAULT_PROVIDER, lane: DEFAULT_LANE, effort: nil,
+                   provider: nil, lane: DEFAULT_LANE, effort: nil,
                    disallowed_tools: [], connectors: [], skills: [],
                    client: Harness::Client.new, worktree: nil)
       @session = session
       @requested_by = requested_by
       @prompt = prompt
-      @model = model
+      # An explicit choice wins; the session's Settings default is what a run starts with when the
+      # composer is left alone; the built-in constant is the last resort. `provider` defaulted
+      # to the constant in the signature before, which made a session default unreachable — the
+      # caller always passed something.
+      @model = model.presence || session.default_model
       @mode = mode
-      @provider = provider
+      @provider = provider.presence || session.default_provider.presence || DEFAULT_PROVIDER
       @lane = lane
       @effort = effort
       @disallowed_tools = disallowed_tools
@@ -162,7 +166,10 @@ module Runs
         effort: @effort,
         disallowed_tools: @disallowed_tools,
         connectors: @connectors,
-        skills: @skills
+        skills: @skills,
+        # WHOSE ACCOUNT PAYS. Omitted when unset so the harness uses the host default —
+        # an explicit null would be a different request.
+        aws_profile: @session.aws_profile
       }.compact_blank
     end
   end

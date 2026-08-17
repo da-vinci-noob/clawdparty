@@ -39,6 +39,7 @@ implement this convention; it is pinned here as the single source.
 | run input | follow-up · interrupt |
 | **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
 | **auth test** | `POST /api/providers/verify` |
+| **host AWS profiles** | `GET /api/aws-profiles` |
 | **skill management** (owner) | `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
 | **projection repair** | `GET /api/sessions/:id/projection/check` · `POST /api/sessions/:id/projection/rederive` (owner) |
@@ -123,6 +124,29 @@ when the harness is unreachable. Any participant may read them; a non-participan
 request is **`404`** `{ errors }`. Connector responses never contain a server's
 command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
 an endpoint.
+
+### Session run defaults — `PATCH /api/sessions/:id`
+
+**OWNER only** (`manage_session`), and now accepts `default_provider`, `default_model`, `aws_profile`
+and `title` alongside the existing `repository_path`. Returns the session, which `GET
+/api/sessions/:id` also exposes to **every** participant: which provider a run uses and which account
+pays are facts about the room, not owner secrets — only the writing is gated.
+
+**Only the keys present are touched.** The endpoint recomputes the working directory *only* when
+`repository_path` is sent, because `working_directory` defaults to the repo root when blank — so
+recomputing on every PATCH would move a session's directory the moment someone set a provider default.
+
+An empty string **clears** a default (stored as NULL): "no default, resolve one at run start" has to
+stay reachable. Validation follows the capability-selection rule (design D6) — only a value outside a
+**known, non-empty** set is **`422`**, so a harness outage cannot block a settings change. A model is
+checked against **its own provider**, never the union, because a model id only means something
+relative to the provider serving it.
+
+`aws_profile` is validated against `GET /api/aws-profiles` (names only, never a credential value —
+) and decides **whose account pays**.
+
+**The defaults are what a run starts with**: `POST /api/sessions/:id/runs` resolves
+explicit param → session default → built-in, so the composer's per-run pick still wins.
 
 ### Skill management — `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name`
 

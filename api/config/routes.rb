@@ -23,6 +23,8 @@ Rails.application.routes.draw do
     get 'models', to: 'models#index'
     # The auth test: sends a real request per provider, so it is a POST, not a read.
     post 'providers/verify', to: 'providers#verify'
+    # Profile NAMES for the Bedrock setting; never a credential value.
+    get 'aws-profiles', to: 'aws_profiles#index'
 
     # Create a session (unauthenticated LAN bootstrap; creator becomes owner +
     # gets the cookie). #update (owner only) changes the working dir: PATCH /api/sessions/:id.

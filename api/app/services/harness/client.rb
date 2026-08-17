@@ -51,6 +51,12 @@ module Harness
       post('/verify', {})
     end
 
+    # GET /aws-profiles — profile NAMES from ~/.aws/config; the harness never opens ~/.aws/credentials,
+    # so no credential value is read. Enumerated so the setting is a choice among what exists.
+    def list_aws_profiles
+      get('/aws-profiles')
+    end
+
     # POST /skills — write a SKILL.md into the repo's `.claude/skills` or the host's. The harness
     # validates the name as a strict single segment, so a write cannot land outside the root.
     def add_skill(cwd:, scope:, name:, description:, body:, replace: false)

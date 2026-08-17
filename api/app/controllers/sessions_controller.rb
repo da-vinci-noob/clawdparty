@@ -9,6 +9,7 @@
 # into the session) is identical.
 class SessionsController < ApplicationController
   include SessionWorkingDirectory
+  include SessionRunDefaults
 
   # #create is the unauthenticated bootstrap; every other action requires an identity.
   before_action :require_user, only: %i[index show update archive]
@@ -55,7 +56,7 @@ class SessionsController < ApplicationController
     raise(ActiveRecord::RecordNotFound) if session.nil?
 
     authorize!(:manage_session, session)
-    session.update!(repository_path: working_directory_for(session.mode))
+    session.update!(update_attrs(session))
     render(json: session_json(session), status: :ok)
   end
 
@@ -121,8 +122,25 @@ class SessionsController < ApplicationController
     end
   end
 
+  # Only what the request asked to change. A PATCH that sets a default must not re-resolve the
+  # working directory (that would 422 a session whose repo moved), and one that changes the directory
+  # must not clear the defaults.
+  def update_attrs(session)
+    attrs = run_default_attrs(session)
+    attrs[:repository_path] = working_directory_for(session.mode) if params.key?(:repository_path)
+    # A blank title is ignored rather than stored: the history list renders it, and an untitled row
+    # is unidentifiable. `mode` is deliberately NOT here — it is fixed for the session's lifetime.
+    attrs[:title] = params[:title].to_s.strip if params[:title].present?
+    attrs
+  end
+
+  # The defaults are readable by EVERY participant (`:view`), not just the owner: which provider a run
+  # uses and which account pays are facts about the room, and the settings page shows the same values
+  # to everyone with the write controls hidden. Choosing them is owner-only.
   def session_json(session)
-    { id: session.id.to_s, mode: session.mode, repository_path: session.repository_path }
+    { id: session.id.to_s, title: session.title, mode: session.mode, status: session.status,
+      repository_path: session.repository_path, default_provider: session.default_provider,
+      default_model: session.default_model, aws_profile: session.aws_profile }
   end
 
   def cookie_options(user_id)

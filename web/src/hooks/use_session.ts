@@ -13,8 +13,15 @@ import { useQuery } from "@tanstack/react-query";
 
 export interface SessionConfig {
   id: string;
+  title?: string;
   mode: "review" | "chat";
+  status?: string;
   repository_path: string | null;
+  /** What a run starts with when the composer is left alone. Null = the server resolves one. */
+  default_provider?: string | null;
+  default_model?: string | null;
+  /** WHICH ACCOUNT PAYS for a Bedrock run. Readable by all; settable by the owner. */
+  aws_profile?: string | null;
 }
 
 async function fetchSession(sessionId: string): Promise<SessionConfig | null> {

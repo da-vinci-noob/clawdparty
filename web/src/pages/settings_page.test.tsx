@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { server } from "../../test/msw_server";
@@ -67,13 +67,13 @@ describe("the settings route", () => {
   });
 
   it("offers no tab that is not built yet", () => {
-    // A "coming soon" tab reads as a broken feature rather than an unbuilt one. Provider
-    // defaults appear when they land.
+    // A "coming soon" tab reads as a broken feature rather than an unbuilt one — every tab in the
+    // list is one that works.
     setRole("owner");
     renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
 
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(tabs).toEqual(["Configuration", "Auth test", "Skills setup"]);
+    expect(tabs).toEqual(["Configuration", "Provider", "Auth test", "Skills setup"]);
   });
 
   it("is reachable by a viewer, not just an owner", async () => {
@@ -111,6 +111,48 @@ describe("the Configuration tab", () => {
     renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
 
     expect(await screen.findByTestId("config-mode")).toHaveTextContent(/no git review/);
+  });
+
+  it("lets an owner rename the session", async () => {
+    let patched: Record<string, unknown> | null = null;
+    server.use(
+      http.patch("/api/sessions/:id", async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ id: "s", mode: "chat", repository_path: "/Users/dev/app" });
+      }),
+    );
+    setRole("owner");
+    renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
+
+    fireEvent.change(await screen.findByTestId("config-title"), { target: { value: "New name" } });
+    fireEvent.click(screen.getByTestId("config-title-save"));
+
+    await waitFor(() => expect(patched).not.toBeNull());
+    // Title ONLY: sending repository_path would make the endpoint recompute the working directory,
+    // which defaults to the repo root — a rename would silently move the session.
+    expect(patched).toEqual({ title: "New name" });
+  });
+
+  it("makes an owner confirm an archive, and says what it costs everyone", async () => {
+    setRole("owner");
+    renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
+
+    fireEvent.click(await screen.findByTestId("config-archive"));
+
+    // Terminal, and shared: the sentence says what happens to the room, not just to the clicker.
+    expect(screen.getByTestId("config-archive-warning")).toHaveTextContent(/no new run/i);
+    expect(screen.getByTestId("config-archive-warning")).toHaveTextContent(/for anyone/i);
+    fireEvent.click(screen.getByTestId("config-archive-cancel"));
+    expect(screen.queryByTestId("config-archive-confirm")).not.toBeInTheDocument();
+  });
+
+  it("hides rename and archive from a non-owner", async () => {
+    setRole("editor");
+    renderWithRouterAt(<AppRoutes />, "/sessions/s/settings");
+    await screen.findByTestId("config-mode");
+
+    expect(screen.queryByTestId("config-title-form")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("config-archive")).not.toBeInTheDocument();
   });
 
   it("renders a readable state when the session cannot be read", async () => {
