@@ -4,11 +4,11 @@
 
 The system SHALL let the client discover the tools, connectors, and skills available to a run, read-only, sourced entirely from the host. The built-in **tools** are a fixed set that never varies by host or repo; they SHALL be a shared constant in the contracts package (`Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `WebSearch`, `WebFetch`, each with a label + description) consumed directly by the client and by Rails validation — there SHALL be no tools discovery endpoint.
 
-Connectors and skills are per-repo project artifacts, and the repo is per-session, so their discovery SHALL be **session-scoped** and read by the sidecar (the only component that reads host config) against the session's repository path plus host-wide `~/.claude`:
+Connectors and skills are per-repo project artifacts, and the repo is per-session, so their discovery SHALL be **session-scoped** and read by the harness (the only component that reads host config) against the session's repository path plus host-wide `~/.claude`:
 
 - `GET /api/sessions/:id/connectors` SHALL respond `200` with `{ connectors: [{ name, transport }], source }`, enumerating only MCP servers the host has configured for that session's repo (`<cwd>/.mcp.json`) or user-wide, and SHALL expose **only** `name` and `transport` — never the server's command, args, url, headers, env, or tokens.
 - `GET /api/sessions/:id/skills` SHALL respond `200` with `{ skills: [{ name, description }], source }` discovered by scanning `<cwd>/.claude/skills/*/SKILL.md` and `~/.claude/skills/*/SKILL.md`; the length of `skills` is the real skill count.
-- When a source is missing or unparseable, the corresponding list SHALL be empty (`source` marking it unavailable) with a `200`; when the sidecar is unreachable the proxy SHALL respond `502` (matching `GET /api/models`), not a fabricated empty list. A cross-session/non-participant request SHALL be refused `404 { errors: [...] }`.
+- When a source is missing or unparseable, the corresponding list SHALL be empty (`source` marking it unavailable) with a `200`; when the harness is unreachable the proxy SHALL respond `502` (matching `GET /api/models`), not a fabricated empty list. A cross-session/non-participant request SHALL be refused `404 { errors: [...] }`.
 
 #### Scenario: The built-in tool set is a shared constant, not an endpoint
 
@@ -20,10 +20,10 @@ Connectors and skills are per-repo project artifacts, and the repo is per-sessio
 - **WHEN** a participant calls `GET /api/sessions/:id/connectors` and the host has configured MCP servers for that session's repo
 - **THEN** the response lists each server's `name` and `transport` only, resolved from that session's repository path, and contains no command/args/url/headers/env/token
 
-#### Scenario: Missing config yields an empty list; an unreachable sidecar yields 502
+#### Scenario: Missing config yields an empty list; an unreachable harness yields 502
 
-- **WHEN** the session's repo has no `.mcp.json`/skills directory (empty+unavailable, `200`) versus the sidecar being unreachable (`502`)
-- **THEN** the endpoint distinguishes the two — an empty list with unavailable `source` for missing config, and `502` when the sidecar cannot be reached
+- **WHEN** the session's repo has no `.mcp.json`/skills directory (empty+unavailable, `200`) versus the harness being unreachable (`502`)
+- **THEN** the endpoint distinguishes the two — an empty list with unavailable `source` for missing config, and `502` when the harness cannot be reached
 
 ### Requirement: Per-run capability selection at run start
 
@@ -39,7 +39,7 @@ Rails SHALL validate each field against the discovered/known sets before startin
 #### Scenario: A valid selection is accepted
 
 - **WHEN** an editor starts a run with `disallowed_tools:["Bash"]`, `connectors:["<a host-configured name>"]`, and `skills:["<a discovered name>"]`
-- **THEN** the server responds `202` with `{ id, status }` and the selection is threaded to the sidecar
+- **THEN** the server responds `202` with `{ id, status }` and the selection is threaded to the harness
 
 #### Scenario: An unknown value is rejected before the run starts
 
@@ -53,22 +53,22 @@ Rails SHALL validate each field against the discovered/known sets before startin
 
 ### Requirement: Capability selection maps to Agent SDK options
 
-The sidecar SHALL map the run-start payload to `query()` options such that an OFF tool is genuinely unavailable, not merely un-pre-approved. `disallowed_tools` SHALL be passed as `disallowedTools` (bare tool names), which removes those tools from the model's context and applies even under `bypassPermissions`. The base `allowed_tools` pre-approval set SHALL be preserved (unchanged default). Each enabled connector name SHALL be resolved against the host config into an `mcpServers` entry, and `mcp__<name>__*` SHALL be appended to `allowedTools`. When `skills` is non-empty (or `"all"`), the sidecar SHALL set `settingSources` to include `"user"` and `"project"` and pass `skills`; when omitted/empty, skills SHALL NOT be enabled and the `Skill` tool SHALL NOT be added. `cwd` SHALL remain pinned to the session worktree in all cases.
+The sidecar SHALL map the run-start payload to `query()` options such that an OFF tool is genuinely unavailable, not merely un-pre-approved. `disallowed_tools` SHALL be passed as `disallowedTools` (bare tool names), which removes those tools from the model's context and applies even under `bypassPermissions`. The base `allowed_tools` pre-approval set SHALL be preserved (unchanged default). Each enabled connector name SHALL be resolved against the host config into an `mcpServers` entry, and `mcp__<name>__*` SHALL be appended to `allowedTools`. When `skills` is non-empty (or `"all"`), the harness SHALL set `settingSources` to include `"user"` and `"project"` and pass `skills`; when omitted/empty, skills SHALL NOT be enabled and the `Skill` tool SHALL NOT be added. `cwd` SHALL remain pinned to the session worktree in all cases.
 
 #### Scenario: An OFF tool is removed via disallowedTools
 
 - **WHEN** a run is started with `disallowed_tools:["Bash"]`
-- **THEN** the sidecar sets `disallowedTools:["Bash"]` on `query()` so Claude cannot use Bash, even if the permission mode would otherwise auto-approve it
+- **THEN** the harness sets `disallowedTools:["Bash"]` on `query()` so Claude cannot use Bash, even if the permission mode would otherwise auto-approve it
 
 #### Scenario: An enabled connector becomes usable and allowed
 
 - **WHEN** a run is started with `connectors:["github"]` and the host has a `github` MCP server configured
-- **THEN** the sidecar adds that server to `mcpServers` and appends `mcp__github__*` to `allowedTools`
+- **THEN** the harness adds that server to `mcpServers` and appends `mcp__github__*` to `allowedTools`
 
 #### Scenario: Skills are enabled only when selected
 
 - **WHEN** a run is started with a non-empty `skills` (or `"all"`)
-- **THEN** the sidecar sets `settingSources` to include user+project and passes `skills`; and when `skills` is omitted, no skills and no `Skill` tool are enabled
+- **THEN** the harness sets `settingSources` to include user+project and passes `skills`; and when `skills` is omitted, no skills and no `Skill` tool are enabled
 
 ### Requirement: run_started echoes the applied capabilities
 

@@ -36,4 +36,4 @@
 
 - [x] 5.1 `openspec validate run-tools-connectors-skills --type change --strict` clean.
 - [x] 5.2 Run all three suites + linters green (api: RSpec + RuboCop; sidecar: Vitest + Biome + tsc; web: Vitest + Biome + tsc).
-- [ ] 5.3 Commit (signed) on a branch, open a PR, confirm CI green, and (on approval) admin-merge + sync main.
+- [ ] 5.3 Commit (signed) on a branch, open a PR, confirm CI green, and (on approval) admin-merge + sync main. **BLOCKED, not forgotten:** this branch has never been pushed and the 1Password SSH agent refuses to sign (`ssh-add -l` reports no identities), which is the same blocker as in the harness feature. The FEATURE itself is shipped and verified in the tree — `BUILTIN_TOOLS` in `packages/contracts`, `run_started`'s resolved `disallowed_tools`/`connectors`/`skills`, the session-scoped discovery endpoints, and `harness/src/mcp/`. The change was archived on that basis, because the living spec describing it should not stay wrong while a PR waits on an unlocked agent.

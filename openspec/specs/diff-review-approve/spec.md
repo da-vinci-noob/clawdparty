@@ -72,7 +72,8 @@ next run SHALL NOT resume the rejected run's Claude session (chaining is severed
 #### Scenario: A fresh run after a reject does not resume the rejected session
 
 - **WHEN** a new (non-revise) run starts after the most recent run was `rejected`
-- **THEN** it begins a new Claude session (no resume of the rejected run's `claude_session_id`)
+- **THEN** it starts with a fresh surface baseline (`resume_context: false`), so the rejected run's
+  conversation is not folded in
 
 ### Requirement: The web presents role-appropriate review controls
 

@@ -40,17 +40,26 @@ The change SHALL document two host-side auth caveats that the harness cannot sol
 - **WHEN** the host authenticates via Amazon Bedrock over AWS SSO
 - **THEN** the documentation states the host must stay `aws sso login`-fresh, because the container reflects the mounted token but cannot refresh it
 
-### Requirement: canUseTool is an allow-all MVP stub
+### Requirement: The command gate is a real interception point
 
-`harness/src/permissions.ts` SHALL implement `canUseTool` as an allow-all stub for the MVP and SHALL be the documented single-file seam for later per-tool Bash gating. It SHALL NOT introduce any shell input path; the terminal pane remains a read-only replay of Claude's Bash events.
+The harness SHALL expose exactly one place that can refuse a model-directed command — the `tool:before`
+extension point — and it SHALL have at least one importer in the tree, enforced by `bin/check-docs`.
 
-#### Scenario: canUseTool allows every tool in the MVP
+<!-- doc-truth:ignore -->
+This requirement replaces "canUseTool is an allow-all MVP stub". That hook was exported, documented as the seam
+for later per-tool gating, and imported by nothing: it could not intercept a call. It was DELETED rather than
+left in place, because a seam presented as one that cannot intercept is worse than an absent one — a reader
+plans around it. The read-only-terminal invariant it was cited for is unchanged and is asserted directly by
+`harness/test/security/no_shell_input.test.ts`.
+<!-- doc-truth:end -->
 
-- **WHEN** the SDK consults `canUseTool` for any tool
-- **THEN** the MVP stub allows it, while remaining the documented seam for future per-tool gating
+#### Scenario: The gate can actually refuse
 
-#### Scenario: No shell input path is introduced
+- **WHEN** the model directs a `bash` command and a rule refuses it at `tool:before`
+- **THEN** the command does not execute and the feed shows the refusal with its reason
 
-- **WHEN** the permissions stub is in place
-- **THEN** it does not add any path for input to a shell, preserving the read-only-terminal invariant
+#### Scenario: No shell input path exists
+
+- **WHEN** any participant-facing surface is inspected
+- **THEN** no path for input to a shell exists; the terminal pane is a read-only replay of Claude's Bash events
 

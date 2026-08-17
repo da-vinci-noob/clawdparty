@@ -26,8 +26,8 @@ terminal status) SHALL NOT block a new run.
 `Runs::Start` SHALL, on a non-revise start, require a clean worktree, then: create the worktree and record
 `base_sha` (via `Git::WorktreeManager`), create the `ai_run` (`queued`, `requested_by` = the requesting
 participant), and call the harness `POST /runs` via `Harness::Client`. The `/runs` payload SHALL carry
-`requested_by` sourced from `ai_runs.requested_by`, `repo_path` set to the session worktree,
-`permission_mode: acceptEdits`, and the `allowed_tools` whitelist, per the frozen `harness-protocol`. The client
+`requested_by` sourced from `ai_runs.requested_by`, `repo_path` set to the session worktree, `lane`,
+`provider`, `resume_context`, and the run's optional scoping fields, per the frozen `harness-protocol`. The client
 SHALL respond to the caller without waiting for run completion (the run advances via ingested events).
 
 `Runs::Start` SHALL NOT itself emit the `run_started` event: per the frozen `harness-protocol`, the **harness**
@@ -39,8 +39,8 @@ run-scoped, `seq`-bearing event. Rails learns the run is live by ingesting that 
 
 - **WHEN** `Runs::Start` runs for a clean session worktree
 - **THEN** it creates the worktree, records `base_sha`, creates the `queued` run, and POSTs `/runs` with
-  `requested_by`, `repo_path` = the worktree, `permission_mode: acceptEdits`, and `allowed_tools` — WITHOUT
-  emitting its own `run_started` event
+  `requested_by`, `repo_path` = the worktree, `lane`, `provider` and `resume_context` — WITHOUT emitting its own
+  `run_started` event
 
 #### Scenario: run_started is the harness's event, carrying the requester
 
@@ -49,25 +49,27 @@ run-scoped, `seq`-bearing event. Rails learns the run is live by ingesting that 
   so the single `run_started` event (harness-emitted, run-scoped, `seq`-bearing) carries the requesting
   participant — Rails does not append a second one
 
-### Requirement: Reject severs claude_session_id; only revise resumes
+### Requirement: Reject severs the resumed context; only revise resumes
 
 `Runs::Start` SHALL accept a mode. On a **revise**, it SHALL supersede the prior run (transition it to
-`superseded`), keep the dirty worktree, and pass the prior `claude_session_id` to the harness so Claude resumes
-the session. On a **fresh** start following a reject, it SHALL NOT pass any `claude_session_id` — the next run
-begins a new Claude session, because the reverted worktree no longer matches the prior session's context. This
-realizes the reject-severs-chaining correctness rule.
+`superseded`), keep the dirty worktree, and send `resume_context: true` so the prior conversation is folded in.
+On a **fresh** start following a reject, it SHALL send `resume_context: false`, which the harness enforces as a
+surface BASELINE — the log is never deleted, and the next request starts folding after it. The rule is unchanged
+and only its carrier is: a per-run session id used to travel on the payload, and resumption is now by harness
+session plus lane. This realizes the reject-severs-chaining correctness rule; without it the next run's context
+believes reverted edits still exist.
 
-#### Scenario: Revise resumes the prior Claude session
+#### Scenario: Revise resumes the prior conversation
 
-- **WHEN** `Runs::Start` runs in revise mode against a run with a `claude_session_id`
-- **THEN** it transitions the prior run to `superseded`, keeps the dirty tree, and passes `claude_session_id` to
-  the harness so the session resumes
+- **WHEN** `Runs::Start` runs in revise mode against a prior run
+- **THEN** it transitions that run to `superseded`, keeps the dirty tree, and sends `resume_context: true` so the
+  harness folds the existing surface into the request
 
 #### Scenario: Fresh start after a reject does not resume
 
 - **WHEN** `Runs::Start` runs a fresh (non-revise) start after a prior run was rejected
-- **THEN** it does NOT pass `claude_session_id` to the harness, so a new Claude session begins against the
-  reverted worktree
+- **THEN** it sends `resume_context: false`, so the harness sets a new surface baseline and the run starts
+  against the reverted worktree with no memory of the reverted edits
 
 ### Requirement: Runs::Finalize transitions runs from ingested lifecycle events
 

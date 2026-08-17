@@ -11,6 +11,12 @@
 #   3. Every exported interception point has at least one real importer — a seam
 #      that cannot intercept must not remain in the tree presented as one
 #.
+#   4. The LIVING spec (openspec/specs) names no identifier this feature removed.
+#      Found the hard way: the living spec still specified `permission_mode`,
+#      `claude_session_id` and the Agent SDK long after all three were deleted,
+#      across ten capabilities, and nothing checked it because checks 1-3 only read
+#      the three guidance files. A capability spec that describes a removed field is
+#      the same defect as guidance naming an absent component.
 #
 # EXPECTED TO FAIL until the harness migration closes it out. The failures are a
 # worklist, not noise: a release gate verifies this script green.
@@ -35,6 +41,28 @@ FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|
 INTERCEPTION_POINTS=(
   harness/src/extensions/points.ts
 )
+
+# Identifiers this feature REMOVED. The living spec may still discuss them — it must do so in the
+# past tense, so a line is only flagged when it makes a POSITIVE claim (no negation marker on it).
+# Archived changes and the contracts CHANGELOG are exempt by scope: both are history, and a
+# changelog that could not name what it removed would be useless.
+RETIRED_IDENTIFIERS=(
+  permission_mode
+  permissionMode
+  claude_session_id
+  allowed_tools
+  SIDECAR_URL
+  'Sidecar::'
+  claude-agent-sdk
+  canUseTool
+)
+# `-w` is load-bearing above: `allowed_tools` is a substring of the CURRENT `disallowed_tools`, and a
+# fixed-string search reported four false positives on the requirement that replaced it.
+# A spec that EXPLAINS a removal wraps that passage in the same `doc-truth:ignore` markers checks
+# 1-3 use. No keyword heuristic: the first version of this check allowed any line near words like
+# "no longer", and promptly excused `409 if the run is no longer active` — a live route description
+# for a route that no longer exists. This file's own header makes that argument; I had to make the
+# mistake to believe it.
 
 failures=0
 unterminated_log="$(mktemp)"
@@ -76,6 +104,21 @@ readable() {
     /^[[:space:]]*<!-- doc-truth:ignore -->[[:space:]]*$/ { skip = 1; next }
     /^[[:space:]]*<!-- doc-truth:end -->[[:space:]]*$/    { skip = 0; next }
     !skip
+    END {
+      if (skip) {
+        printf "UNTERMINATED_IGNORE %s\n", file > "/dev/stderr"
+        exit 3
+      }
+    }
+  ' "$1" 2>>"${unterminated_log}"
+}
+
+# `readable`, but keeping each surviving line's ORIGINAL number so a finding can be pointed at.
+readable_numbered() {
+  awk -v file="$1" '
+    /^[[:space:]]*<!-- doc-truth:ignore -->[[:space:]]*$/ { skip = 1; next }
+    /^[[:space:]]*<!-- doc-truth:end -->[[:space:]]*$/    { skip = 0; next }
+    !skip { printf "%d:%s\n", NR, $0 }
     END {
       if (skip) {
         printf "UNTERMINATED_IGNORE %s\n", file > "/dev/stderr"
@@ -137,6 +180,18 @@ for point in "${INTERCEPTION_POINTS[@]}"; do
   fi
 done
 
+echo
+echo "== 4. The living spec names nothing that was removed ==============="
+for ident in "${RETIRED_IDENTIFIERS[@]}"; do
+  while IFS= read -r spec; do
+    while IFS=: read -r line text; do
+      [[ -z "${line:-}" ]] && continue
+      fail "${spec}:${line} states \`${ident}\` as current, but it was removed by this feature"
+      note "$(cut -c1-110 <<<"${text#"${text%%[![:space:]]*}"}")"
+    done < <(readable_numbered "$spec" | grep -w -F -- "$ident" || true)
+  done < <(find openspec/specs -name spec.md | sort)
+done
+
 # Report a stray marker as a failure of its own: a suppressed region is worse than a
 # reported discrepancy, because it looks like success.
 while read -r _tag doc; do
@@ -150,4 +205,4 @@ if (( failures > 0 )); then
   exit 1
 fi
 
-printf '\033[32mdoc-truth OK\033[0m — guidance matches the tree, every interception point has an importer.\n'
+printf '\033[32mdoc-truth OK\033[0m — guidance matches the tree, every interception point has an importer, the living spec names nothing removed.\n'

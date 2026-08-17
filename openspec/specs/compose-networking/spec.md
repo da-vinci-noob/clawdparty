@@ -124,10 +124,10 @@ The compose file SHALL declare an explicit restart posture for **every** service
 
 ### Requirement: Claude session JSONL survives container restarts via the host mount
 
-Because `~/.claude` is bind-mounted from the host, the Claude session JSONL under `~/.claude/projects/` SHALL persist on the host across `harness` container restarts, so after a restart the host can resume a run via `claude_session_id`.
+The harness is a HOST PROCESS, so nothing in its credential or record path is mounted: it reads `~/.claude` in place. Session continuity SHALL come from the harness's own per-session store rather than from a vendor JSONL — the store is the authority and Postgres `events` is a projection of it, so a harness restart resumes from the store's position marker.
 
 #### Scenario: Session JSONL persists across a harness restart
 
 - **WHEN** the `harness` container restarts
-- **THEN** the Claude session JSONL in the host's `~/.claude/projects/` is still present (it lives on the host), enabling `claude_session_id` resume
+- **THEN** the Claude session JSONL in the host's `~/.claude/projects/` is still present (it lives on the host), enabling resumption to resume
 

@@ -143,6 +143,38 @@ RSpec.describe('Run control') do
       expect(response.parsed_body['errors'].first['message']).to(be_present)
     end
 
+    # The case the spec above could not catch, found by running the openspec change's own manual
+    # scenario against the live stack: model resolution reaches a PROVIDER, and it ran first — so on
+    # a host whose default provider serves nothing, an archived session was refused with the
+    # provider's 422 ("lists no models this host can serve") instead of 409. Wrong reason, after a
+    # round trip nobody needed, for a condition knowable from the database alone. Same argument the
+    # lane check already makes one line above it in the controller.
+    it 'stays 409 even when the default provider cannot resolve a model' do
+      join_as(session, role: 'owner')
+      session.update!(status: 'archived')
+      allow(Runs::ResolveModel).to(receive(:call)
+        .and_raise(Runs::ResolveModel::Unresolvable, 'provider "anthropic-direct" lists no models'))
+
+      expect { post("/api/sessions/#{session.id}/runs", params: { prompt: 'go' }) }
+        .not_to(change(AiRun, :count))
+      expect(response).to(have_http_status(:conflict))
+      expect(response.parsed_body['errors'].first['message']).to(match(/archiv/i))
+    end
+
+    it 'does not consult a provider at all once the session is archived' do
+      join_as(session, role: 'owner')
+      session.update!(status: 'archived')
+
+      # The round trip is the cost, not just the wrong message. A spy, so the assertion is about
+      # what was CALLED rather than a pre-set expectation the archived check short-circuits.
+      allow(Runs::ResolveModel).to(receive(:call))
+
+      post("/api/sessions/#{session.id}/runs", params: { prompt: 'go' })
+
+      expect(Runs::ResolveModel).not_to(have_received(:call))
+      expect(response).to(have_http_status(:conflict))
+    end
+
     it 'surfaces a harness transport failure as 502 (not an unhandled 500) and leaves no queued run' do
       join_as(session, role: 'owner')
       allow_any_instance_of(Harness::Client).to(receive(:start_run)

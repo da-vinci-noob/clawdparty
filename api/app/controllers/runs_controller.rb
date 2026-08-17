@@ -21,6 +21,13 @@ class RunsController < ApplicationController
     # BEFORE model resolution, which reaches a provider over the network. A malformed lane is a
     # client error knowable from the request alone, and resolving a model first meant an invalid
     # lane surfaced as a provider failure — the wrong error, after a round trip nobody needed.
+    #
+    # An archived session is the same case and was making the same mistake: a closed session on a
+    # host whose default provider serves nothing was refused with "lists no models" instead of
+    # "archived". It goes FIRST because a closed session makes the rest of the request moot.
+    # `Runs::Start` keeps its own check as the invariant for every other caller.
+    raise(Runs::Start::SessionArchived) if session.archived?
+
     validate_lane!
     result = start_run!(session, participant)
     render(json: { id: result.ai_run.id.to_s, status: result.ai_run.status }, status: :accepted)

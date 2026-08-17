@@ -5,7 +5,7 @@ TBD - created by archiving change harness-foundation. Update Purpose after archi
 ## Requirements
 ### Requirement: Normalizer is the only SDK-aware file
 
-`harness/src/normalizer.ts` SHALL be the **only** file in the harness that touches raw `@anthropic-ai/claude-agent-sdk` message shapes. The server (`index.ts`), transport (`transport.ts`), and permissions (`permissions.ts`) SHALL deal only in Contract-1 event envelopes and SHALL NOT reference raw SDK message types. This contains SDK version or shape surprises to one file.
+`harness/src/loop/normalize.ts` SHALL be the **only** file in the harness that maps a `ProviderEvent` to a Contract-1 event. The constraint is unchanged and its subject moved: the vendor agent SDK is gone, each provider adapter is the only code permitted to import its own vendor SDK, and an unrecognised shape becomes `ai_raw` rather than a crash. The server (`index.ts`), transport (`transport.ts`), and permissions (`permissions.ts`) SHALL deal only in Contract-1 event envelopes and SHALL NOT reference raw SDK message types. This contains SDK version or shape surprises to one file.
 
 #### Scenario: Only the normalizer references raw SDK shapes
 

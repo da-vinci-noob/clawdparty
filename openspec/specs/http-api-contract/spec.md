@@ -5,9 +5,9 @@ TBD - created by archiving change freeze-interface-contracts. Update Purpose aft
 ## Requirements
 ### Requirement: REST endpoint surface
 
-The contract `docs/contracts/http_api.md` SHALL enumerate the client-facing REST endpoints and their roles, including at least: session create/join, invite generation/use, run start (`POST /api/sessions/:id/runs`), follow-up and interrupt, event backfill (`GET /api/sessions/:id/events?after=<cursor>`), diff retrieval (`GET /api/runs/:id/diff`), changeset approve/reject, and file tree/content reads. Diffs SHALL be served over REST, never over cable.
+The contract `docs/contracts/http_api.md` SHALL enumerate the client-facing REST endpoints and their roles, including at least: session create/join, **the per-user session list (`GET /api/sessions`)**, **owner session archive (`POST /api/sessions/:id/archive`)**, invite generation/use, run start (`POST /api/sessions/:id/runs`), follow-up and interrupt, event backfill (`GET /api/sessions/:id/events?after=<cursor>`), diff retrieval (`GET /api/runs/:id/diff`), changeset approve/reject, and file tree/content reads. Diffs SHALL be served over REST, never over cable.
 
-The contract SHALL pin both the success and error response shapes for the client surface, establishing the convention once rather than re-specifying every endpoint. Event backfill SHALL return `200` with an ordered array of Contract-1 event envelopes, every element having `id` greater than the `<cursor>`, in ascending `id` order. A request from a participant whose role is not permitted the action (per the role matrix below) SHALL be denied with `403` and a body of the form `{ errors: [...] }`, matching the `rescue_from` → `render json: { errors }` convention; this denial shape applies to every role-gated endpoint, making the role matrix testable. Each element of `errors` SHALL be an object with at least a human-readable `message` string field; additional fields (e.g. a `code`) MAY be added additively.
+The contract SHALL pin both the success and error response shapes for the client surface, establishing the convention once rather than re-specifying every endpoint. Event backfill SHALL return `200` with an ordered array of Contract-1 event envelopes, every element having `id` greater than the `<cursor>`, in ascending `id` order. **`GET /api/sessions` SHALL return `200` with an ordered array of the caller's session rows (shape defined by the `session-history` capability); it is a per-user index gated only by a valid `clawd_uid`, not scoped to one session, so an unauthenticated request is `404` (the shared `require_user` anti-enumeration posture). `POST /api/sessions/:id/archive` SHALL return `200` with `{ id, status: "archived" }` on success.** A request from a participant whose role is not permitted the action (per the role matrix below) SHALL be denied with `403` and a body of the form `{ errors: [...] }`, matching the `rescue_from` → `render json: { errors }` convention; this denial shape applies to every role-gated endpoint, making the role matrix testable. Each element of `errors` SHALL be an object with at least a human-readable `message` string field; additional fields (e.g. a `code`) MAY be added additively.
 
 #### Scenario: Event backfill is cursor-based over REST
 
@@ -23,6 +23,16 @@ The contract SHALL pin both the success and error response shapes for the client
 
 - **WHEN** a participant whose role is not permitted the requested action calls a role-gated endpoint
 - **THEN** the server responds `403` with a body of the form `{ errors: [...] }`, regardless of what the client UI shows
+
+#### Scenario: The session list is a per-user index over REST
+
+- **WHEN** a user with a valid `clawd_uid` cookie calls `GET /api/sessions`
+- **THEN** the server responds `200` with an ordered array of that user's session rows (host or participant), and an unauthenticated request instead receives `404` with `{ errors: [...] }`
+
+#### Scenario: Archive returns the terminal status on success
+
+- **WHEN** an owner calls `POST /api/sessions/:id/archive`
+- **THEN** the server responds `200` with `{ id, status: "archived" }`
 
 ### Requirement: Unknown resource and non-participant access are 404, not 403
 
@@ -64,19 +74,26 @@ The contract SHALL define the 4-role matrix as an explicit action×role table (r
 | action | owner | editor | reviewer | viewer |
 |---|:---:|:---:|:---:|:---:|
 | view / event backfill / read diffs & files | ✓ | ✓ | ✓ | ✓ |
+| list own sessions (`GET /api/sessions`) | ✓ | ✓ | ✓ | ✓ |
 | send `chat_message` | ✓ | ✓ | ✓ | ✓ |
 | create / update tasks | ✓ | ✓ | ✓ | ✗ |
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
-| approve / reject changeset | ✓ | ✓ | ✓ | ✗ |
+| approve / reject changeset | ✓ | ✗ | ✗ | ✗ |
+| archive session | ✓ | ✗ | ✗ | ✗ |
 
-(owner = everything incl. runs + approve/reject + invites/archive; editor = runs/follow-ups/interrupt + tasks/chat + approve/reject; reviewer = tasks/chat/view + approve/reject; viewer = view/chat. Approve/reject is available to every role except viewer.)
+(Per `docs/PLAN.md §9`: owner = everything incl. approve/reject; editor = runs/follow-ups/interrupt/tasks/chat; reviewer = tasks/chat/view; viewer = view/chat. The session list is not session-scoped — it is a per-user index gated only by a valid identity, so every role that can hold a cookie may call it for their own sessions; archive is owner-only, alongside approve/reject.)
 
 The contract SHALL state that the server enforces this matrix on every endpoint and that cable subscriptions independently verify participantship; the client only hides buttons.
 
-#### Scenario: Every role except viewer may approve or reject
+#### Scenario: Only owner may approve or reject
 
-- **WHEN** an owner, editor, or reviewer approves or rejects an awaiting-review changeset
-- **THEN** the server permits it, while a viewer's attempt is denied `403` regardless of what the client UI shows
+- **WHEN** a non-owner attempts to approve or reject a changeset
+- **THEN** the server denies the action regardless of what the client UI shows
+
+#### Scenario: Only owner may archive a session
+
+- **WHEN** a non-owner participant attempts `POST /api/sessions/:id/archive`
+- **THEN** the server denies the action with `403 { errors: [...] }` regardless of what the client UI shows
 
 #### Scenario: Cable subscription verifies participantship
 
@@ -100,4 +117,32 @@ The contract SHALL define the gap-free catch-up sequence: subscribe to cable fir
 
 - **WHEN** a client joins mid-run
 - **THEN** it subscribes to cable first, buffers, backfills via REST, drains the buffer applying durable events only when `id` is greater than the max backfilled `id` while always applying ephemeral (null-`id`) events, and transitions to live with no missed or duplicated events
+
+### Requirement: Run capability discovery endpoints
+
+The contract `docs/contracts/http_api.md` SHALL enumerate two read-only, **session-scoped** discovery endpoints that Rails serves by proxying the harness (cached like `GET /api/models`, with the repo path in the cache key): `GET /api/sessions/:id/connectors` and `GET /api/sessions/:id/skills`. The built-in **tools** set is a shared constant (not an endpoint). Each endpoint SHALL pin its success shape — `200` with `{ connectors: [{ name, transport }], source }` and `{ skills: [{ name, description }], source }` respectively — SHALL return an empty list with an unavailable `source` (still `200`) when the underlying config is missing/unparseable, and SHALL respond `502` when the harness is unreachable (matching `GET /api/models`). These endpoints gate on participantship (any participant may view); a non-participant/cross-session request SHALL be refused `404 { errors: [...] }` per the anti-enumeration convention. No connector command/url/headers/tokens SHALL ever appear in these responses.
+
+#### Scenario: Connectors/skills are discoverable per session over REST
+
+- **WHEN** a participant calls `GET /api/sessions/:id/connectors` or `GET /api/sessions/:id/skills`
+- **THEN** the server responds `200` with the pinned `{ …, source }` shape, resolved against that session's repository path
+
+#### Scenario: Discovery is available to any participant but not cross-session
+
+- **WHEN** a non-participant (or cross-session requester) calls a discovery endpoint
+- **THEN** the server responds `404 { errors: [...] }`, indistinguishable from a nonexistent resource
+
+### Requirement: Run start accepts additive capability-selection fields
+
+The contract SHALL document that `POST /api/sessions/:id/runs` accepts three additive, optional body fields alongside the existing `prompt`/`model`: `disallowed_tools` (string[]), `connectors` (string[]), and `skills` (`"all"` | string[]). Omitting a field SHALL preserve the prior behavior. A value outside the discovered/known set SHALL be rejected with `422 { errors: [...] }` and start no run; setting these fields SHALL be gated to run-capable roles (owner/editor), so a reviewer/viewer attempt SHALL be denied `403 { errors: [...] }` per the four-role matrix. On success the endpoint SHALL return its existing `202` shape unchanged.
+
+#### Scenario: Capability fields are optional and validated
+
+- **WHEN** an editor starts a run with valid `disallowed_tools`/`connectors`/`skills`
+- **THEN** the server responds `202` with the existing `{ id, status }` shape, and an unknown value instead yields `422 { errors: [...] }` with no run started
+
+#### Scenario: Capability selection follows the run role gate
+
+- **WHEN** a reviewer or viewer sends `POST /api/sessions/:id/runs` (with or without capability fields)
+- **THEN** the server responds `403 { errors: [...] }`, consistent with the start-run row of the role matrix
 

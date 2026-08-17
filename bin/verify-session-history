@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+// openspec `session-history-and-archive` task 5.3 — the manual end-to-end, run against the live
+// stack instead of by hand: the per-user session list, its ordering and badges, and archive as a
+// hard close.
+//
+// Usage: bin/verify-session-history [base-url]
+
+const BASE = process.argv[2] ?? "http://localhost:3000";
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+function cookieFrom(response) {
+  const jar = (response.headers.getSetCookie?.() ?? []).find((c) => c.startsWith("clawd_uid="));
+  if (!jar) throw new Error("no clawd_uid cookie in response");
+  return jar.split(";")[0];
+}
+
+async function call(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  return { status: response.status, response, json: text ? JSON.parse(text) : null };
+}
+
+async function createSession(title, name, cookie) {
+  const response = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify({ title, name, mode: "chat" }),
+  });
+  if (!response.ok) throw new Error(`create → ${response.status}: ${await response.text()}`);
+  const json = await response.json();
+  return { sessionId: json.session_id, cookie: cookie ?? cookieFrom(response) };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  console.log(`\nsession-history-and-archive 5.3 — against ${BASE}\n`);
+
+  // Two sessions the caller HOSTS. The cookie from the first is reused, so both belong to one user
+  // — creating a second session with a fresh cookie would make two users and prove nothing.
+  const first = await createSession("history check A", "Historian", undefined);
+  const second = await createSession("history check B", "Historian", first.cookie);
+  const mine = first.cookie;
+
+  // A third the caller only JOINED, hosted by someone else — the `owned: false` half of the list.
+  const other = await createSession("history check C (someone else's)", "Someone Else", undefined);
+  const { json: invite } = await call(`/api/sessions/${other.sessionId}/invites`, {
+    method: "POST",
+    cookie: other.cookie,
+    body: { role: "reviewer" },
+  });
+  const joined = await call("/api/participants", {
+    method: "POST",
+    body: { session_id: other.sessionId, token: invite.token, name: "Historian" },
+  });
+  check(joined.status === 201 || joined.status === 200, "joined a third session as reviewer", `HTTP ${joined.status}`);
+
+  const { status, json: list } = await call("/api/sessions", { cookie: mine });
+  check(status === 200, "GET /api/sessions answers 200 to a valid cookie");
+  const byId = new Map(list.map((row) => [row.id, row]));
+  for (const [id, label] of [
+    [first.sessionId, "hosted A"],
+    [second.sessionId, "hosted B"],
+    [other.sessionId, "joined C"],
+  ]) {
+    check(byId.has(String(id)), `the list contains ${label}`);
+  }
+
+  check(byId.get(String(first.sessionId))?.owned === true, "a hosted session reports owned:true");
+  check(byId.get(String(other.sessionId))?.owned === false, "a joined session reports owned:false");
+  check(
+    byId.get(String(other.sessionId))?.my_role === "reviewer",
+    "my_role is the caller's OWN role, not the host's",
+    byId.get(String(other.sessionId))?.my_role,
+  );
+  check(
+    byId.get(String(first.sessionId))?.status === "active",
+    "a live session's badge reads active",
+  );
+
+  // Newest-first by last_activity_at, which is what the ordering requirement is about.
+  const stamps = list.map((row) => row.last_activity_at);
+  check(
+    stamps.every((s, i) => i === 0 || stamps[i - 1] >= s),
+    "ordered by last_activity_at DESCENDING",
+    `${stamps.length} rows`,
+  );
+
+  // Activity advances the ordering key: post a message to the OLDEST session and it must move to
+  // the front. Static creation order would pass the check above and fail this one.
+  const oldest = String(first.sessionId);
+  await sleep(1100);
+  await call(`/api/sessions/${oldest}/messages`, {
+    method: "POST",
+    cookie: mine,
+    body: { body: "activity on the oldest session" },
+  });
+  const { json: reordered } = await call("/api/sessions", { cookie: mine });
+  check(reordered[0].id === oldest, "appending an event moves its session to the front", `first=${reordered[0].id}`);
+
+  // Archive is a HARD close, and owner-only.
+  const nonOwner = await call(`/api/sessions/${other.sessionId}/archive`, {
+    method: "POST",
+    cookie: mine,
+  });
+  check(nonOwner.status === 403, "a reviewer archiving someone else's session gets 403", `HTTP ${nonOwner.status}`);
+
+  const archived = await call(`/api/sessions/${second.sessionId}/archive`, {
+    method: "POST",
+    cookie: mine,
+  });
+  check(archived.status === 200, "the owner archives their own session", `HTTP ${archived.status}`);
+  check(archived.json?.status === "archived", "and the response says so", JSON.stringify(archived.json));
+
+  const { json: afterArchive } = await call("/api/sessions", { cookie: mine });
+  check(
+    afterArchive.find((r) => r.id === String(second.sessionId))?.status === "archived",
+    "the list badge flips to archived rather than the row disappearing",
+  );
+
+  const refused = await call(`/api/sessions/${second.sessionId}/runs`, {
+    method: "POST",
+    cookie: mine,
+    body: { prompt: "should never start" },
+  });
+  check(refused.status === 409, "starting a run on an archived session is refused with 409", `HTTP ${refused.status}`);
+
+  const again = await call(`/api/sessions/${second.sessionId}/archive`, {
+    method: "POST",
+    cookie: mine,
+  });
+  check(again.status === 200, "archiving twice is a 200 no-op, not an error", `HTTP ${again.status}`);
+
+  const anonymous = await call("/api/sessions");
+  check(anonymous.status === 404, "an unauthenticated list is 404, not 401 (anti-enumeration)", `HTTP ${anonymous.status}`);
+
+  console.log(`\n${failures === 0 ? "PASS" : `FAIL (${failures})`}\n`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}\n`);
+  process.exit(1);
+});

@@ -5,28 +5,31 @@ TBD - created by archiving change harness-runner. Update Purpose after archive.
 ## Requirements
 ### Requirement: POST /runs starts a query() in the worktree and returns the frozen success shape
 
-`runner.ts` SHALL accept `POST /runs`, replacing the Week-1 `501` stub with the frozen `harness-protocol`
-success shape `202 { run_id, status: "running" }`, and start a real `@anthropic-ai/claude-agent-sdk` `query()`
-with `cwd` pinned to the session worktree (`repo_path` from the payload), `permission_mode: acceptEdits`, the
-`allowed_tools` whitelist, and the optional `claude_session_id` for resume. The route signature SHALL be
-unchanged from the skeleton. A `POST /runs` while a run is already active SHALL return `409` and SHALL NOT start
-a second run.
+The harness SHALL accept `POST /runs` with the frozen `harness-protocol` success shape
+`202 { run_id, status: "running" }`, and SHALL run its OWN agent loop against a provider adapter — no vendor
+agent SDK is involved, and `runner.ts` is deleted. `cwd` SHALL be pinned to the session worktree (`repo_path`
+from the payload). Whether the run inherits the session's prior conversation SHALL be carried by the boolean
+`resume_context`, which the harness enforces as a surface BASELINE: the log is never deleted, and the next
+request starts folding after it. A `POST /runs` for a LANE that already has an active run SHALL return `409`
+and SHALL NOT start a second run in that lane.
 
 #### Scenario: Accepted start returns 202 and starts the query in the worktree
 
 - **WHEN** Rails POSTs a valid `/runs` with no run active
-- **THEN** the runner responds `202 { run_id, status: "running" }` and starts `query()` with `cwd` = the session
-  worktree, `permission_mode: acceptEdits`, and the `allowed_tools` whitelist
+- **THEN** the harness responds `202 { run_id, status: "running" }` and runs its loop with `cwd` = the session
+  worktree and the run's resolved tool set
 
 #### Scenario: Second concurrent start is rejected with 409
 
 - **WHEN** a `POST /runs` arrives while a run is already active
 - **THEN** the runner responds `409` and does not start a second run
 
-#### Scenario: Optional claude_session_id resumes a session
+#### Scenario: resume_context folds the prior conversation
 
-- **WHEN** `POST /runs` carries a `claude_session_id`
-- **THEN** the runner starts `query()` resuming that session (used by revise; absent on a fresh post-reject start)
+- **WHEN** `POST /runs` carries `resume_context: true`
+- **THEN** the harness folds the session's existing surface into the request (used by revise and by a fresh
+  follow-up); with `resume_context: false` it starts folding after a new baseline, which is how a reject severs
+  the context without deleting the log
 
 ### Requirement: run_started is emitted with the requesting participant as actor
 
@@ -100,9 +103,10 @@ The runner SHALL preserve three guards already frozen by upstream capabilities, 
 cannot drift: (a) ephemeral events (`ai_text_delta`/`presence_changed`) SHALL NOT consume the per-run `seq` —
 `seq` is assigned only to durable run-scoped events (`event-envelope`); (b) the runner SHALL NOT create or
 relocate the worktree — Rails creates it and the runner only uses the provided `repo_path` as `cwd`
-(`harness-protocol` / `worktree-management`); (c) `canUseTool` SHALL remain the allow-all MVP stub and the
-runner SHALL introduce NO shell input path (`claude-auth-passthrough`), preserving the read-only-terminal
-invariant.
+(`harness-protocol` / `worktree-management`); (c) the harness SHALL introduce NO shell input path
+(`claude-auth-passthrough`), preserving the read-only-terminal invariant. The gate that may refuse a
+model-directed command is the `tool:before` extension point; the unwired allow-all hook that used to be named
+here was deleted, because a seam that cannot intercept must not exist.
 
 #### Scenario: Ephemeral events do not consume seq during a live run
 
@@ -117,7 +121,7 @@ invariant.
 
 #### Scenario: No shell input path is introduced
 
-- **WHEN** the runner is in place
-- **THEN** `canUseTool` remains allow-all and no path for input to a shell is added (the terminal pane stays a
-  read-only replay of Claude's Bash events)
+- **WHEN** the harness is in place
+- **THEN** no path for input to a shell exists anywhere (the terminal pane stays a read-only replay of Claude's
+  Bash events), and the only thing that may refuse a command is `tool:before`
 

@@ -30,22 +30,30 @@ The application SHALL configure three PostgreSQL databases — `primary`, `queue
 
 ### Requirement: Eight-table data model with enums
 
-The schema SHALL define exactly these eight tables: `users` (name); `sessions` (title, objective, status, repository_path, worktree_path, branch_name, base_branch, host_id); `invites` (token_digest, role, expires_at); `participants` (session, user, role, last_seen_at); `tasks` (title, status, owner, position); `ai_runs` (status, prompt, claude_session_id, model, base_sha, total_cost_usd, usage, diff_stats, requested_by, reviewed_by); `messages` (session, author participant, kind, body); and `events` (session_id, event_type, actor_kind, actor_participant_id, ai_run_id, seq, payload). `sessions.status` SHALL be an enum of `active`/`archived` (a minimal session-lifecycle set that MAY be extended additively in a later change); `participants.role` SHALL be an enum of `owner`/`editor`/`reviewer`/`viewer`; `tasks.status` SHALL be an enum of `todo`/`doing`/`review`/`done`/`blocked`; `messages.kind` SHALL be an enum of `user`/`claude`/`system`.
+The schema SHALL define exactly these eight tables: `users` (name); `sessions` (title, objective, status, repository_path, worktree_path, branch_name, base_branch, host_id, **last_activity_at**); `invites` (token_digest, role, expires_at); `participants` (session, user, role, last_seen_at); `tasks` (title, status, owner, position); `ai_runs` (status, prompt, lane, model, base_sha, total_cost_usd, usage, diff_stats, requested_by, reviewed_by); `messages` (session, author participant, kind, body); and `events` (session_id, event_type, actor_kind, actor_participant_id, ai_run_id, seq, payload). `sessions.status` SHALL be an enum of `active`/`archived` (a minimal session-lifecycle set that MAY be extended additively in a later change); `participants.role` SHALL be an enum of `owner`/`editor`/`reviewer`/`viewer`; `tasks.status` SHALL be an enum of `todo`/`doing`/`review`/`done`/`blocked`; `messages.kind` SHALL be an enum of `user`/`claude`/`system`.
+
+`sessions.last_activity_at` SHALL be a timestamp recording the session's most recent activity, used to order the per-user session list (`session-history`). It SHALL be set on session creation (defaulting to the session's `created_at`) and SHALL be advanced to the current time whenever an event is appended for the session (in the same transaction as the append — see the append-only requirement below). Existing sessions SHALL be backfilled to their `created_at` by the migration so ordering is well-defined without a data job.
 
 #### Scenario: All eight tables exist with their enums
 
 - **WHEN** the schema is loaded
 - **THEN** the `users`, `sessions`, `invites`, `participants`, `tasks`, `ai_runs`, `messages`, and `events` tables exist
 - **AND** `sessions.status`, `participants.role`, `tasks.status`, and `messages.kind` are constrained to their enumerated value sets (`sessions.status` to `active`/`archived`)
+- **AND** `sessions.last_activity_at` exists as a timestamp column
 
 #### Scenario: Each model has one minimal factory
 
 - **WHEN** a model's FactoryBot factory is used in a spec
 - **THEN** exactly one minimal factory per model exists, using `sequence` for any uniqueness, and it does not eagerly create unrelated associations
 
+#### Scenario: Appending an event advances the session's last_activity_at
+
+- **WHEN** an event is appended for a session
+- **THEN** the session's `last_activity_at` is advanced to the append time within the same transaction as the event insert
+
 ### Requirement: ai_runs state machine value set
 
-The `ai_runs.status` enum SHALL include all nine states of the run state machine: `queued`, `running`, `awaiting_review`, `approved`, `rejected`, `superseded`, `completed_clean`, `failed`, and `interrupted`. The full value set SHALL exist in Week 1 even though run-orchestration transitions are deferred, so that the reject-severs-`claude_session_id`-chaining rule and the revise-supersedes rule can be encoded later without a schema change.
+The `ai_runs.status` enum SHALL include all nine states of the run state machine: `queued`, `running`, `awaiting_review`, `approved`, `rejected`, `superseded`, `completed_clean`, `failed`, and `interrupted`. The full value set SHALL exist in Week 1 even though run-orchestration transitions are deferred, so that the reject-severs-the-resumed-context rule and the revise-supersedes rule can be encoded later without a schema change.
 
 `ai_runs.status` SHALL be stored as a PostgreSQL native enum type (NOT an integer-backed Rails enum), so the partial unique index predicate `WHERE status IN ('queued','running','awaiting_review')` matches the stored string values directly. *Why:* the predicate compares against the string literals `'queued'`/`'running'`/`'awaiting_review'`; an integer-backed Rails enum would store `0`/`1`/`2`, the predicate would never match, and the one-active-run invariant would silently fail to enforce. Enums NOT referenced by any database constraint or index predicate (`participants.role`, `tasks.status`, `messages.kind`) MAY use string-backed Rails enums; the rule above binds only enums named in a `WHERE`/`CHECK` clause.
 
@@ -132,11 +140,11 @@ The frozen event-envelope pins `actor.id`, `session_id`, and `ai_run_id` as STRI
 
 ### Requirement: Column nullability posture separates W2-only fields from structural columns
 
-The W2-only `ai_runs` columns — `base_sha`, `claude_session_id`, `reviewed_by`, `total_cost_usd`, `usage`, and `diff_stats` — SHALL be nullable so that the Week-1 replay/seed path can create runs without populating run-orchestration data that does not yet exist. The identity, enum, and structural columns — `ai_runs.status`, `ai_runs.prompt`, `ai_runs.model`, `events.session_id`, `events.event_type`, `events.actor_kind`, `participants.role`, and the foreign keys that always exist — SHALL be `NOT NULL`, so the load-bearing constraints and indexes always have a value to operate on. `ai_runs.prompt` and `ai_runs.model` are conceptually always-present (like `status`): a run is always requested with a prompt and a model, so they are structural NOT NULL rather than W2-only nullable.
+The W2-only `ai_runs` columns — `base_sha`, `reviewed_by`, `total_cost_usd`, `usage`, and `diff_stats` — SHALL be nullable so that the Week-1 replay/seed path can create runs without populating run-orchestration data that does not yet exist. The identity, enum, and structural columns — `ai_runs.status`, `ai_runs.prompt`, `ai_runs.model`, `events.session_id`, `events.event_type`, `events.actor_kind`, `participants.role`, and the foreign keys that always exist — SHALL be `NOT NULL`, so the load-bearing constraints and indexes always have a value to operate on. `ai_runs.prompt` and `ai_runs.model` are conceptually always-present (like `status`): a run is always requested with a prompt and a model, so they are structural NOT NULL rather than W2-only nullable.
 
 #### Scenario: A W1 run is created with W2-only columns null
 
-- **WHEN** the Week-1 replay/seed path creates an `ai_run` without `base_sha`, `claude_session_id`, `reviewed_by`, `total_cost_usd`, `usage`, or `diff_stats`
+- **WHEN** the Week-1 replay/seed path creates an `ai_run` without `base_sha`, `reviewed_by`, `total_cost_usd`, `usage`, or `diff_stats`
 - **THEN** the run is persisted successfully with those W2-only columns null
 
 #### Scenario: Structural columns reject null

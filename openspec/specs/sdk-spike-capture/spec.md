@@ -5,12 +5,19 @@ TBD - created by archiving change sdk-message-spike. Update Purpose after archiv
 ## Requirements
 ### Requirement: Spike harness runs a real query() using the host's inherited login
 
-The harness SHALL contain a spike harness that runs a real `@anthropic-ai/claude-agent-sdk` `query()` against
-a throwaway git repository bind-mounted at `/repo`, exercising a representative run: assistant text, thinking,
-at least one file-editing tool call, at least one Bash command, and run completion/result. The harness SHALL
-authenticate using the host developer's inherited Claude login (the SDK auto-detects from the passed-through
-environment and read-only mounts), and SHALL contain no app-owned credential and no auth-method selection,
-consistent with the `claude-auth-passthrough` capability.
+The event taxonomy SHALL be derived from a real captured run rather than from documentation: a spike SHALL
+exercise assistant text, thinking, at least one file-editing tool call, at least one Bash command, and
+completion, against a throwaway git repository, and its captured output SHALL be what the taxonomy is built
+from. The spike SHALL authenticate using the host developer's inherited Claude login and SHALL contain no
+app-owned credential and no auth-method selection, consistent with the `claude-auth-passthrough` capability.
+
+<!-- doc-truth:ignore -->
+HISTORICAL, and kept for the derivation rule above rather than for its mechanism. The M0 spike ran a real
+`@anthropic-ai/claude-agent-sdk` `query()` in a container against `/repo`; that dependency is gone — the harness
+owns the loop and vendor SDKs are provider adapters behind one contract. What survives is why
+`packages/contracts/fixtures/sample_run.jsonl` is REGENERATED from a real harness run and never hand-edited.
+Nothing in the tree implements the original mechanism today, by design.
+<!-- doc-truth:end -->
 
 #### Scenario: Spike authenticates via the host login with no app-owned credential
 

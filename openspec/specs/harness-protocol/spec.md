@@ -5,9 +5,9 @@ TBD - created by archiving change freeze-interface-contracts. Update Purpose aft
 ## Requirements
 ### Requirement: Rails-to-harness run control endpoints
 
-The contract `docs/contracts/harness_protocol.md` SHALL define the Rails→harness control surface: `POST /runs`, `POST /runs/:id/messages`, `POST /runs/:id/interrupt`, `POST /runs/:id/permission_mode`, and `GET /healthz`. `POST /runs` SHALL carry at least `run_id`, `session_id`, `repo_path` (the session worktree), `prompt`, `requested_by` (the originating participant id, which the harness stamps as `actor.id` on the `run_started` event), optional `claude_session_id`, `model`, `max_turns`, `permission_mode` (an allowlist value — `plan`, `acceptEdits` (the default when omitted), or `bypassPermissions`), and an `allowed_tools` whitelist, and SHALL return `409` when a run is already active. `POST /runs/:id/messages` SHALL carry a body of `{ message, requested_by }` — the follow-up text and the originating participant id — and SHALL push the follow-up into the live streaming-input iterable without respawning the run; `requested_by` is the attribution carried onto any follow-up-driven event's `actor.id`. `POST /runs/:id/interrupt` SHALL carry a body of `{ requested_by }` — the participant id that initiated the interrupt — so the resulting `run_interrupted` event is attributed to that user (interrupt is a human action, unlike the system-attributed `run_finished`/`run_failed`). `POST /runs/:id/permission_mode` SHALL carry a body of `{ permission_mode, requested_by }` and SHALL switch the active run's permission mode in-session (via the SDK query handle) without respawning the run — the mechanism behind the plan→execute flow. `GET /healthz` SHALL report active runs.
+The contract `docs/contracts/harness_protocol.md` SHALL define the Rails→harness control surface: `POST /runs`, `POST /runs/:id/messages`, `POST /runs/:id/interrupt`, `GET /runs`, and `GET /healthz`. `POST /runs` SHALL carry at least `run_id`, `session_id`, `repo_path` (the session worktree), `prompt`, `requested_by` (the originating participant id, which the harness stamps as `actor.id` on the `run_started` event), `lane`, `provider`, `resume_context` (a boolean, replacing the run-carried session id), `model`, and the optional per-run scoping fields, and SHALL return `409` when that LANE already has an active run. `POST /runs/:id/messages` SHALL carry a body of `{ message, requested_by }` — the follow-up text and the originating participant id — and SHALL push the follow-up into the live streaming-input iterable without respawning the run; `requested_by` is the attribution carried onto any follow-up-driven event's `actor.id`. `POST /runs/:id/interrupt` SHALL carry a body of `{ requested_by }` — the participant id that initiated the interrupt — so the resulting `run_interrupted` event is attributed to that user (interrupt is a human action, unlike the system-attributed `run_finished`/`run_failed`). `GET /healthz` SHALL report active runs.
 
-The contract SHALL pin the success (2xx) response shape of each endpoint, not only the errors — for a frozen wire seam the success paths are as load-bearing as the failures, and `sample_run.jsonl` only covers the event stream, not these RPC responses. `POST /runs` SHALL return `202 Accepted` with `{ run_id, status: "running" }` (the run proceeds asynchronously; events arrive via the callback). `POST /runs/:id/messages` and `POST /runs/:id/interrupt` SHALL return `200` with `{ run_id, accepted: true }` (and `404`/`409` when the run is unknown or not interruptible). `POST /runs/:id/permission_mode` SHALL return `200` with `{ run_id, permission_mode }` (the applied mode), `404` when the run is unknown, and `409` when the run is no longer active (so it cannot be switched — the caller falls back to a fresh run). `GET /healthz` SHALL return `200` with `{ active_run_ids: [run_id, …] }` — the same key name used by the heartbeat, so the contract names the concept once.
+The contract SHALL pin the success (2xx) response shape of each endpoint, not only the errors — for a frozen wire seam the success paths are as load-bearing as the failures, and `sample_run.jsonl` only covers the event stream, not these RPC responses. `POST /runs` SHALL return `202 Accepted` with `{ run_id, status: "running" }` (the run proceeds asynchronously; events arrive via the callback). `POST /runs/:id/messages` and `POST /runs/:id/interrupt` SHALL return `200` with `{ run_id, accepted: true }` (and `404`/`409` when the run is unknown or not interruptible). `GET /healthz` SHALL return `200` with `{ active_run_ids: [run_id, …] }` — the same key name used by the heartbeat, so the contract names the concept once.
 
 #### Scenario: Starting a run while one is active is rejected
 
@@ -33,11 +33,6 @@ The contract SHALL pin the success (2xx) response shape of each endpoint, not on
 
 - **WHEN** Rails sends `POST /runs/:id/interrupt`
 - **THEN** the harness interrupts that run cleanly
-
-#### Scenario: Permission mode is switched on the active run
-
-- **WHEN** Rails sends `POST /runs/:id/permission_mode` with `{ permission_mode, requested_by }` during an active run
-- **THEN** the harness switches that run's permission mode in-session via the SDK query handle (no respawn) and responds `200` with `{ run_id, permission_mode }`, or `409` if the run is no longer active
 
 ### Requirement: Harness-to-Rails callback endpoints
 
@@ -81,22 +76,106 @@ The contract SHALL specify that Rails reaches the harness at a configurable URL 
 - **WHEN** Rails needs to call the harness
 - **THEN** it uses `HARNESS_URL` (default `http://harness:8787`) rather than a hard-coded address
 
-### Requirement: Permission mode and tool scoping at run start
+### Requirement: Tool scoping at run start
 
-The contract SHALL specify that a run's `permission_mode` is a selectable allowlist value — `plan`, `acceptEdits` (the default when the field is omitted), or `bypassPermissions` — and that every run carries an `allowed_tools` whitelist and `cwd` pinned to the session worktree in all modes. `acceptEdits` auto-approves file edits within the whitelist (the prior fixed behavior); `plan` explores with read-only tools and does not make file edits; `bypassPermissions` auto-approves all tools and, per the SDK, is NOT constrained by `allowed_tools`, so Rails SHALL restrict it to owners (enforced server-side by `SessionPolicy`, not by the harness). Values outside the allowlist (including `default`/`dontAsk`/ask-per-tool) SHALL be rejected by Rails before reaching the harness. The `canUseTool` permission hook SHALL remain allow-all for the MVP and is documented as the seam for later per-tool Bash gating; live per-tool approval remains out of scope.
+`POST /runs` SHALL carry no mode field of any kind, and SHALL pin `cwd` to the session worktree in
+all modes. What a run may do SHALL be expressed as its per-run TOOL SET, and the only thing that may
+refuse a call SHALL be the `tool:before` extension point.
 
-#### Scenario: Run start defaults to acceptEdits and pins cwd
+<!-- doc-truth:ignore -->
+Two fields were REMOVED to get here, and naming them is the point of this paragraph. `permission_mode`
+was an Agent SDK concept — `plan`/`acceptEdits`/`bypassPermissions`, plus the
+allow-all `canUseTool` hook that was documented as the seam for later per-tool gating and could not
+intercept anything. The harness owns the loop and its own tool dispatch, so the mode has no meaning
+here, and the retired seam was deleted rather than left exported: a seam that cannot intercept must
+not exist. `allowed_tools` went with it, because it only ever pre-approved and so never disabled
+anything.
+<!-- doc-truth:end -->
 
-- **WHEN** Rails starts a run without a `permission_mode`
-- **THEN** the run carries `permission_mode: acceptEdits`, an `allowed_tools` whitelist, and `cwd` set to the session worktree
+`POST /runs` SHALL accept three additive, optional scoping fields, all defaulting to today's
+behaviour when omitted (nothing disabled, no connectors, no skills):
 
-#### Scenario: A selected allowlist mode is honored
+- `disallowed_tools` — built-in tool ids to genuinely disable. The harness SHALL remove them from
+  the tool set a run offers, so the model never sees them; this is the real disable, and the reason
+  a pre-approval list was not.
+- `connectors` — host-configured MCP server names. The harness SHALL resolve each name against
+  host-owned configuration into an MCP server connection and expose its tools to the run. A
+  server's command/args/url/headers/env SHALL NEVER cross from the client. A connector that is not
+  configured, refuses, or hangs SHALL NOT fail the run: the run continues without it and
+  `run_started` reports the failure by CLASSIFICATION (`not_configured`/`timeout`/`failed`), never
+  the transport's own message, which could carry a URL with a token in it.
+- `skills` — `"all"` or an array of discovered skill names. The harness SHALL index the selected
+  skills in the system prompt and expose a `skill` tool that loads one on demand. Indexing rather
+  than inlining is required, not stylistic: inlining every `SKILL.md` was never viable at real
+  scale (79 on the measured host).
 
-- **WHEN** Rails starts a run with `permission_mode: plan` (or `bypassPermissions`)
-- **THEN** the harness starts the run in that mode with `cwd` still pinned to the session worktree
+`run_started` SHALL echo the RESOLVED set — what the run actually applied, not what was requested —
+because that event is the only place a client, including a late joiner arriving by backfill with no
+live events, can learn what a run was allowed to do. Rails SHALL reject any value outside the
+discovered/known sets with `422` before it reaches the harness.
 
-#### Scenario: A plan-mode run makes no file edits
+#### Scenario: A run pins cwd to the session worktree
 
-- **WHEN** a run is started in `plan` mode
-- **THEN** Claude explores with read-only tools and produces a plan without editing files, so no changeset is produced by that run
+- **WHEN** Rails starts a run in either mode
+- **THEN** the run's `cwd` is the session worktree and no permission mode is sent, because the field
+  does not exist
+
+#### Scenario: disallowed_tools removes the tool from the run entirely
+
+- **WHEN** Rails starts a run with `disallowed_tools:["Bash"]`
+- **THEN** the harness builds the run's tool set without `Bash`, so the model is never offered it,
+  and `run_started` echoes `disallowed_tools:["Bash"]`
+
+#### Scenario: A connector name is resolved server-side to an MCP server
+
+- **WHEN** Rails starts a run with `connectors:["github"]` for a host that has a `github` MCP server
+  configured
+- **THEN** the harness connects to it from host-owned config and exposes its tools to the run, and no
+  server configuration crosses from the client
+
+#### Scenario: A broken connector does not break the run
+
+- **WHEN** a selected connector is not configured on the host, refuses the connection, or hangs
+- **THEN** the run proceeds without it and `run_started` lists it under `connectors_failed` with a
+  classified `kind`, so the participant who enabled it is told rather than left to infer it from
+  absence
+
+#### Scenario: Skills are indexed, not inlined
+
+- **WHEN** Rails starts a run with `skills:"all"`
+- **THEN** the harness indexes the discovered skills in the system prompt and offers a `skill` tool
+  that loads one on demand
+
+### Requirement: Harness capability discovery endpoints
+
+The harness SHALL expose read-only, `cwd`-scoped discovery that Rails proxies to the client:
+`GET /connectors?cwd=<path>` and `GET /skills?cwd=<path>`. The built-in tool set is NOT discovered —
+it is a shared `packages/contracts` constant, because it is the harness's own tool registry rather
+than anything host-configured. Discovery SHALL read only host-owned configuration (the given repo
+path plus host-wide `~/.claude`) and SHALL NOT start a run. Like every other harness route, both
+SHALL require the bearer `HARNESS_SHARED_SECRET`: the harness binds host loopback, which every
+process running as the developer can reach, so placement is not the boundary.
+
+The connector listing SHALL expose only each server's `name` and `transport` — never
+command/args/url/headers/env/tokens. The skills listing SHALL be derived from scanning `SKILL.md`
+frontmatter (`name`, `description`). Each response SHALL pin a success shape
+(`{ connectors: [...], source }`, `{ skills: [...], source }`) and SHALL degrade to an empty list
+with an unavailable `source` and a `200` — never an error — when the configuration is absent or
+unparseable, mirroring `GET /api/models`.
+
+#### Scenario: Discovery reads the session repo config without starting a run
+
+- **WHEN** Rails requests `GET /connectors?cwd=<path>` or `GET /skills?cwd=<path>` from the harness
+- **THEN** the harness returns the host-configured connector names, or the scanned skills for that
+  path plus `~/.claude`, without starting a run
+
+#### Scenario: Discovery degrades safely
+
+- **WHEN** the given repo has no MCP config or skills directory, or the files are unparseable
+- **THEN** the harness returns an empty list with an unavailable `source` and a `200`, never an error
+
+#### Scenario: Discovery is authenticated like everything else
+
+- **WHEN** an unauthenticated process on the host calls `GET /connectors` or `GET /skills`
+- **THEN** the harness answers `401`, because loopback is not the boundary
 
