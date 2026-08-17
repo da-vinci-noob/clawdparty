@@ -36,9 +36,42 @@ const read = (path: string) => readFileSync(path, "utf8");
  * the list is short so the argument is visible in review.
  *
  * `bash.ts` spawns a shell. `glob.ts`/`grep.ts` run git in ARGV form, which cannot
- * be injected through its arguments.
+ * be injected through its arguments. `credentials/keychain.ts` runs `/usr/bin/security` with a
+ * CONSTANT argv — the only variable in it is a module constant, so there is nothing a caller can
+ * influence (and the reason the rule below is about shape rather than directory).
  */
-const PROCESS_STARTERS = ["tools/bash.ts", "tools/glob.ts", "tools/grep.ts"];
+const PROCESS_STARTERS = [
+  "providers/credentials/keychain.ts",
+  "tools/bash.ts",
+  "tools/glob.ts",
+  "tools/grep.ts",
+];
+
+/**
+ * The RULE the allowlist enforces — tightened from "lives under `tools/`".
+ *
+ * Location was a proxy for the property that matters, and a poor one in both directions: a file
+ * under `tools/` can still interpolate into a shell string, and a legitimate process-starter
+ * elsewhere (a macOS Keychain reader spawning `/usr/bin/security` —  names the Keychain as a
+ * place only a host process can reach) is refused for being in the wrong directory rather than for
+ * doing anything unsafe.
+ *
+ * So the rule is now: **on the allowlist AND argv-form with no interpolated input.** Every starter
+ * is checked against `INJECTABLE_SHAPES` below, not just the three that had bespoke assertions —
+ * which means a new starter inherits the check instead of needing one written for it.
+ */
+const INJECTABLE_SHAPES: Array<{ name: string; pattern: RegExp }> = [
+  { name: "enables a shell", pattern: /shell:\s*true/ },
+  { name: "spawns from a template literal", pattern: /(?:spawn|exec|execFile|execSync)\(\s*`/ },
+  {
+    name: "concatenates into the command argument",
+    pattern: /(?:spawn|exec|execFile|execSync)\(\s*["'][^"']*["']\s*\+/,
+  },
+  {
+    name: "imports the shell-string exec",
+    pattern: /import \{[^}]*\bexec\b[^}]*\} from "node:child_process"/,
+  },
+];
 
 /**
  * Detected by the child_process IMPORT, not by method name.
@@ -57,10 +90,43 @@ describe("no shell input path exists", () => {
       .map((f) => f.slice(SRC.length))
       .sort();
 
+    // No route handler, transport, store or extension point may start a process: the allowlist is
+    // the whole permitted set, and it is asserted as an EQUALITY so an addition cannot pass by
+    // being merely present.
     expect(starters).toEqual(PROCESS_STARTERS);
-    // No route handler, transport, store or extension point may start a process.
-    for (const starter of starters) {
-      expect(starter.startsWith("tools/"), `${starter} is outside tools/`).toBe(true);
+  });
+
+  it("holds every starter to argv form with no interpolated input", () => {
+    // The rule that replaced "lives under tools/". Location was a proxy: a file in the right
+    // directory can still build a shell string, and a legitimate starter outside it — a Keychain
+    // reader spawning `/usr/bin/security` — would be refused for its path rather than its shape.
+    //
+    // Applied to EVERY starter, so a future one inherits the check instead of needing its own.
+    const starters = files.filter((f) => CHILD_PROCESS_IMPORT.test(read(f)));
+    expect(starters.length, "no process starters found — the scan is broken").toBeGreaterThan(0);
+
+    for (const file of starters) {
+      const body = read(file);
+      const name = file.slice(SRC.length);
+      for (const { name: shape, pattern } of INJECTABLE_SHAPES) {
+        expect(pattern.test(body), `${name} ${shape}`).toBe(false);
+      }
+    }
+  });
+
+  it("is not vacuous — the shape checks catch what they describe", () => {
+    // A security test whose patterns never match anything is a test that passes by accident. Each
+    // shape is verified against a sample of exactly what it is meant to reject.
+    const samples: Record<string, string> = {
+      "enables a shell": 'execFile("git", args, { shell: true })',
+      "spawns from a template literal": "spawn(`git ${pattern}`)",
+      "concatenates into the command argument": 'exec("git " + pattern)',
+      "imports the shell-string exec": 'import { exec } from "node:child_process";',
+    };
+    for (const { name, pattern } of INJECTABLE_SHAPES) {
+      expect(pattern.test(samples[name] as string), `${name} does not match its own sample`).toBe(
+        true,
+      );
     }
   });
 

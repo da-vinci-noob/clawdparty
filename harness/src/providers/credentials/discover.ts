@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { CredentialSourceId } from "@clawdparty/contracts";
+import { keychainHasToken } from "./keychain.js";
 import {
   ENV_SOURCES,
   FILE_SOURCES,
@@ -111,7 +112,9 @@ export function discoverAnthropicCredential(opts: DiscoverEnv = {}): Discovery {
   if (env.CLAUDE_CODE_OAUTH_TOKEN && env.CLAUDE_CODE_OAUTH_TOKEN.trim() !== "") {
     return { source: "env:CLAUDE_CODE_OAUTH_TOKEN", usable: true };
   }
-  if (os === KEYCHAIN_SOURCE.supportedOn && (opts.keychainHasToken?.() ?? false)) {
+  // The REAL probe by default. It defaulted to `false`, which made the slot unreachable in
+  // production — so a macOS host with a subscription credential reported having none.
+  if (os === KEYCHAIN_SOURCE.supportedOn && (opts.keychainHasToken ?? keychainHasToken)()) {
     return { source: KEYCHAIN_SOURCE.id, usable: true };
   }
 

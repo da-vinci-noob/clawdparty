@@ -46,7 +46,13 @@ export const PROFILE_DIRS = {
  */
 export const KEYCHAIN_SOURCE = {
   id: "keychain:anthropic-oauth" as const satisfies CredentialSourceId,
-  service: "Claude Code",
+  /**
+   * MEASURED, not guessed. This was `"Claude Code"`, which does not exist — checked on a host
+   * that has the credential: `security find-generic-password -s "Claude Code"` finds nothing, while
+   * `-s "Claude Code-credentials"` finds the item. So the slot was doubly broken: unreachable
+   * because its probe defaulted to false, AND keyed on a name that would never have matched.
+   */
+  service: "Claude Code-credentials",
   supportedOn: "darwin" as const,
 };
 

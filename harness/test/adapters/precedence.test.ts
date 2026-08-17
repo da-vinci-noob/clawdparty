@@ -103,7 +103,15 @@ describe("the documented order is applied, first match wins", () => {
   });
 
   it("reports NO credential with a remedy rather than an empty answer", () => {
-    const found = discoverAnthropicCredential({ env: env(), home });
+    // `keychainHasToken: () => false` is REQUIRED, not decorative. The Keychain probe used to
+    // default to false, so this test passed on any machine; now that it is wired, an
+    // uncontrolled slot makes the result depend on whether the developer running the suite happens
+    // to have a Claude credential in their own Keychain — which it did, here.
+    const found = discoverAnthropicCredential({
+      env: env(),
+      home,
+      keychainHasToken: () => false,
+    });
 
     expect(found).toMatchObject({ source: "none", usable: false });
     // naming the absence without naming the fix leaves the developer guessing which

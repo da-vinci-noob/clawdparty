@@ -441,3 +441,40 @@ merge conflict, no warning — so this report is the only place the overlap beco
 reviewer decides. An unreadable sibling lane (pruned by `bin/worktrees`, moved, never created)
 contributes nothing rather than failing the diff.
 
+## 9. Reading the macOS Keychain
+
+ names the Keychain as a location a container cannot reach, and it is the only place a macOS
+subscription/enterprise OAuth credential lives — there is no file. It is therefore one of the
+reasons the harness runs as a host process at all.
+
+**Existence only. The harness never reads the secret.**
+
+```
+/usr/bin/security find-generic-password -s "Claude Code-credentials"
+```
+
+No `-w`, which is the flag that prints the password, and `stdio: "ignore"` on every stream. That is
+sufficient because `anthropic_oauth.client()` constructs the vendor client with **no token** for this
+path — the SDK resolves the credential itself — so discovery only ever needs to know whether there is
+one. Reading the value would put a credential in this process for no purpose .
+
+**The service name is measured, not assumed.** It was `"Claude Code"` in the source, which finds
+nothing; the real item is `"Claude Code-credentials"`. So the slot was broken twice over — its probe
+defaulted to `false` AND it would have queried a name that never matches.
+
+**Why a credential module may start a process.** `no_shell_input.test.ts` used to require every
+process-starter to live under `tools/`. That was a proxy for the property that matters, and wrong in
+both directions: a file under `tools/` can still build a shell string, and a legitimate starter
+elsewhere would be refused on its path. The rule is now **on the allowlist AND argv form with no
+interpolated input**, applied to every starter rather than to the three that had bespoke assertions —
+so a new one inherits the check. The allowlist is still asserted as an equality, so adding a row
+remains a visible decision.
+
+**Failure is always "this slot cannot serve".** Missing binary, locked keychain, timeout, exit 44
+(`security`'s item-not-found) — each returns false rather than throwing, because discovery walks a
+precedence list and one slot failing must let the next be tried.
+
+**Precedence is unchanged.** `CLAUDE_CODE_OAUTH_TOKEN` still wins, so a developer who exported it
+deliberately is not overridden by a stale Keychain item, and the documented file/profile slots still
+sit above the Keychain.
+

@@ -88,11 +88,18 @@ Listed as breaking rather than additive because a caller that reached the harnes
 without a bearer stops working — even though no *payload* shape changed. Two knock-on
 decisions worth stating rather than leaving to be inferred:
 
-- **`~/.claude` and `~/.aws` bind mounts are gone**, and with them the macOS caveat that
-  subscription/enterprise OAuth needed `claude setup-token` +
-  `CLAUDE_CODE_OAUTH_TOKEN`: the Keychain is now readable directly. The env var stays
-  supported as an explicit override and still wins its precedence slot. `aws sso login`
-  freshness is unchanged — nothing can refresh that token on the developer's behalf.
+- **`~/.claude` and `~/.aws` bind mounts are gone.**
+  **Correction: "the Keychain is now readable directly" was FALSE when written.** The
+  `keychain:anthropic-oauth` slot existed, but its probe was injected and defaulted to FALSE, so it
+  was unreachable in production — and the service name it would have queried (`"Claude Code"`) does
+  not exist on a real host. Both are fixed: `credentials/keychain.ts` runs
+  `security find-generic-password -s "Claude Code-credentials"` (the measured name) in fixed argv
+  form, and `keychainHasToken()` now returns true on a host that has the credential — verified.
+  It checks EXISTENCE only and never passes `-w`, so the secret never enters the process; the SDK
+  resolves the credential itself, exactly as on the file path. `CLAUDE_CODE_OAUTH_TOKEN` remains
+  supported and still wins its precedence slot, so a developer who set it deliberately is not
+  overridden. `aws sso login` freshness is unchanged — nothing can refresh that token on the
+  developer's behalf.
 - **`docker/harness.Dockerfile` and its entrypoint are DELETED.** Not kept for CI: the `harness` CI
   job already runs on a bare ubuntu runner with `actions/setup-node`, so the image was used by
   nothing once the compose service went. Keeping it would also have been actively misleading,
