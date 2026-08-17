@@ -41,6 +41,15 @@ export const SessionInfo: FC<{ sessionId: string }> = ({ sessionId }) => {
       >
         {session.repository_path ?? "—"}
       </div>
+      {/*  for the roles that never see the composer. A reviewer or viewer cannot start a
+          run, but they can ask someone who can — so who pays has to be legible to the whole room,
+          not only to the person clicking Run. */}
+      <div data-testid="session-account-notice" className="text-[11px] text-[#6b726b]">
+        Runs spend the host developer's account
+        {session.aws_profile ? (
+          <span data-testid="session-account-profile"> · AWS profile {session.aws_profile}</span>
+        ) : null}
+      </div>
       {/* Every role, because the settings page is readable by every role — the auth test is how a
           participant finds out WHY a provider is missing instead of asking someone else to look. */}
       <Link

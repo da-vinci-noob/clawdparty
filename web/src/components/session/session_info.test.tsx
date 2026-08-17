@@ -43,6 +43,44 @@ describe("SessionInfo", () => {
     expect(await screen.findByTestId("session-info")).toHaveTextContent(/no git review/i);
   });
 
+  // The composer carries the same notice, but it is hidden from reviewer and
+  // viewer — and they are exactly the participants who would otherwise never learn that the
+  // runs they ask for are spending someone else's quota.
+  it("tells every role that runs spend the host developer's account", async () => {
+    stub("review", "/repo");
+    renderWithQuery(<SessionInfo sessionId="s" />);
+
+    expect(await screen.findByTestId("session-account-notice")).toHaveTextContent(
+      /host developer's account/i,
+    );
+  });
+
+  it("names the AWS profile when one is set, because that is which account", async () => {
+    server.use(
+      http.get("/api/sessions/:id", () =>
+        HttpResponse.json({
+          id: "s",
+          mode: "review",
+          repository_path: "/repo",
+          aws_profile: "claude-code-sso",
+        }),
+      ),
+    );
+    renderWithQuery(<SessionInfo sessionId="s" />);
+
+    expect(await screen.findByTestId("session-account-profile")).toHaveTextContent(
+      "claude-code-sso",
+    );
+  });
+
+  it("omits the profile line when none is set rather than showing an empty one", async () => {
+    stub("review", "/repo");
+    renderWithQuery(<SessionInfo sessionId="s" />);
+
+    await screen.findByTestId("session-account-notice");
+    expect(screen.queryByTestId("session-account-profile")).not.toBeInTheDocument();
+  });
+
   it("renders nothing when the session cannot be read", async () => {
     server.use(http.get("/api/sessions/:id", () => HttpResponse.json({}, { status: 404 })));
     renderWithQuery(<SessionInfo sessionId="s" />);

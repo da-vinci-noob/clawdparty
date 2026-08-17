@@ -2,7 +2,7 @@ import { BUILTIN_TOOL_IDS } from "@clawdparty/contracts";
 import { type FC, type FormEvent, useState } from "react";
 import { useConnectors } from "../hooks/use_connectors";
 import { useCurrentParticipant } from "../hooks/use_current_participant";
-import { useModels } from "../hooks/use_models";
+import { useModels, useUnavailableProviders } from "../hooks/use_models";
 import { useSkills } from "../hooks/use_skills";
 import {
   selectActiveRunId,
@@ -30,6 +30,10 @@ const tokensToK = (n: number): string =>
 export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   const { can } = useCurrentParticipant();
   const models = useModels();
+  // Providers that CANNOT serve, with the reason and the fix. Shown rather than dropped: a
+  // picker missing Bedrock and a host with no Bedrock credential look identical otherwise, and
+  // has the harness report every provider precisely so the absence can be explained.
+  const unavailable = useUnavailableProviders();
   // Tools and skills have no per-item toggle — every built-in tool and every installed skill is
   // available. CONNECTORS do, and default to off: enabling one connects to that MCP server and
   // declares every tool it advertises. These are the discovered lists (the badge + validation of
@@ -277,6 +281,23 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
                   ))}
                 </optgroup>
               ))}
+              {/* A provider the host cannot serve, shown DISABLED with its reason and fix rather
+                  than omitted. An empty picker and a missing credential are indistinguishable
+                  otherwise, and the harness reports unavailable providers (never drops them) for
+                  exactly this . The sentinel value is never selectable, so it can
+                  never be sent. */}
+              {unavailable.map((provider) => (
+                <optgroup key={provider.id} label={`${provider.label} — unavailable`}>
+                  <option
+                    value={`unavailable:${provider.id}`}
+                    disabled
+                    data-testid={`model-unavailable-${provider.id}`}
+                  >
+                    {provider.reason ?? "unavailable"}
+                    {provider.remedy ? ` — ${provider.remedy}` : ""}
+                  </option>
+                </optgroup>
+              ))}
             </select>
           )}
 
@@ -328,6 +349,27 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
             </span>
           </button>
         </div>
+
+        {/* , at the point of action. Any participant with run permission spends the HOST
+            developer's account, not their own — that is already true and multi-provider made it
+            harder to see, since the same model name under two providers bills two places. Named
+            here (where a run is started) and in the session header (where every role reads it). */}
+        {showModeControl && (
+          <p
+            data-testid="composer-account-notice"
+            className="px-[15px] pb-3 font-mono text-[11px] text-[#6b726b]"
+          >
+            Runs spend the host developer's{" "}
+            {selected ? (
+              <span data-testid="composer-account-provider" className="text-[#8a927c]">
+                {selected.providerLabel}
+              </span>
+            ) : (
+              "provider"
+            )}{" "}
+            account, not yours.
+          </p>
+        )}
 
         {error && (
           <p

@@ -708,3 +708,139 @@ describe("PromptComposer context bar", () => {
     expect(await screen.findByTestId("context-usage")).toHaveTextContent("124K / 200K · 62%");
   });
 });
+
+/**
+ * An unavailable provider is SHOWN, disabled, with its reason and fix.
+ *
+ * The failure this prevents: `useModels` filters to available providers, so a host with no
+ * Bedrock credential produced a picker identical to one where Bedrock does not exist. The
+ * harness reports unavailable providers precisely so the gap can be explained , and
+ * dropping that on the floor is what left participants with an empty picker and no reason.
+ */
+describe("PromptComposer unavailable providers", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+  afterEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+
+  const withUnavailable = () =>
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json({
+          providers: [
+            ...providersResponse([{ id: "claude-opus-5", label: "Opus 5" }]).providers,
+            {
+              id: "anthropic-bedrock",
+              displayName: "Amazon Bedrock",
+              available: false,
+              reason: "credential_expired",
+              remedy: "Run `aws sso login --profile claude-code-sso`",
+              models: [],
+            } satisfies ProviderStatus,
+          ],
+        }),
+      ),
+    );
+
+  it("lists the provider with its reason and remedy", async () => {
+    withUnavailable();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    const row = await screen.findByTestId("model-unavailable-anthropic-bedrock");
+    expect(row).toHaveTextContent("credential_expired");
+    expect(row).toHaveTextContent("aws sso login");
+  });
+
+  it("makes it unselectable, so it can never be sent as a model", async () => {
+    withUnavailable();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    const row = await screen.findByTestId("model-unavailable-anthropic-bedrock");
+    // A selectable row would post a sentinel id the server has never heard of.
+    expect(row).toBeDisabled();
+    expect(row.getAttribute("value")).not.toBe("");
+  });
+
+  it("still offers the available provider's models", async () => {
+    withUnavailable();
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    await screen.findByTestId("model-unavailable-anthropic-bedrock");
+    expect(
+      screen.getByTestId("model").querySelectorAll("option[value='claude-opus-5']"),
+    ).toHaveLength(1);
+  });
+});
+
+/**
+ * whose account a run spends, stated where the run is started.
+ *
+ * "since any participant can start one" is the reason the requirement exists: the person
+ * clicking Run is usually not the person paying, and the same model name under two providers
+ * bills two different places.
+ */
+describe("PromptComposer account disclosure", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+  afterEach(() => {
+    useParticipantStore.getState().clear();
+    useEventStore.getState().reset();
+  });
+
+  it("says runs spend the host developer's account, not the participant's", () => {
+    setRole("editor");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    expect(screen.getByTestId("composer-account-notice")).toHaveTextContent(
+      /host developer's .* account, not yours/,
+    );
+  });
+
+  it("names the provider once a model is chosen, because that decides where it bills", async () => {
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json(providersResponse([{ id: "claude-opus-5", label: "Opus 5" }])),
+      ),
+    );
+    setRole("owner");
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // Wait for the OPTION, not the select: the select renders before discovery resolves, and
+    // changing it early sets an id no model matches yet.
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("model").querySelector("option[value='claude-opus-5']"),
+      ).not.toBeNull(),
+    );
+    fireEvent.change(screen.getByTestId("model"), { target: { value: "claude-opus-5" } });
+    expect(screen.getByTestId("composer-account-provider")).toHaveTextContent("Anthropic (direct)");
+  });
+
+  it("is hidden while a run is live, when there is no start decision to make", () => {
+    setRole("owner");
+    useEventStore.getState().applyMany([
+      {
+        id: 1,
+        session_id: "s",
+        ai_run_id: "run1",
+        seq: 1,
+        type: "run_started",
+        actor: { kind: "user", id: "1" },
+        ts: "2026-07-17T00:00:00.000Z",
+        payload: { model: "m", cwd: "/r" },
+      } as EventEnvelope,
+    ]);
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    expect(screen.queryByTestId("composer-account-notice")).not.toBeInTheDocument();
+  });
+});

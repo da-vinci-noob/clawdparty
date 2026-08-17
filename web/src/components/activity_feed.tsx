@@ -3,6 +3,7 @@ import { type FC, useEffect, useRef } from "react";
 import type { ParticipantNames } from "../helpers/participant_names";
 import { selectActiveRunId, selectDurableEvents, useEventStore } from "../stores/event_store";
 import { FileChangedRow } from "./feed/file_changed_row";
+import { ProviderErrorRow } from "./feed/provider_error_row";
 import { RawFallback } from "./feed/raw_fallback";
 import { RecoveryAppliedRow } from "./feed/recovery_applied_row";
 import { RunBanner } from "./feed/run_banner";
@@ -167,6 +168,10 @@ function renderEvent(
       // Its OWN row, not folded into the chip: a refusal is the room's policy
       // acting, not a tool breaking, and showing them alike would hide the rule.
       return <ToolRefusedRow event={event} />;
+    case "provider_error":
+      // Not a RUN_LIFECYCLE banner: the credential failed, the session did not, and a
+      // "run failed" framing would send the room off to create a new one.
+      return <ProviderErrorRow event={event} />;
     case "terminal_output":
       return <TerminalBlock event={event} />;
     case "file_changed":
