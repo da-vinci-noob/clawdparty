@@ -117,9 +117,31 @@ SDK message → harness/src/normalizer.ts → batched POST /internal/events
 
 ## 7. Rails ↔ harness protocol
 
-- **Rails → harness (`http://harness:8787` over the compose network):** `POST /runs` {run_id, session_id, repo_path(worktree), prompt, requested_by (participant id → stamped as `run_started.actor.id`), claude_session_id?, model, max_turns, permission_mode: acceptEdits, allowed_tools} (409 if run active); `POST /runs/:id/messages` (pushed into the live streaming-input iterable — no respawn); `POST /runs/:id/interrupt`; `GET /healthz` → {active_run_ids}. The harness host is configurable (`HARNESS_URL`) so the app never hard-codes a transport assumption.
-- **Harness → Rails:** `POST /internal/events` (batched, idempotent); `POST /internal/harness/heartbeat` every 5s with active_run_ids.
-- **Crash recovery:** harness dies → its container's restart policy reboots it; `Harness::HealthcheckJob` marks runs stale >15s as failed; Claude session JSONL persists in the bind-mounted host `~/.claude/projects/` (survives container restarts) so the host can resume via `claude_session_id`; partial worktree edits get reviewed/rejected like any changeset. Rails restarts → harness ring-buffers events + retries with backoff (idempotent ingest); boot reconciliation marks orphans failed.
+**`docs/contracts/harness_protocol.md` is the authority for this section**; what follows is the
+summary. Every field below is bearer-authenticated  — placement is not the boundary.
+
+- **Rails → harness (`http://host.docker.internal:8787`, configurable via `HARNESS_URL`):**
+  `POST /runs` {run_id, session_id, lane, repo_path, prompt, requested_by (participant id → stamped
+  as `run_started.actor.id`), provider, model, resume_context, + optional `effort` /
+  `disallowed_tools` / `connectors` / `skills` / `aws_profile`} (409 if the lane has an active run);
+  `POST /runs/:id/messages` (queued in the loop's inbox and appended to the RECORD at the next turn
+  boundary — no respawn); `POST /runs/:id/interrupt`; `GET /runs`;
+  `POST /verify` (a real 1-token request per provider); `GET /models` · `/connectors` · `/skills` ·
+  `/aws-profiles` (read-only discovery); `POST /skills` · `POST /skills/remove` (the only routes that
+  mutate host files); `GET /healthz` → {active_run_ids}.
+  **Gone with the SDK:** `permission_mode` (replaced by the `tool:before` gate plus the per-run tool
+  set), `claude_session_id` (resumption is harness session + lane, carried by `resume_context`),
+  `max_turns`, and `allowed_tools` — the last one accepted-and-never-read until it was retired.
+  The harness is a HOST process on loopback, not a compose service .
+- **Harness → Rails:** `POST /internal/events` (batched, idempotent, `store_seq` per durable event);
+  `POST /internal/harness/heartbeat` every 5s with `active_run_ids` + `store_seq_high_water`.
+- **Crash recovery:** harness dies → launchd/systemd restarts it; `Harness::HealthcheckJob` marks
+  runs stale >15s as failed; recovery reads the **total position marker** from the session's own
+  SQLite store and switches on its phase — it never replays the log, which is what keeps recovery
+  O(1) in session length. The harness owns the record now, so there is no SDK session file to resume
+  from. Partial worktree edits get reviewed/rejected like any changeset. Rails restarts → harness
+  ring-buffers events + retries with backoff (idempotent ingest); boot reconciliation marks orphans
+  failed.
 
 **Harness files:** `index.ts` (Fastify + heartbeat), `supervisor.ts` (live runs, one store per session), `loop/` (run_loop · request_builder · checkpoint · stop_reasons · normalize), `store/` (the durable record), `providers/` (adapters + credential discovery), `tools/`, `extensions/` (the four points). (**the ONLY file that sees raw SDK shapes**; unknown types → `ai_raw`, never a crash), `transport.ts` (batch/retry), `hooks.ts` (Bash→terminal_output, Edit/Write→file_changed), `permissions.ts` (canUseTool allow-all for MVP — **the seam** for later Bash gating).
 
@@ -139,7 +161,10 @@ SDK message → harness/src/normalizer.ts → batched POST /internal/events
 - **Perimeter (MVP):** the trusted local network. Only the `rails` container publishes a port (`3000`); `config.hosts` allows `<shah-mac>.local` + LAN IP; harness/Vite are unpublished (compose-network only — the Docker equivalent of loopback-only); signed cookies without `Secure` flag (plain HTTP on LAN). Accepted risk: anyone on the same network can reach the login page — but every endpoint requires a valid invite-token-derived cookie, and only colleagues are on the network. Future phase: Tailscale (publish/forward the rails service + add origins; no app-level changes — this is why nothing in the app assumes a fixed host).
 - **Roles** enforced server-side in `api/app/policies/session_policy.rb` (PORO, every controller action) — owner: everything incl. approve/reject; editor: runs/follow-ups/interrupt/tasks/chat; reviewer: tasks/chat/view; viewer: view/chat. Cable subscriptions independently verify participantship. Client hides buttons; server enforces. (The `tasks/*` permissions are **dormant while the task board UI is cut** per §12 — the role grants and the `tasks` table + `task_*` events are modeled now so restoring the board needs no schema or policy change.)
 - **File API** (`RepoBrowser`): tree from `git ls-files --cached --others --exclude-standard`; content with realpath-containment (defeats `../` and symlinks), denylist (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `*secret*`, `.git/`…), 1MB cap, null-byte binary detection. **Terminal pane is read-only replay of Claude's Bash events — no input path to a shell anywhere.**
-- Claude blast radius: allowedTools whitelist, cwd pinned to worktree, everything lands uncommitted behind human review. (SDK doesn't hard-jail Bash to cwd — accepted MVP risk, documented.)
+- Claude blast radius: the `tool:before` gate (deny rules run before every tool call) plus the per-run
+  tool set, `cwd` pinned to the worktree, everything lands uncommitted behind human review. There is
+  no allow-list — it only ever pre-approved, and the field that carried one was retired unread.
+  (Bash is not hard-jailed to `cwd` — accepted MVP risk, documented.)
 - **Claude credentials:** the harness never stores its own Anthropic key. It uses the host developer's existing login, mounted read-only (`~/.claude`, `~/.aws`) plus inherited auth env. Accepted MVP risk: those credentials are the host's, so a run bills/acts as the host — fine for same-host, single-developer-credential MVP. The mounts are **read-only** so a run cannot tamper with the host's login state.
 
 ## 10. 3-week execution plan

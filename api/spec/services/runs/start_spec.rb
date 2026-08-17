@@ -46,11 +46,13 @@ RSpec.describe(Runs::Start) do
     expect(payload[:repo_path]).to(eq("/repo/.clawdparty/worktrees/session-#{session.id}"))
     expect(payload[:lane]).to(eq('main'))
     expect(payload[:provider]).to(eq('anthropic-direct'))
-    expect(payload[:allowed_tools]).to(include('bash', 'str_replace_based_edit_tool'))
-    # Both are gone from the protocol: permission_mode was an Agent SDK concept,
-    # and resumption is now by harness session + lane (CHANGELOG B1/B2).
+    # All three are gone from the protocol: permission_mode was an Agent SDK concept, resumption is
+    # now by harness session + lane (CHANGELOG B1/B2), and `allowed_tools` was a pre-approval list
+    # the harness accepted and never read — an allow-list only pre-approves, and the real
+    # gate is the `tool:before` extension point plus dropping a declaration outright.
     expect(payload).not_to(have_key(:permission_mode))
     expect(payload).not_to(have_key(:claude_session_id))
+    expect(payload).not_to(have_key(:allowed_tools))
   end
 
   describe 'capability selection (disallowed_tools / connectors / skills)' do
@@ -59,14 +61,13 @@ RSpec.describe(Runs::Start) do
                            model: 'claude-opus-4-8', client: client, worktree: worktree, **caps)
     end
 
-    it 'pre-approves every advertised built-in tool by default, under its HARNESS name' do
+    it 'knows the built-in tools by their HARNESS name, for validating a disallow list' do
       # The names have to be the harness's registry names (`read`, not `Read`): it filters
       # `disallowed_tools` by exact name, so the SDK-era capitalized list disabled nothing.
-      # packages/contracts BUILTIN_TOOLS is the shared list; this is the Ruby copy of it.
-      tools = %w[read str_replace_based_edit_tool bash glob grep web_search web_fetch]
-      expect(described_class::DEFAULT_ALLOWED_TOOLS).to(eq(tools))
-      start
-      expect(posted.last[:allowed_tools]).to(eq(tools))
+      # packages/contracts BUILTIN_TOOLS is the shared list; this is the Ruby copy of it, and
+      # validating a selection is now its ONLY job.
+      expect(described_class::BUILTIN_TOOLS)
+        .to(eq(%w[read str_replace_based_edit_tool bash glob grep web_search web_fetch]))
     end
 
     it 'omits the capability keys entirely when nothing is selected (prior behavior)' do

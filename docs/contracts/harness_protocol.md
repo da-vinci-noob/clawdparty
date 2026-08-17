@@ -39,7 +39,6 @@ Body (at least):
 | `model` | string? | optional model override |
 | `max_turns` | integer? | optional |
 | `permission_mode` | string | one of `plan` / `acceptEdits` / `bypassPermissions`; default `acceptEdits` when omitted (see §5) |
-| `allowed_tools` | string[] | pre-approval whitelist (see §5) |
 | `disallowed_tools` | string[]? | built-in tool ids to hard-disable (→ SDK `disallowedTools`; see §5). Omitted = nothing disabled |
 | `connectors` | string[]? | host-configured MCP server names to enable (see §5). Omitted = none |
 | `skills` | `"all"` \| string[]? | discovered skills to enable (see §5). Omitted = none |
@@ -137,7 +136,13 @@ the loop, so the mode was the only lever over what a tool call could do. The har
 the loop now, so the lever is the **`tool:before` extension point** plus the per-run tool
 set — both of which are ours and both of which are testable.
 
-`allowed_tools` still pre-approves and **`cwd` is still pinned to the session worktree**.
+**`allowed_tools` is GONE too** (CHANGELOG), and for a sharper reason: it was not merely
+superseded, it was never read. The harness accepted the field from the day the SDK left and no code
+path consulted it, so Rails computed and sent a whitelist that changed nothing. An allow-list only
+*pre-approves* in any case — the two things that actually bound a tool call are the `tool:before`
+gate and dropping a declaration outright (`disallowed_tools`).
+
+**`cwd` is still pinned to the session worktree.**
 
 ### The four extension points
 

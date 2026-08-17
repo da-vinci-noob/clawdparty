@@ -56,7 +56,6 @@ export interface StartRunInput {
    */
   resume_context?: boolean;
   effort?: EffortLevel;
-  allowed_tools?: string[];
   disallowed_tools?: string[];
   connectors?: string[];
   /**

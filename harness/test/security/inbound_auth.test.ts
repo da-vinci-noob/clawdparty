@@ -96,6 +96,19 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe("retired protocol fields stay retired", () => {
+  it("does not accept `allowed_tools` on run start", () => {
+    // It was the SDK's pre-approval list, and the harness ACCEPTED it for months without a single
+    // reader — Rails computed a whitelist and sent it into a void while the protocol document
+    // described it as active. A field declared in the input type is a field someone will wire up
+    // again, so its absence is asserted rather than assumed.
+    const source = readFileSync(new URL("../../src/supervisor.ts", import.meta.url), "utf8");
+    // The lookbehind is load-bearing: a bare /allowed_tools/ matches `disallowed_tools`, which is a
+    // live field — the first version of this guard could never pass.
+    expect(source).not.toMatch(/(?<!dis)allowed_tools/);
+  });
+});
+
 describe("every control route rejects a bad token", () => {
   const rejected: Array<[string, Record<string, string>]> = [
     ["absent", {}],

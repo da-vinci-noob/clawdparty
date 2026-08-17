@@ -11,15 +11,16 @@ module Runs
     class DirtyWorktree < StandardError; end
     class SessionArchived < StandardError; end
 
-    # The built-in tools the composer advertises ON, by their HARNESS REGISTRY NAME
-    # (kept in sync with packages/contracts BUILTIN_TOOLS; Rails can't import TS, so
-    # this is the Ruby copy). Turning a tool OFF is modeled as `disallowed_tools`,
-    # not by shrinking this set — an allow-list only pre-approves, while a bare
-    # disallow drops the declaration (design D1/D8).
+    # The built-in tools a run has, by their HARNESS REGISTRY NAME (the Ruby copy of
+    # packages/contracts BUILTIN_TOOLS; Rails cannot import TS). Used to VALIDATE a
+    # `disallowed_tools` selection — nothing else. It was `DEFAULT_ALLOWED_TOOLS` and
+    # was sent as an `allowed_tools` payload field that no consumer read: an
+    # allow-list only pre-approves, and the harness's real gate is the `tool:before`
+    # extension point plus dropping the declaration outright.
     #
-    # These were the Agent SDK's capitalized names until a later cleanup. Nothing answered to
+    # These were the Agent SDK's capitalized names originally. Nothing answered to
     # them once the SDK left, so `disallowed_tools` silently matched no tool at all.
-    DEFAULT_ALLOWED_TOOLS = %w[read str_replace_based_edit_tool bash glob grep web_search web_fetch].freeze
+    BUILTIN_TOOLS = %w[read str_replace_based_edit_tool bash glob grep web_search web_fetch].freeze
     # Until M7 a session has exactly one lane, so this is the whole lane space.
     # Named rather than inlined because the harness enforces one-active-run PER
     # LANE, and a bare "main" at the call site would hide where that comes from.
@@ -154,8 +155,7 @@ module Runs
         requested_by: @requested_by.id.to_s,
         provider: @provider,
         model: @model,
-        resume_context: resume,
-        allowed_tools: DEFAULT_ALLOWED_TOOLS
+        resume_context: resume
       }
     end
 

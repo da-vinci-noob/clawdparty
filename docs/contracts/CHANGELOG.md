@@ -233,6 +233,32 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [protocol] — `allowed_tools` retired from `POST /runs` (breaking, in-window)
+
+**No `CONTRACT_VERSION` bump** — endpoint/protocol changes are recorded here and do not move the
+event contract's version. Breaking by classification, inert in practice.
+
+`POST /runs` no longer accepts `allowed_tools`, and Rails no longer sends it.
+
+**Why.** It was the Agent SDK's pre-approval list. When the SDK left, the harness kept ACCEPTING the
+field and no code path read it — `supervisor.ts` declared it in `StartRunInput` and that was the only
+mention. So Rails computed a whitelist on every run start and sent it into a void, while the protocol
+document described it as active ("`allowed_tools` still pre-approves"). That is worse than a missing
+feature: it is a documented guarantee with no implementation.
+
+An allow-list only *pre-approves* in any case. The two things that actually bound a tool call are the
+`tool:before` extension point and dropping the declaration outright (`disallowed_tools`, which itself
+did nothing until CHANGELOG 1.8.0 gave it the right vocabulary).
+
+**The constant survives, renamed.** `Runs::Start::DEFAULT_ALLOWED_TOOLS` is now `BUILTIN_TOOLS`: the
+Ruby copy of `packages/contracts` `BUILTIN_TOOLS`, whose only remaining job is validating a
+`disallowed_tools` selection. The old name promised an allow-list that no longer exists.
+
+**Recovery / migration.** Nothing stored changes and no behaviour changes, because the field never had
+any. A harness on older code ignores its absence exactly as it ignored its presence. This closes the
+earlier scoping-audit finding: of the four per-run scoping fields, `disallowed_tools` works (1.8.0), `connectors` works
+(1.9.0), `skills` works (1.10.0), and this one is gone.
+
 ## [1.10.0] — `skill_changed`, the 31st event type (additive)
 
 **`CONTRACT_VERSION = { major: 1, minor: 10 }`.** Additive `minor` bump: one new event type, taking

@@ -38,7 +38,7 @@ module RunCapabilities
 
   def validated_disallowed_tools!
     values = array_param(:disallowed_tools)
-    reject_unknown!('tool', values, Runs::Start::DEFAULT_ALLOWED_TOOLS)
+    reject_unknown!('tool', values, Runs::Start::BUILTIN_TOOLS)
     values
   end
 
