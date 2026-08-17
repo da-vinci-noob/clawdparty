@@ -105,6 +105,7 @@ function stubCaps() {
     contextWindow: 1000,
     maxOutputTokens: 100,
     adaptiveThinking: false,
+    thinkingBudgetTokens: null,
     thinkingDisplaySummarized: false,
     effortLevels: [],
     promptCaching: false,

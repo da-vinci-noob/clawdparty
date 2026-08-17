@@ -94,10 +94,16 @@ export interface ToolSchema {
  * DEEP-FROZEN before dispatch: mutating a built request must throw, so a request
  * the record cannot explain is impossible to construct by accident.
  *
- * Note what is absent and must stay absent: `temperature`, `top_p`, `top_k`, and
- * `thinking.budget_tokens` all return 400 on current models (R10). They are not
- * optional-and-unused here; they have no field at all, so emitting one is a type
- * error rather than a runtime surprise.
+ * Note what is absent and must stay absent: `temperature`, `top_p` and `top_k`. They are not
+ * optional-and-unused here; they have no field at all, so emitting one is a type error rather than
+ * a runtime surprise. Measured, and sharper than R10's "they 400": with thinking enabled,
+ * `temperature: 0.5` is refused with "`temperature` may only be set to 1 when thinking is enabled",
+ * so the field is not merely useless, it is incompatible with the feature this request is built for.
+ *
+ * `thinking.budget_tokens` USED to be in that list, on R10's reading that it 400s on current models.
+ * That is true of some and false of others — measured on Bedrock, `claude-opus-4-7` refuses it
+ * ("thinking.type.enabled is not supported for this model") while `claude-sonnet-4-6` accepts it, and
+ * five older profiles accept ONLY it. So it is a per-model shape, not a deprecated one.
  */
 export interface ProviderRequest {
   model: string;
@@ -106,7 +112,15 @@ export interface ProviderRequest {
   system: SystemBlock[];
   messages: NeutralMessage[];
   tools: ToolSchema[];
-  thinking?: { type: "adaptive" | "disabled"; display?: "summarized" | "omitted" };
+  /**
+   * The two shapes are a DISCRIMINATED UNION rather than one object with optional members, so the
+   * combinations the API refuses cannot be constructed: `budget_tokens` on an adaptive request, or
+   * an `enabled` request with no budget, are both type errors instead of 400s.
+   */
+  thinking?:
+    | { type: "adaptive"; display?: "summarized" | "omitted" }
+    | { type: "enabled"; budget_tokens: number }
+    | { type: "disabled" };
   effort?: EffortLevel;
   compaction?: boolean;
   /** Block indices; ≤4, one per ~15 blocks (R7). */

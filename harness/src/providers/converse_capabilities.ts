@@ -100,9 +100,11 @@ export function converseCapabilities(
     toolUseWhileStreaming: toolUse(modelId) && toolUseWhileStreaming(modelId),
     contextWindow,
     maxOutputTokens,
-    // Converse exposes no thinking-budget parameter; models that reason do it on their own and
-    // report it as reasoningContent, which is not the same thing as a controllable budget.
+    // Converse exposes NEITHER thinking shape — no adaptive knob and no budget. Models that reason
+    // do it on their own and report it as `reasoningContent`, which is not a budget anyone
+    // can set.
     adaptiveThinking: false,
+    thinkingBudgetTokens: null,
     thinkingDisplaySummarized: false,
     effortLevels: [],
     promptCaching: false,

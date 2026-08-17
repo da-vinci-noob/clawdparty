@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { EffortLevel } from "@clawdparty/contracts";
-import { type RawStream, classifyProbeFailure, mapAnthropicStream } from "./anthropic_family.js";
+import {
+  DEFAULT_THINKING_BUDGET_TOKENS,
+  type RawStream,
+  classifyProbeFailure,
+  mapAnthropicStream,
+} from "./anthropic_family.js";
 import { toAnthropicMessages } from "./anthropic_request.js";
 import type {
   Capabilities,
@@ -62,6 +67,9 @@ const CONSERVATIVE_FALLBACK: Capabilities = {
   contextWindow: 200_000,
   maxOutputTokens: 8_192,
   adaptiveThinking: false,
+  // Conservative: omitting `thinking` works everywhere, so a wrong null costs a feature while a
+  // wrong number costs the turn.
+  thinkingBudgetTokens: null,
   thinkingDisplaySummarized: false,
   effortLevels: [],
   promptCaching: false,
@@ -212,6 +220,11 @@ function fromModelsApi(model: Anthropic.ModelInfo): Capabilities {
     contextWindow: model.max_input_tokens ?? CONSERVATIVE_FALLBACK.contextWindow,
     maxOutputTokens: model.max_tokens ?? CONSERVATIVE_FALLBACK.maxOutputTokens,
     adaptiveThinking: caps?.thinking?.types?.adaptive?.supported === true,
+    // Read from the SAME live capability metadata as `adaptive` above, one sibling over. This host
+    // serves neither first-party path (no API key, no OAuth token), so unlike the Bedrock table this
+    // is NOT measured here — it mirrors the adjacent field's shape, and a null costs only a feature.
+    thinkingBudgetTokens:
+      caps?.thinking?.types?.enabled?.supported === true ? DEFAULT_THINKING_BUDGET_TOKENS : null,
     thinkingDisplaySummarized: caps?.thinking?.supported === true,
     effortLevels,
     promptCaching: DECLARED_FIRST_PARTY.promptCaching,

@@ -29,6 +29,7 @@ const CAPS: Capabilities = {
   contextWindow: 200_000,
   maxOutputTokens: 8192,
   adaptiveThinking: false,
+  thinkingBudgetTokens: null,
   thinkingDisplaySummarized: false,
   effortLevels: [],
   promptCaching: false,

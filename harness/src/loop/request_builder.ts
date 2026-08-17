@@ -39,6 +39,8 @@ export const MAX_CACHE_BREAKPOINTS = 4;
  * rather than a configuration one.
  */
 export const THINKING_HEADROOM_TOKENS = 8_192;
+/** Measured floor for the older shape: `budget_tokens: 512` is a 400 on every profile that takes it. */
+export const MIN_THINKING_BUDGET_TOKENS = 1_024;
 export const DEFAULT_ANSWER_TOKENS = 8_192;
 
 export interface BuildInput {
@@ -65,7 +67,7 @@ export function build(input: BuildInput): ProviderRequest {
     system: buildSystem(input.systemPrompt, input.capabilities),
     messages,
     tools: input.tools,
-    ...thinkingFor(input.capabilities),
+    ...thinkingFor(input),
     ...(input.effort && input.capabilities.effortLevels.includes(input.effort)
       ? { effort: input.effort }
       : {}),
@@ -190,20 +192,60 @@ function exceedsMinimum(prompt: string, caps: Capabilities): boolean {
  * thinking blocks with empty text; the feed would show a long pause and then
  * nothing, since clawdparty renders thinking live.
  */
-function thinkingFor(caps: Capabilities): Pick<ProviderRequest, "thinking"> {
-  if (!caps.adaptiveThinking) return {};
-  return {
-    thinking: {
-      type: "adaptive",
-      display: caps.thinkingDisplaySummarized ? "summarized" : "omitted",
-    },
-  };
+function thinkingFor(
+  input: Pick<BuildInput, "capabilities" | "answerTokens">,
+): Pick<ProviderRequest, "thinking"> {
+  const caps = input.capabilities;
+  if (caps.adaptiveThinking) {
+    // Preferred where a model offers both (sonnet-4-6 does): it is the shape the newer models are
+    // tuned for, and it needs no budget arithmetic.
+    return {
+      thinking: {
+        type: "adaptive",
+        display: caps.thinkingDisplaySummarized ? "summarized" : "omitted",
+      },
+    };
+  }
+
+  // The OLDER shape. Without it, opus-4-1/4-5, sonnet-4/4-5 and haiku-4-5 ran with no extended
+  // thinking at all — an earlier fix stopped their 400 by omitting `thinking`, because the
+  // request type could not express what they accept.
+  const budget = budgetFor(input);
+  return budget === null ? {} : { thinking: { type: "enabled", budget_tokens: budget } };
 }
 
-/** Sizes for thinking AND text together, then clamps to the model's ceiling. */
+/**
+ * The budget to send, or null when none can be sent validly.
+ *
+ * Both bounds are MEASURED, not documented: `budget_tokens` must be ≥ 1024 (512 is a 400), and
+ * `max_tokens` must be STRICTLY greater than the budget (an equal pair is a 400). So a model whose
+ * output ceiling cannot hold the answer plus 1024 gets no thinking rather than an invalid request.
+ */
+function budgetFor(input: Pick<BuildInput, "capabilities" | "answerTokens">): number | null {
+  const declared = input.capabilities.thinkingBudgetTokens;
+  if (declared === null) return null;
+
+  const answer = input.answerTokens ?? DEFAULT_ANSWER_TOKENS;
+  // What is left under the ceiling once the answer has its room, minus one token so the inequality
+  // is STRICT rather than merely satisfied.
+  const room = input.capabilities.maxOutputTokens - answer - 1;
+  const budget = Math.min(declared, room);
+  return budget >= MIN_THINKING_BUDGET_TOKENS ? budget : null;
+}
+
+/**
+ * Sizes for thinking AND text together, then clamps to the model's ceiling.
+ *
+ * The budgeted shape makes this load-bearing rather than merely generous: `max_tokens` must be
+ * STRICTLY greater than `thinking.budget_tokens` or the API refuses the request, so the budget is
+ * headroom in exactly the way the adaptive allowance is.
+ */
 export function sizeMaxTokens(input: Pick<BuildInput, "capabilities" | "answerTokens">): number {
   const answer = input.answerTokens ?? DEFAULT_ANSWER_TOKENS;
-  const headroom = input.capabilities.adaptiveThinking ? THINKING_HEADROOM_TOKENS : 0;
+  const budget = budgetFor(input);
+  const headroom = input.capabilities.adaptiveThinking
+    ? THINKING_HEADROOM_TOKENS
+    : (budget ?? 0) + (budget === null ? 0 : 1);
   return Math.min(answer + headroom, input.capabilities.maxOutputTokens);
 }
 

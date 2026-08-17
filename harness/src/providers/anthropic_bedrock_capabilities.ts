@@ -1,3 +1,4 @@
+import { DEFAULT_THINKING_BUDGET_TOKENS } from "./anthropic_family.js";
 /**
  * Per-MODEL Anthropic capabilities on Bedrock.
  *
@@ -57,6 +58,32 @@ const has = (modelId: string, fragments: readonly string[]): boolean =>
  */
 export function supportsAdaptiveThinking(modelId: string): boolean {
   return has(modelId, ADAPTIVE_THINKING);
+}
+
+/**
+ * Profiles measured to accept the OLDER `thinking: {type:"enabled", budget_tokens: N}` shape.
+ *
+ * Fragments carry the full version segment for a reason learned the hard way: a bare
+ * `claude-sonnet-4-` would also match sonnet-4-5 and sonnet-4-6, and a loose fragment 400s a whole
+ * family. Hence `claude-sonnet-4-20250514` for Sonnet 4 itself.
+ *
+ * The five older profiles are here because they support extended thinking and were getting NONE —
+ * they were made to work by omitting `thinking` entirely, since `ProviderRequest` could not express
+ * their shape. `claude-sonnet-4-6` is here too, measured to accept BOTH shapes; the request builder
+ * prefers `adaptive` where both are offered, which is policy, not capability.
+ */
+const BUDGETED_THINKING = [
+  "claude-opus-4-1",
+  "claude-opus-4-5",
+  "claude-sonnet-4-20250514",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+];
+
+/** The budget for a model, or null when it does not take the older shape at all. */
+export function thinkingBudgetTokens(modelId: string): number | null {
+  return has(modelId, BUDGETED_THINKING) ? DEFAULT_THINKING_BUDGET_TOKENS : null;
 }
 
 /** Whether the host can serve this profile at all. */

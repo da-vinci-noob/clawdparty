@@ -3,7 +3,9 @@ import {
   ANTHROPIC_BEDROCK_MEASURED_AT,
   isServableAnthropicProfile,
   supportsAdaptiveThinking,
+  thinkingBudgetTokens,
 } from "../../src/providers/anthropic_bedrock_capabilities.js";
+import { DEFAULT_THINKING_BUDGET_TOKENS } from "../../src/providers/anthropic_family.js";
 
 /**
  * Anthropic capabilities on Bedrock are PER MODEL, not per provider.
@@ -73,6 +75,53 @@ describe("adaptive thinking and effort", () => {
     // unsupported one is a 400 that kills the run. A wrong false costs a feature; a wrong true
     // costs the turn.
     expect(supportsAdaptiveThinking("us.anthropic.claude-opus-9-released-tomorrow")).toBe(false);
+  });
+});
+
+describe("the older budgeted thinking shape", () => {
+  it('holds for every profile measured to accept `{type:"enabled", budget_tokens}`', () => {
+    // The five that adaptive REFUSES were previously sent no `thinking` at all, so they ran with no
+    // extended thinking whatsoever — an earlier fix dodged a 400 by omission, because the request
+    // type could not express their shape. Each returned real thinking blocks on a live request.
+    for (const id of [
+      "us.anthropic.claude-opus-4-1-20250805-v1:0",
+      "global.anthropic.claude-opus-4-5-20251101-v1:0",
+      "global.anthropic.claude-sonnet-4-20250514-v1:0",
+      "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      // Accepts BOTH shapes. The request builder prefers adaptive; the table states what the model
+      // takes, which is a different claim.
+      "global.anthropic.claude-sonnet-4-6",
+    ]) {
+      expect(thinkingBudgetTokens(id), id).toBe(DEFAULT_THINKING_BUDGET_TOKENS);
+    }
+  });
+
+  it("is NULL for a profile measured to refuse it", () => {
+    // opus-4-7: `"thinking.type.enabled" is not supported for this model. Use "thinking.type.adaptive"
+    // and "output_config.effort"`. So this is per-MODEL on both sides, not a version cutoff — the
+    // exact assumption a single table would have encoded wrongly.
+    expect(thinkingBudgetTokens("global.anthropic.claude-opus-4-7")).toBeNull();
+  });
+
+  it("is NULL for anything unmeasured", () => {
+    // Omitting `thinking` works everywhere, so a wrong null costs a feature while a wrong number
+    // costs the turn — the same direction `supportsAdaptiveThinking` defaults in.
+    expect(thinkingBudgetTokens("us.anthropic.claude-opus-9-released-tomorrow")).toBeNull();
+  });
+
+  it("does not let a loose fragment claim a sibling version", () => {
+    // Sonnet 4's fragment carries its full date segment, because a bare
+    // `claude-sonnet-4-` also matches 4-5 and 4-6.
+    expect(thinkingBudgetTokens("global.anthropic.claude-sonnet-4-20250514-v1:0")).not.toBeNull();
+    expect(thinkingBudgetTokens("global.anthropic.claude-opus-4-7")).toBeNull();
+  });
+
+  it("clears the measured floor by a wide margin", () => {
+    // The shipped magnitude is a choice inside a measured rule (>= 1024, and strictly below
+    // max_tokens), not itself a measurement of a limit.
+    expect(DEFAULT_THINKING_BUDGET_TOKENS).toBeGreaterThanOrEqual(1024);
+    expect(DEFAULT_THINKING_BUDGET_TOKENS).toBeLessThan(64_000);
   });
 });
 

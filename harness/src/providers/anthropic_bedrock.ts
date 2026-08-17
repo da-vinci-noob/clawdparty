@@ -4,6 +4,7 @@ import { dedupeByModel, inferContextWindow } from "../models.js";
 import {
   isServableAnthropicProfile,
   supportsAdaptiveThinking,
+  thinkingBudgetTokens,
 } from "./anthropic_bedrock_capabilities.js";
 import { type RawStream, mapAnthropicStream } from "./anthropic_family.js";
 import { toAnthropicMessages } from "./anthropic_request.js";
@@ -50,7 +51,11 @@ import { type Discovery, discoverAwsCredential } from "./credentials/discover.js
  */
 const BEDROCK_CAPABILITIES: Omit<
   Capabilities,
-  "contextWindow" | "adaptiveThinking" | "thinkingDisplaySummarized" | "effortLevels"
+  | "contextWindow"
+  | "adaptiveThinking"
+  | "thinkingBudgetTokens"
+  | "thinkingDisplaySummarized"
+  | "effortLevels"
 > = {
   streaming: true,
   toolUse: true,
@@ -86,6 +91,10 @@ function capabilitiesFor(model: string): Capabilities {
   return {
     ...BEDROCK_CAPABILITIES,
     adaptiveThinking: adaptive,
+    // The OTHER thinking shape, and independent of `adaptive` rather than its complement: sonnet-4-6
+    // takes both, opus-4-7 takes only adaptive, and the five older profiles take only this one — so
+    // they think at all now instead of running with thinking omitted.
+    thinkingBudgetTokens: thinkingBudgetTokens(model),
     thinkingDisplaySummarized: adaptive,
     // Effort tracks adaptive thinking exactly — measured, not assumed: every profile that
     // accepted one accepted the other, and every profile that refused one refused both.

@@ -317,6 +317,7 @@ function caps(over: { webSearch?: boolean; webFetch?: boolean }) {
     contextWindow: 1_000_000,
     maxOutputTokens: 64_000,
     adaptiveThinking: true,
+    thinkingBudgetTokens: null,
     thinkingDisplaySummarized: true,
     effortLevels: ["high" as const],
     promptCaching: true,

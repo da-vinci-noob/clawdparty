@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 10 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 11 } as const;
 
 /**
  * The 31 frozen event type names. Adding or removing a name is a CONTRACT
@@ -685,6 +685,23 @@ export interface ProviderCapabilities {
   contextWindow: number;
   maxOutputTokens: number;
   adaptiveThinking: boolean;
+  /**
+   * Tokens to reserve for extended thinking under the OLDER `thinking: {type:"enabled",
+   * budget_tokens: N}` shape, or `null` when the model does not take it (added at v1.11).
+   *
+   * A SECOND field rather than a widening of `adaptiveThinking`, because the two are genuinely
+   * independent and measured to overlap: on Bedrock, `claude-sonnet-4-6` accepts BOTH shapes,
+   * `claude-opus-4-7` accepts only `adaptive` (`"thinking.type.enabled" is not supported for this
+   * model`), and the five older profiles — opus-4-1, opus-4-5, sonnet-4, sonnet-4-5, haiku-4-5 —
+   * accept only `enabled`, having previously run with no extended thinking at all because the
+   * request type could not express their shape.
+   *
+   * Consumers preferring `adaptive` where both are offered is a POLICY choice, not something this
+   * field encodes: it states what the model accepts. Two constraints ride with it, both measured:
+   * the value must be **≥ 1024**, and `maxOutputTokens` for the request must be **strictly
+   * greater** than it — an equal pair is a 400.
+   */
+  thinkingBudgetTokens: number | null;
   thinkingDisplaySummarized: boolean;
   effortLevels: readonly EffortLevel[];
   promptCaching: boolean;

@@ -85,6 +85,7 @@ const MODEL_CAPS = {
   contextWindow: 200_000,
   maxOutputTokens: 64_000,
   adaptiveThinking: true,
+  thinkingBudgetTokens: null,
   thinkingDisplaySummarized: true,
   effortLevels: [],
   promptCaching: true,

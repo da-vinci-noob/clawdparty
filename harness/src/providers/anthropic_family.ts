@@ -37,6 +37,16 @@ export interface RawStream extends AsyncIterable<RawStreamEvent> {
   currentMessage?: { content?: unknown[] } | undefined;
 }
 
+/**
+ * The budget to reserve when a model takes the OLDER `thinking: {type:"enabled", budget_tokens}`
+ * shape, shared by all three Anthropic paths because it is a property of the API, not of a host.
+ *
+ * MEASURED on Bedrock: the shape on six profiles, the floor (`512` is a 400 — "Input should be
+ * greater than or equal to 1024"), and that `max_tokens` must be STRICTLY greater than the budget.
+ * The magnitude is a choice inside that rule.
+ */
+export const DEFAULT_THINKING_BUDGET_TOKENS = 8192;
+
 export function blockKind(type: string): "text" | "thinking" | "tool_use" | "compaction" {
   if (type === "text") return "text";
   if (type === "thinking" || type === "redacted_thinking") return "thinking";

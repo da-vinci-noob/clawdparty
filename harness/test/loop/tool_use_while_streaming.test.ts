@@ -45,6 +45,7 @@ const BASE: Capabilities = {
   contextWindow: 1_000_000,
   maxOutputTokens: 64_000,
   adaptiveThinking: false,
+  thinkingBudgetTokens: null,
   thinkingDisplaySummarized: false,
   effortLevels: [],
   promptCaching: false,

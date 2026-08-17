@@ -233,6 +233,58 @@ emitted at the TURN BOUNDARY, so `ai_text_delta` carried no earlier information 
 leave as they are produced. Neither of these was detectable by reading the contract — both were
 found by generating a real run and reading what arrived.
 
+## [1.11.0] — `thinkingBudgetTokens`: the older extended-thinking shape (additive)
+
+**`CONTRACT_VERSION = { major: 1, minor: 11 }`.** Additive `minor` bump: one new REQUIRED field on
+`ProviderCapabilities`. Additive for consumers; a compile error for producers until each states a
+value, which is the point — tsc found 28 sites.
+
+```ts
+interface ProviderCapabilities {
+  adaptiveThinking: boolean;
+  thinkingBudgetTokens: number | null;   // NEW
+  ...
+}
+```
+
+**Why.** An earlier fix stopped a 400 by omitting `thinking` entirely for the models that refuse
+`{type:"adaptive"}` — which made them WORK, and left five Bedrock profiles (opus-4-1, opus-4-5,
+sonnet-4, sonnet-4-5, haiku-4-5) running with **no extended thinking at all**. They support it; the
+request type could not express their shape.
+
+**The split is per MODEL on both sides, measured, and it is not a version cutoff:**
+
+| shape accepted | profiles |
+|---|---|
+| `{type:"adaptive"}` only | `claude-opus-4-7` — *"thinking.type.enabled is not supported for this model"* |
+| **both** | `claude-sonnet-4-6` |
+| `{type:"enabled", budget_tokens}` only | opus-4-1, opus-4-5, sonnet-4, sonnet-4-5, haiku-4-5 |
+
+So a second field rather than a widening of `adaptiveThinking`: the two are independent and overlap.
+The field states what a model ACCEPTS; preferring `adaptive` where both are offered is policy and
+lives in the request builder.
+
+**This also corrects a note in `providers/contract.ts` (R10)**, which listed
+`thinking.budget_tokens` alongside `temperature`/`top_p`/`top_k` as "returns 400 on current models".
+True of opus-4-7, false of sonnet-4-6, and false of every older profile — where it is the only shape
+that works. `temperature` stays absent for a sharper measured reason: with thinking enabled,
+`temperature: 0.5` is refused outright ("`temperature` may only be set to 1 when thinking is
+enabled"), so it is incompatible with the feature rather than merely useless.
+
+**Two constraints travel with the field, both measured, and both are enforced when sizing a request:**
+`budget_tokens` must be **≥ 1024** (512 → *"Input should be greater than or equal to 1024"*), and
+`max_tokens` must be **strictly greater** than the budget (an equal pair is a 400). A model whose
+output ceiling cannot hold the answer plus 1024 therefore gets NO thinking rather than an invalid
+request — `ProviderRequest.thinking` is now a discriminated union, so `budget_tokens` on an adaptive
+request is a type error instead of a 400.
+
+**What producers should do.** State it. `null` is the safe default and means "does not take this
+shape": omitting `thinking` works everywhere, so a wrong null costs a feature while a wrong number
+costs the turn. Every Converse model is `null` — Converse has neither shape.
+
+**Recovery / migration.** Nothing stored changes. Runs recorded before this bump were sent no
+`thinking` field on those five profiles, which is exactly what they show.
+
 ## [protocol] — `allowed_tools` retired from `POST /runs` (breaking, in-window)
 
 **No `CONTRACT_VERSION` bump** — endpoint/protocol changes are recorded here and do not move the
