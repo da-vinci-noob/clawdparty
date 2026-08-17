@@ -1,4 +1,4 @@
-import type { ProviderEvent, StopReason } from "./contract.js";
+import type { ProviderEvent, StopReason, Usage } from "./contract.js";
 
 /**
  * Stream mapping shared by every Anthropic-family adapter (direct, host OAuth, Bedrock).
@@ -17,19 +17,23 @@ import type { ProviderEvent, StopReason } from "./contract.js";
  * even by accident.
  */
 
+/** The usage figures a vendor stream reports, on either of the two events that carry them. */
+export interface RawUsage {
+  input_tokens?: number | null;
+  output_tokens?: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+}
+
 /** The subset of a vendor stream event this mapping reads. Structural, deliberately. */
 export interface RawStreamEvent {
   type: string;
   index?: number;
-  message?: { model?: string };
+  /** `usage` here is the OPENING count — `input_tokens` plus the cache fields. */
+  message?: { model?: string; usage?: RawUsage };
   content_block?: { type?: string };
   delta?: Record<string, unknown>;
-  usage?: {
-    input_tokens?: number | null;
-    output_tokens?: number;
-    cache_read_input_tokens?: number | null;
-    cache_creation_input_tokens?: number | null;
-  };
+  usage?: RawUsage;
 }
 
 /** What a vendor stream must offer to be mapped: iteration plus the accumulated message. */
@@ -46,6 +50,16 @@ export interface RawStream extends AsyncIterable<RawStreamEvent> {
  * The magnitude is a choice inside that rule.
  */
 export const DEFAULT_THINKING_BUDGET_TOKENS = 8192;
+
+/** One raw usage object to the contract's shape; a missing figure is 0, never undefined. */
+function usageFrom(usage: RawUsage | undefined): Usage {
+  return {
+    input_tokens: usage?.input_tokens ?? 0,
+    output_tokens: usage?.output_tokens ?? 0,
+    cache_read_input_tokens: usage?.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: usage?.cache_creation_input_tokens ?? 0,
+  };
+}
 
 export function blockKind(type: string): "text" | "thinking" | "tool_use" | "compaction" {
   if (type === "text") return "text";
@@ -86,9 +100,20 @@ export function mapStopReason(reason: string | null | undefined): StopReason {
  * (R6). An unmapped event type becomes `{ t: "raw" }` rather than throwing.
  */
 export async function* mapAnthropicStream(stream: RawStream): AsyncIterable<ProviderEvent> {
+  /**
+   * Usage accumulated ACROSS the stream, because the two events split it and models differ on how
+   * (measured on Bedrock): `message_start` always carries `input_tokens` and the cache fields,
+   * while `message_delta` carries the final `output_tokens` and only SOMETIMES repeats the input
+   * ones. Reading the delta alone recorded `input_tokens: 0` for every model of the first kind —
+   * opus-4-1 among them — and the web's context bar divides that figure by the window, so a session
+   * with real history displayed as using none.
+   */
+  let opening: Usage | null = null;
+
   for await (const event of stream) {
     switch (event.type) {
       case "message_start":
+        opening = usageFrom(event.message?.usage);
         yield { t: "message_start", model: String(event.message?.model ?? "") };
         break;
 
@@ -112,18 +137,25 @@ export async function* mapAnthropicStream(stream: RawStream): AsyncIterable<Prov
         break;
       }
 
-      case "message_delta":
+      case "message_delta": {
+        const delta = usageFrom(event.usage);
         yield {
           t: "message_delta",
           stopReason: mapStopReason(event.delta?.stop_reason as string | null | undefined),
           usage: {
-            input_tokens: event.usage?.input_tokens ?? 0,
-            output_tokens: event.usage?.output_tokens ?? 0,
-            cache_read_input_tokens: event.usage?.cache_read_input_tokens ?? 0,
-            cache_creation_input_tokens: event.usage?.cache_creation_input_tokens ?? 0,
+            // The delta wins where it reports a figure — it is the later and more complete one —
+            // and `message_start` fills the fields it omits. `output_tokens` is the reverse: the
+            // opening event carries the count SO FAR, so the delta's total is the one to keep.
+            input_tokens: delta.input_tokens || (opening?.input_tokens ?? 0),
+            output_tokens: delta.output_tokens,
+            cache_read_input_tokens:
+              delta.cache_read_input_tokens || (opening?.cache_read_input_tokens ?? 0),
+            cache_creation_input_tokens:
+              delta.cache_creation_input_tokens || (opening?.cache_creation_input_tokens ?? 0),
           },
         };
         break;
+      }
 
       case "message_stop":
         yield { t: "message_stop" };
