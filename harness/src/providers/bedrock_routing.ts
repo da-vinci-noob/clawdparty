@@ -27,9 +27,47 @@ export interface BedrockProfile {
  */
 const ONE_MILLION_FAMILIES = ["opus-4-8", "opus-4-7", "sonnet-5", "sonnet-4-6", "fable-5"];
 
+/**
+ * MEASURED windows, from Bedrock's own refusal of an over-long input (`npm run probe:context`).
+ *
+ * The flat 200_000 below used to apply to every non-Anthropic model, and it OVER-declared: all four
+ * models that named a window said 131072. Over-declaring is the wrong direction for a gauge — the
+ * bar read 65% when the model was actually full, so the run died at what looked like two thirds.
+ * Found by verifying S8.4 against the live stack.
+ */
+const MEASURED_WINDOWS: Array<[token: string, window: number]> = [
+  ["llama3-1-8b", 131_072],
+  ["llama3-1-70b", 131_072],
+  ["llama3-3-70b", 131_072],
+  ["pixtral-large", 131_072],
+];
+
+/**
+ * What an UNMEASURED non-Anthropic model gets. Erring low shows a fuller bar; erring high hides
+ * real pressure until the request fails — the same asymmetry `CONSERVATIVE_MAX_OUTPUT_TOKENS`
+ * documents, in the same direction.
+ *
+ * 131_072 rather than the old 200_000 because it is the only value any measured model reported, and
+ * because the two models that refused WITHOUT naming a number (deepseek-r1, nova-micro) are
+ * therefore below the ~280k that refused them. Five models (both Palmyras, three Novas) accepted
+ * ~280k and are known only to be LARGER than that, so for them this under-declares — which is the
+ * harmless direction.
+ */
+export const CONSERVATIVE_CONTEXT_WINDOW = 131_072;
+
 export function inferContextWindow(id: string): number {
   const lower = id.toLowerCase();
-  return ONE_MILLION_FAMILIES.some((token) => lower.includes(token)) ? 1_000_000 : 200_000;
+  if (ONE_MILLION_FAMILIES.some((token) => lower.includes(token))) return 1_000_000;
+  const measured = MEASURED_WINDOWS.find(([token]) => lower.includes(token));
+  if (measured) return measured[1];
+  // Anthropic models keep the 200k they have always had: the Messages API reports
+  // `max_input_tokens` for the first-party path and every Claude model is at least this. Matched on
+  // `claude` as well as the vendor segment, because ids reach here in bare form too
+  // (`claude-haiku-4-5-...`) and `isAnthropicProfileId` — the ROUTING predicate, deliberately left
+  // alone — only looks for the segment.
+  return lower.includes("claude") || isAnthropicProfileId(id)
+    ? 200_000
+    : CONSERVATIVE_CONTEXT_WINDOW;
 }
 
 /**

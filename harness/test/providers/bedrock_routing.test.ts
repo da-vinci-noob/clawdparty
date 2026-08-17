@@ -110,9 +110,18 @@ describe("inferContextWindow", () => {
     }
   });
 
-  it("maps haiku and anything unrecognised to 200K", () => {
-    for (const id of ["claude-haiku-4-5-20251001", "us.deepseek.r1-v1:0", "totally-unknown"]) {
+  it("maps haiku and any other CLAUDE model to 200K", () => {
+    for (const id of ["claude-haiku-4-5-20251001", "us.anthropic.claude-haiku-4-5-v1:0"]) {
       expect(inferContextWindow(id), id).toBe(200_000);
+    }
+  });
+
+  it("gives a non-Anthropic model the conservative window, not the old flat 200K", () => {
+    // `us.deepseek.r1-v1:0` was asserted at 200_000 here, and a live measurement caught the defect: the
+    // flat value OVER-declared every non-Anthropic model, and the four that named a window said
+    // 131072. See `context_window.test.ts` for the measured rows.
+    for (const id of ["us.deepseek.r1-v1:0", "totally-unknown"]) {
+      expect(inferContextWindow(id), id).toBe(131_072);
     }
   });
 
