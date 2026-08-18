@@ -213,3 +213,71 @@ describe("a rejected request is not a network fault", () => {
     expect(remedy).toMatch(/network|region/i);
   });
 });
+
+/**
+ * A 429 that reports NO limits is not a quota answer, and telling someone to wait is wrong.
+ *
+ * Measured against the live API with a Keychain subscription credential. The response:
+ *
+ *   status 429 · x-should-retry: true · request-id present
+ *   anthropic-organization-id and anthropic-workspace-id PRESENT — so it authenticated
+ *   no `retry-after`, and no `anthropic-ratelimit-*` header of any kind
+ *
+ * A genuine quota refusal says what the limit is, what remains, and when it resets. This one
+ * describes no limit at all, and the vendor's own `message` field is the word "Error". The owner ran
+ * `claude setup-token`, followed our remedy — "Wait and retry; reduce concurrent runs if this
+ * persists" — and waited, which could not have helped.
+ *
+ * is the requirement this lands on: whether a third-party client may drive a subscription
+ * credential is the account owner's decision, and it can arrive as a 429 rather than a 403. So the
+ * remedy must not assert a quota it cannot see — it should say the credential authenticated, that no
+ * limit was reported, and what the alternatives are.
+ */
+describe("a 429 is read by what it reports", () => {
+  const HINTS = {
+    expired: "expired hint",
+    notEntitled: "entitlement hint",
+    unreachable: "Could not reach the provider. Check network access",
+  };
+
+  const with429 = (headers: Record<string, string>) =>
+    Object.assign(new Error("429 rate_limit_error"), {
+      status: 429,
+      headers: new Headers(headers),
+    });
+
+  it("says wait and retry when a real quota IS reported", () => {
+    const err = with429({
+      "retry-after": "30",
+      "anthropic-ratelimit-requests-remaining": "0",
+      "anthropic-ratelimit-requests-reset": "2026-08-18T18:00:00Z",
+    });
+
+    expect(classifyStreamError(err, HINTS).remedy).toMatch(/wait/i);
+  });
+
+  it("does NOT say wait when no limit is reported at all", () => {
+    const err = with429({ "x-should-retry": "true", "request-id": "req_x" });
+
+    const { remedy } = classifyStreamError(err, HINTS);
+    expect(remedy).not.toMatch(/wait and retry/i);
+    // What the reader needs instead: it authenticated, nothing said you are over a limit, and here
+    // are the paths that do work.
+    expect(remedy).toMatch(/no.*(limit|quota)|reported no/i);
+    expect(remedy).toMatch(/API key|Bedrock/i);
+  });
+
+  it("treats a partial rate-limit header set as a real quota, erring toward retry", () => {
+    // One header is enough to mean "a limit was described"; inventing a threshold would be guessing.
+    const err = with429({ "anthropic-ratelimit-tokens-remaining": "0" });
+
+    expect(classifyStreamError(err, HINTS).remedy).toMatch(/wait/i);
+  });
+
+  it("still says wait when there are no headers at all to read", () => {
+    // A transport that surfaces no headers tells us nothing, so the older, safer advice stands.
+    expect(
+      classifyStreamError(Object.assign(new Error("429"), { status: 429 }), HINTS).remedy,
+    ).toMatch(/wait/i);
+  });
+});

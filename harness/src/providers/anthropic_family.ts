@@ -197,6 +197,26 @@ export function classifyProbeFailure(
   return { reason: "unreachable", remedy: `${hints.unreachable}: ${String(err)}` };
 }
 
+/**
+ * Did the 429 actually DESCRIBE a limit?
+ *
+ * One header is enough — inventing a threshold would be guessing. No headers at all means the
+ * transport told us nothing, which is not the same as "no limit exists", so that case is treated as a
+ * real quota and keeps the older, safer advice.
+ */
+function quotaWasReported(err: unknown): boolean {
+  const headers = (err as { headers?: Headers | Record<string, string> } | null)?.headers;
+  if (!headers) return true;
+  const names =
+    typeof (headers as Headers).forEach === "function"
+      ? [...(headers as Headers).keys()]
+      : Object.keys(headers as Record<string, string>);
+  return names.some(
+    (name) =>
+      name.toLowerCase() === "retry-after" || name.toLowerCase().startsWith("anthropic-ratelimit-"),
+  );
+}
+
 function isAuthResolutionFailure(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /could not resolve authentication method|expected one of apiKey/i.test(message);
@@ -237,11 +257,27 @@ export function classifyStreamError(
     };
   }
   if (status === 429) {
-    return {
-      kind: "api_error",
-      message: "rate limited (429)",
-      remedy: "Wait and retry; reduce concurrent runs if this persists.",
-    };
+    return quotaWasReported(err)
+      ? {
+          kind: "api_error",
+          message: "rate limited (429)",
+          remedy: "Wait and retry; reduce concurrent runs if this persists.",
+        }
+      : {
+          kind: "api_error",
+          message: `rate limited (429) with no limit reported: ${String(err)}`,
+          // MEASURED, not inferred. A subscription credential from the Keychain got a 429 whose
+          // response carried `anthropic-organization-id` and `anthropic-workspace-id` — so it
+          // authenticated — and NO `retry-after` or `anthropic-ratelimit-*` header of any kind. A real
+          // quota refusal states the limit, what remains and when it resets; this stated none, and the
+          // vendor's own `message` was the word "Error". Telling someone to wait for a limit nobody
+          // described sends them to wait forever, which is what happened.
+          remedy:
+            "The provider accepted this credential and then refused the request, reporting no limit " +
+            "and no retry time — so this is probably not your usage running out. A subscription seat " +
+            "is not necessarily permitted to drive this API directly, which is the account owner's " +
+            "decision to check. An API key or Amazon Bedrock are the paths that do not depend on it.",
+        };
   }
   if (status === 400) {
     return {
