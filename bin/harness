@@ -160,6 +160,48 @@ cmd_status() {
     return 1
   fi
   echo "harness: OK (pid ${pid}) ${HARNESS_BIND_HOST}:${HARNESS_PORT} ${body}"
+  agent_status
+}
+
+# Which ssh agent Claude will push with, and whether it holds anything.
+#
+# Reported because the failure is otherwise invisible until a `git push` inside a tool call says
+# `Permission denied (publickey)`. Measured on this host: the harness had inherited Apple's launchd
+# agent, which holds NO identities, while the developer's real agent held four keys — and the
+# conclusion drawn at the time was that the agent "refuses to sign" and needed interactive approval.
+# It was the wrong agent answering. Read from the RUNNING process, not this shell, because those are
+# exactly the two that disagreed.
+agent_status() {
+  local sock
+  # Space-safe: the value can CONTAIN spaces (1Password's is under "Group Containers"), so the env
+  # cannot be split on them. Take everything after the key, then cut at the next `VAR=`. Splitting
+  # on spaces truncated the path and reported "NO identities" for a perfectly good agent — the exact
+  # false alarm this function exists to prevent.
+  sock="$(ps eww -p "$(cat "${pid_file}")" 2>/dev/null | tr '\n' ' ' \
+    | sed -n 's/.*SSH_AUTH_SOCK=\(.*\)/\1/p' | sed 's/ [A-Za-z_][A-Za-z_0-9]*=.*//')"
+  if [[ -z "${sock}" ]]; then
+    echo "  ssh agent: NONE — Claude cannot authenticate a push. Set SSH_AUTH_SOCK in .env.local."
+    return 0
+  fi
+  # `ssh-add -l` distinguishes the two failures in its EXIT CODE, and they need different advice:
+  # 1 = agent reachable but empty, 2 = cannot reach it at all (a stale or wrong path). Counting
+  # output lines instead reported Apple's empty agent as "1 identities", because
+  # "The agent has no identities." is a line — a false all-clear from the check meant to catch this.
+  local listing status
+  listing="$(SSH_AUTH_SOCK="${sock}" ssh-add -l 2>/dev/null)" && status=0 || status=$?
+  case "${status}" in
+    0) echo "  ssh agent: ${sock} ($(printf '%s\n' "${listing}" | grep -c .) identities)" ;;
+    1)
+      echo "  ssh agent: ${sock}"
+      echo "             reachable but holds NO identities — a push will fail. If that is not the"
+      echo "             agent you use, set SSH_AUTH_SOCK in .env.local (see .env.example)."
+      ;;
+    *)
+      echo "  ssh agent: ${sock}"
+      echo "             CANNOT BE REACHED — the path is stale or wrong. Set SSH_AUTH_SOCK in"
+      echo "             .env.local (see .env.example) and restart."
+      ;;
+  esac
 }
 
 # Session stores and their schema versions.
