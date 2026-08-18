@@ -463,3 +463,36 @@ describe("one construction path, not two", () => {
     expect(reopened.map((e) => e.type)).toEqual(live.map((e) => e.type));
   });
 });
+
+/**
+ * The LIVE half of  is not verifiable, and the gap lives here rather than only in a note.
+ *
+ * Everything above proves the fold byte-for-byte — but only because `RecordingAdapter` keeps every
+ * `ProviderRequest` it was handed. Nothing keeps them for a real session, and scenario S4 step 2
+ * told a reader to `diff` the rebuild against `/tmp/actual-requests.jsonl`: a file no script in this
+ * repo writes. `capture_fixture.ts` captures EVENTS, not requests.
+ *
+ * `request_header` fingerprints the system prompt and the tool schemas — the two things the record
+ * does not copy — and nothing fingerprints the messages array, which is the part the fold produces.
+ * So on a real session there is no comparison side at all.
+ *
+ * Both fixes cost something real, which is why this is recorded rather than chosen:
+ * putting the digest on `request_header` breaks emit-on-change, because the messages array grows
+ * every turn and the snapshot is fingerprinted for change detection — measured, and it fails
+ * `behaviour_parity.test.ts`'s "not once per request". Putting it on the per-turn usage ledger is
+ * the right home (`entry_store_seq` already marks the boundary there) but needs a store-schema bump,
+ * and the store is REFUSED never migrated, so every existing session needs `reset-session`.
+ */
+describe("what the record cannot yet vouch for", () => {
+  it("has no per-request messages fingerprint, so a real session cannot be checked", async () => {
+    await run([turn([text(0, "hi")], "end_turn")]);
+    const header = (await reopen()).entriesFrom(0).find((e) => e.type === "request_header");
+
+    expect(header).toBeDefined();
+    const payload = header?.payload as Record<string, unknown>;
+    expect(payload.system_prompt_digest).toBeTruthy();
+    expect(payload.tool_schemas_digest).toBeTruthy();
+    // Inverts loudly when `messages_digest` ships, which is the point of asserting an absence.
+    expect(payload.messages_digest).toBeUndefined();
+  });
+});
