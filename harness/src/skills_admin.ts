@@ -67,14 +67,45 @@ export interface RemoveSkillInput {
 
 export type SkillWriteResult =
   | { ok: true; scope: SkillScope; name: string; path: string }
-  | { ok: false; reason: "invalid_name" | "exists" | "not_found" | "failed"; detail?: string };
+  | {
+      ok: false;
+      reason: "invalid_name" | "invalid_scope" | "exists" | "not_found" | "failed";
+      detail?: string;
+    };
 
-/** The two roots, and nothing else is writable. */
+const SCOPES: readonly string[] = ["project", "host"];
+
+/**
+ * Is this one of the two scopes? Checked rather than assumed, for the same reason `NAME` is.
+ *
+ * `skillsRoot` used to be `scope === "project" ? project : HOST`, so ANY other value — a typo, a new
+ * caller, a future third scope — resolved to `~/.claude/skills`, the more privileged tree. Rails
+ * defaults the same field the opposite way (`params[:scope] == 'host' ? 'host' : 'project'`), so the
+ * two ends of one seam failed in opposite directions and only the Rails path was safe. Every harness
+ * route is bearer-authed because loopback is not the boundary, so "anything else" is a real caller.
+ */
+function validScope(scope: string): scope is SkillScope {
+  return SCOPES.includes(scope);
+}
+
+/** The two roots, and nothing else is writable. Callers must validate `scope` first. */
 export function skillsRoot(scope: SkillScope, cwd: string, home: string = homedir()): string {
   return scope === "project" ? join(cwd, ".claude", "skills") : join(home, ".claude", "skills");
 }
 
+/** The refusal both entry points share, naming the value received so a caller can see its own bug. */
+function refuseScope(scope: string): SkillWriteResult {
+  return {
+    ok: false,
+    reason: "invalid_scope",
+    detail: `scope must be "project" or "host", got ${JSON.stringify(scope)}`,
+  };
+}
+
 export function addSkill(input: AddSkillInput): SkillWriteResult {
+  if (!validScope(input.scope)) {
+    return refuseScope(input.scope);
+  }
   if (!NAME.test(input.name)) {
     return { ok: false, reason: "invalid_name" };
   }
@@ -104,6 +135,9 @@ export function addSkill(input: AddSkillInput): SkillWriteResult {
 }
 
 export function removeSkill(input: RemoveSkillInput): SkillWriteResult {
+  if (!validScope(input.scope)) {
+    return refuseScope(input.scope);
+  }
   if (!NAME.test(input.name)) {
     return { ok: false, reason: "invalid_name" };
   }
