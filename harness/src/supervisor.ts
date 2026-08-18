@@ -471,14 +471,24 @@ export class Supervisor {
    * Ephemeral events get no `store_seq` because they were never persisted to have
    * one — and they must not be buffered or retried, since a stale delta replayed
    * after the durable block has settled would corrupt the accumulator.
+   *
+   * The position is looked up PER EVENT. It used to be `store.maxStoreSeq()` for the whole batch,
+   * which shipped the same number for every event in it and offset past the entries by whatever
+   * non-entry rows the commit also wrote — leaving the  re-derivation unable to reconcile.
    */
   private ship(events: EventEnvelope[], store: HarnessStoreApi): void {
-    const highWater = store.maxStoreSeq();
     const durable: EventEnvelope[] = [];
 
     for (const event of events) {
-      if (event.seq === null) void this.transport.deliverEphemeral(event);
-      else durable.push({ ...event, store_seq: highWater });
+      if (event.seq === null) {
+        void this.transport.deliverEphemeral(event);
+        continue;
+      }
+      // Null for an event the durability policy emitted without a matching entry, and for a
+      // session-scoped event that belongs to no run; the high-water mark is the honest upper
+      // bound for either.
+      const own = event.ai_run_id === null ? null : store.storeSeqFor(event.ai_run_id, event.seq);
+      durable.push({ ...event, store_seq: own ?? store.maxStoreSeq() });
     }
     if (durable.length > 0) void this.transport.deliverDurable(durable);
   }

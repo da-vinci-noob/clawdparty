@@ -402,6 +402,22 @@ class HarnessStore implements HarnessStoreApi {
     return row.m;
   }
 
+  /**
+   * One entry's OWN position, or null when there is no such entry.
+   *
+   * Indexed by `UNIQUE (run_id, seq)` — the same index that makes ingest idempotent, so this reads an
+   * existing guarantee rather than adding one. It exists because `store_seq` shipped to Rails was the
+   * store's high-water mark instead: every event in a batch got the same number, offset by however
+   * many non-entry rows the commit also wrote, which made the projection digest unmatchable.
+   */
+  storeSeqFor(runId: string, seq: number): number | null {
+    this.assertOpen();
+    const row = this.db
+      .prepare("SELECT store_seq FROM entries WHERE run_id = ? AND seq = ?")
+      .get(runId, seq) as { store_seq: number } | undefined;
+    return row?.store_seq ?? null;
+  }
+
   /** Allocate a usage id up front so a request can be settled under it later. */
   reserveUsageId(): number {
     this.assertOpen();

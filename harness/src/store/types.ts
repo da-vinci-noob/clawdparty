@@ -264,6 +264,8 @@ export interface HarnessStoreApi {
   usageRows(runId: string): UsageRow[];
   activeRunIds(): string[];
   maxStoreSeq(): number;
+  /** An entry's own position, by `(run_id, seq)`. Null when there is no such entry. */
+  storeSeqFor(runId: string, seq: number): number | null;
   reserveUsageId(): number;
   /**
    * The highest per-run `seq` already WRITTEN. A read, not an allocation — it exists so a
