@@ -1,16 +1,23 @@
 #!/usr/bin/env node
-// Scenario S4 step 3 — : the Postgres projection can be RE-DERIVED from the harness's
-// record, and the audit that says whether it currently matches actually detects a mismatch.
+// Scenario S4 steps 3 and 4 — three of S4's four pass conditions, against the live stack:
+// the projection RE-DERIVES from the record , an INJECTED divergence is detected
+//, and no credential value is anywhere in the record.
 //
-// Runs a real run so the events are real, then checks, then wipes the projection and rebuilds it
-// from the store alone. Uses the cheapest live model available (llama3-1-8b via Converse: ~25
-// tokens for this prompt) because the point is the plumbing, not the answer.
+// The fourth — byte-identical reconstruction of a compacted session  — is S4 steps 1-2
+// and needs a session with a tool-surface change and a compaction, so it stays manual.
+//
+// Runs a real run so the events are real. Uses the cheapest live model available (llama3-1-8b via
+// Converse, ~25 tokens for this prompt) because the point is the plumbing, not the answer.
 //
 // Usage: bin/verify-projection [base-url]
+
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 const BASE = process.argv[2] ?? "http://localhost:3000";
 const MODEL = process.env.VERIFY_MODEL ?? "us.meta.llama3-1-8b-instruct-v1:0";
 const PROVIDER = process.env.VERIFY_PROVIDER ?? "bedrock-converse";
+const DB = process.env.VERIFY_DB ?? "clawdparty_development";
 
 let failures = 0;
 function check(ok, label, detail = "") {
@@ -30,8 +37,17 @@ async function call(path, { method = "GET", cookie, body } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Postgres runs in a container, so the injection goes through compose rather than a local psql. */
+function psql(sql) {
+  return execFileSync(
+    "docker",
+    ["compose", "exec", "-T", "postgres", "psql", "-U", "postgres", "-d", DB, "-c", sql],
+    { encoding: "utf8" },
+  );
+}
+
 async function main() {
-  console.log(`\nprojection re-derivation (S4.3) — against ${BASE}\n`);
+  console.log(`\nprojection: re-derive, detect, scan (S4.3-4) — against ${BASE}\n`);
 
   const created = await fetch(`${BASE}/api/sessions`, {
     method: "POST",
@@ -116,6 +132,65 @@ async function main() {
       replayed.some((e) => e.type === type),
       `${type} survived the wipe`,
     );
+  }
+
+  // the check must DETECT a divergence, not merely agree when there is none. Unit specs
+  // ask this of a stubbed harness; this asks it of a real store, which is the half that matters
+  // after both sides of the comparison were just changed.
+  //
+  // `event_type` and not `payload`: the digest covers the ordered `(store_seq, type, seq)` triples
+  // and deliberately EXCLUDES payload, because JSONB key order is not stable across a round trip.
+  const target = `and store_seq = (select max(store_seq) from events where session_id = ${sessionId})`;
+  const mutated = psql(
+    `update events set event_type = 'ai_thinking'
+       where session_id = ${sessionId} and event_type <> 'ai_thinking' ${target};`,
+  );
+  check(mutated.includes("UPDATE 1"), "mutated one projected row", mutated.trim().split("\n")[0]);
+
+  const injected = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(injected.json)}\n`);
+  const detected = injected.json?.diverged === true;
+  check(detected, "the mutation is DETECTED", detected ? "" : "reported no divergence");
+  check(
+    injected.json?.reason === "content_mismatch",
+    "and named as content_mismatch",
+    String(injected.json?.reason),
+  );
+  // Detecting it must not fix it: a silent auto-heal destroys the evidence an operator came for.
+  const stillThere = psql(
+    `select count(*) from events where session_id = ${sessionId}
+       and event_type = 'ai_thinking' ${target};`,
+  );
+  check(/^\s*1$/m.test(stillThere), "the check repaired nothing");
+
+  // The exclusion, asserted rather than assumed. A payload-only mutation is NOT reported, so the
+  // check's own comment claiming it "catches a MUTATED row" is true of the structural triple and
+  // not of content. Worth knowing before trusting a green check to mean the rows are intact.
+  psql(`update events set event_type = '${terminal.type}' where session_id = ${sessionId} ${target};`);
+  psql(
+    `update events set payload = payload || '{"text":"tampered"}'::jsonb
+       where session_id = ${sessionId} ${target};`,
+  );
+  const payloadOnly = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  check(
+    payloadOnly.json?.diverged === false,
+    "a payload-only mutation is deliberately NOT detected",
+    `reported ${payloadOnly.json?.reason}`,
+  );
+
+  // zero credential values anywhere in the record. The store IS the record, so it is the
+  // thing to scan. No secret is planted, so this asserts the absence of real host credential
+  // material rather than of a sample.
+  const store = `${process.env.HOME}/.local/state/clawdparty/sessions/session-${sessionId}.sqlite3`;
+  if (existsSync(store)) {
+    const dump = execFileSync("sqlite3", [store, "select payload, blocks from entries;"], {
+      encoding: "utf8",
+    });
+    for (const marker of ["sk-ant-", "ASIA", "AKIA", "aws_secret_access_key", "Bearer "]) {
+      check(!dump.includes(marker), `no ${marker.trim()} in the record`);
+    }
+  } else {
+    check(false, "store file found to scan", store);
   }
 
   console.log(`\n${failures === 0 ? "all checks passed" : `${failures} FAILED`}\n`);
