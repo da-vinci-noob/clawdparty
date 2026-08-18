@@ -35,7 +35,7 @@ const ONE_MILLION_FAMILIES = ["opus-4-8", "opus-4-7", "sonnet-5", "sonnet-4-6", 
  * bar read 65% when the model was actually full, so the run died at what looked like two thirds.
  * Found by verifying S8.4 against the live stack.
  */
-const MEASURED_WINDOWS: Array<[token: string, window: number]> = [
+export const MEASURED_WINDOWS: Array<[token: string, window: number]> = [
   ["llama3-1-8b", 131_072],
   ["llama3-1-70b", 131_072],
   ["llama3-3-70b", 131_072],

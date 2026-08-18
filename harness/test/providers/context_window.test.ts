@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   CONSERVATIVE_CONTEXT_WINDOW,
+  MEASURED_WINDOWS,
   inferContextWindow,
 } from "../../src/providers/bedrock_routing.js";
 
@@ -32,6 +33,35 @@ const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as { rows: Row[] };
 const measured = fixture.rows.filter((r): r is Row & { context_window: number } =>
   Boolean(r.context_window),
 );
+
+/**
+ * The behaviour assertions below CANNOT FAIL on their own, and that is worth saying out loud.
+ *
+ * Every model that named a window said 131072, and the conservative default was set to 131072 for
+ * exactly that reason — so `inferContextWindow` returns the right number for a measured model whether
+ * the measured table exists or not. Deleting the whole table left this file 12/12 green, which I only
+ * discovered by reverting the fix and re-running: written after the change, it had never been seen to
+ * fail.
+ *
+ * So the table's CONTENT is asserted separately from the function's behaviour. That assertion does
+ * fail when the table goes, and it is what keeps the measured provenance from quietly becoming a
+ * default that happens to agree.
+ */
+describe("the measured table itself, not just the number it agrees with", () => {
+  it("contains a row for every model that reported a window", () => {
+    for (const row of measured) {
+      const found = MEASURED_WINDOWS.find(([token]) =>
+        row.profile_id.toLowerCase().includes(token),
+      );
+      expect(found, `${row.profile_id} has no entry in MEASURED_WINDOWS`).toBeDefined();
+      expect(found?.[1]).toBe(row.context_window);
+    }
+  });
+
+  it("is not empty, so the fixture cannot silently stop being represented", () => {
+    expect(MEASURED_WINDOWS.length).toBeGreaterThanOrEqual(4);
+  });
+});
 
 describe("every measured window is what the code reports", () => {
   it("has measured rows to check at all", () => {
