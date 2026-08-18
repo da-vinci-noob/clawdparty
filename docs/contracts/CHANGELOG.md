@@ -241,6 +241,43 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [recovery-reaches-the-room] — two writers on one `seq`, and a borrowed `store_seq` (clarifying)
+
+No version bump: no field is added or removed. `recovery_applied` simply never arrived, and the audit
+reported a divergence that was not there. Both found by running the acceptance walkthrough's S3
+against the live stack — a real Bedrock run SIGKILLed mid-`bash`.
+
+**1. Rails and the harness both allocated `seq` for the same run.** `Harness::HealthcheckJob` and
+`Harness::Reconcile` appended their `run_failed` with
+`seq: (run.events.maximum(:seq) || 0) + 1` — computed from the PROJECTION, which is behind the
+record by definition, so the value is always one the harness may still use. Measured: the store's
+last emitted seq for the run was 17, the sweep took 18, and the harness's `recovery_applied` was
+allocated 18 from the store. The insert hit `UNIQUE (ai_run_id, seq)` and `Events::Ingest` treats
+that as a retry — **silently skipped, never raised**, and the transport counts a skip as delivered.
+
+The collision is structural and aimed at the worst moment: those two are the only Rails code that
+appends run-scoped events, and both run precisely when the harness is concurrently recovering. So
+the one event that explains why a run restarted was the one event this lost, in the only scenario it
+exists to document.
+
+Rails-appended events now carry **no `seq`**, matching what they already did for `store_seq`. Both
+are properties of the RECORD, and Rails appended these itself, so it holds neither — the same
+reasoning that scopes `rederive(reset:)` to `store_seq NOT NULL`. Nothing consumed `seq` on these
+rows: the web never reads `seq` at all, clients page on `id`, and `ProjectionCheck` already filters
+Rails-origin rows out.
+
+**2. `store_seq` was borrowed when the event had no entry.** `Supervisor.ship()` fell back to
+`store.maxStoreSeq()` for an event with no entry of its own, and `recovery_applied` is emitted and
+never logged. So it shipped carrying the position of the synthesized `tool_failed` entry — which is
+store-only, and therefore absent from the record's projection. A **healthy** recovered session then
+reported `diverged: true, reason: unexpected_rows` (live session 145: `rails: [24, 19]` against
+`harness: [23, 18]`), and a `rederive(reset:)` would have deleted the event and been unable to
+rebuild it.
+
+The rule is now exact: **`store_seq` is present IFF the record holds that event's entry.** Absent is
+load-bearing rather than a gap — it is what marks a row re-derivation cannot rebuild, so the repair
+preserves it. `events.ts` says so where the field is declared.
+
 ## [projection-store-seq] — `store_seq` is per EVENT, and a reset keeps what it cannot rebuild (clarifying)
 
 No version bump: the wire shape is unchanged and `store_seq` always meant "this event's position in
