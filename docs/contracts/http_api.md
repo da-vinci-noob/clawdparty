@@ -83,10 +83,17 @@ not), `content_mismatch` (same high water mark, different content — a mutated 
 row), or `null`. **It never repairs what it finds**: a silent auto-heal destroys the evidence.
 
 `rederive` defaults to **gap-fill** — replay from Rails' own `max(store_seq)`, additive, and
-broadcast because those events are genuinely unseen. `reset: true` deletes the session's rows
-and rebuilds the whole log; it does **not** broadcast, because the rebuilt rows get new `id`s
-and re-broadcasting would defeat the client's dedupe-by-id and replay the session into every
-open feed. A client whose cursor spans a reset must reload.
+broadcast because those events are genuinely unseen. `reset: true` deletes the rows the record
+can rebuild — those with a `store_seq` — and replays the whole log; it does **not** broadcast,
+because the rebuilt rows get new `id`s and re-broadcasting would defeat the client's
+dedupe-by-id and replay the session into every open feed. A client whose cursor spans a reset
+must reload.
+
+Rows Rails appended itself (`chat_message`, `changeset_approved`/`rejected`,
+`participant_joined`) have no `store_seq` and are **preserved**: no harness entry exists to put
+them back, so deleting them destroyed the chat and the review audit trail permanently. They
+keep their old, lower `id`s, so after a reset a mid-session chat message sorts before the
+transcript in an `id`-ordered feed. `ts` stays correct.
 
 **Owner-only.** Rebuilding the room's history is a session-management action, not a review
 action: an editor can drive Claude and still cannot rewrite what the room saw.

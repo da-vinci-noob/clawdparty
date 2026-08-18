@@ -74,7 +74,9 @@ RSpec.describe('Projection repair') do
       post("/api/sessions/#{session.id}/projection/rederive", params: { reset: true })
 
       expect(response.parsed_body['reset']).to(be(true))
-      expect(Event.where(session: session).pluck(:store_seq)).to(eq([1]))
+      # The store_seq 5 row is gone and rebuilt as 1; the `participant_joined` that `join_as`
+      # appended survives with a null store_seq, because no harness entry could put it back.
+      expect(Event.where(session: session).pluck(:store_seq)).to(eq([nil, 1]))
     end
   end
 

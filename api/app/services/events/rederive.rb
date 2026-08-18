@@ -13,10 +13,10 @@ module Events
   #                       ingest dedupes on `(ai_run_id, seq)`, so an imprecise cursor
   #                       costs work and never correctness. Broadcasts, since the events
   #                       are genuinely unseen.
-  #   reset               Delete the session's rows and replay the whole log. Does NOT
-  #                       broadcast: the rebuilt rows get NEW ids, so re-broadcasting
-  #                       would defeat the client's dedupe-by-id and replay the entire
-  #                       session into every open feed.
+  #   reset               Delete the rows the RECORD can rebuild and replay the whole log.
+  #                       Does NOT broadcast: the rebuilt rows get NEW ids, so
+  #                       re-broadcasting would defeat the client's dedupe-by-id and replay
+  #                       the entire session into every open feed.
   #
   # Replays through `Events::Ingest`, never a private insert path — the projection must be
   # built by exactly one code path or "identical to live ingest" is untestable.
@@ -58,9 +58,19 @@ module Events
 
     # Delete and rebuild atomically, so a failure part-way through does not leave a session
     # with half a projection and no record of which half.
+    #
+    # Scoped to rows that CAME FROM the record. Rails appends `chat_message`,
+    # `changeset_approved`/`rejected` and `participant_joined` itself, and the harness has no
+    # entry for any of them — an unscoped delete destroyed the chat and the review decisions
+    # permanently, in the one operation an operator runs to repair a session. A `store_seq` is
+    # exactly the marker of a row the record can put back.
+    #
+    # Preserved rows keep their old (lower) ids while rebuilt rows get new ones, so a
+    # mid-session chat message sorts before the transcript in an id-ordered feed. `ts` stays
+    # correct and a reset already forces a client reload; losing the message did not.
     def rebuild(entries)
       Event.transaction do
-        Event.where(session: session).delete_all
+        Event.where(session: session).where.not(store_seq: nil).delete_all
         replay(entries, broadcast: false)
       end
     end

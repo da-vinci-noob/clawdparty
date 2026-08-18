@@ -241,6 +241,35 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [projection-store-seq] — `store_seq` is per EVENT, and a reset keeps what it cannot rebuild (clarifying)
+
+No version bump: the wire shape is unchanged and `store_seq` always meant "this event's position in
+the record". The harness was sending something else, Rails was dropping it, and the repair was
+deleting rows nothing could put back. Found by running the acceptance walkthrough's S4.3 against the
+live stack for the first time — the / mechanism had never been able to pass.
+
+**1. Rails dropped the field.** `Internal::EventsController#permit_event` did not permit
+`:store_seq`, so strong params silently discarded it and every row landed with NULL.
+`Events::ProjectionCheck` matches on it, so the audit compared nothing to nothing and reported
+`diverged: false`. Any consumer that trusted a green check on data written before this got an
+answer with no evidence behind it.
+
+**2. The harness sent one value per BATCH.** `Supervisor.ship()` stamped `store.maxStoreSeq()` on
+every durable event, read after the commit — so a two-event batch shipped the same number twice, and
+the number ran ahead of the entries by however many non-entry rows the commit also wrote (the
+position marker is itself a row, so the drift grew). `HarnessStoreApi` gains
+**`storeSeqFor(runId, seq)`**, backed by the `UNIQUE (run_id, seq)` index that already makes ingest
+idempotent; `ship()` looks up each event's own position and falls back to the high-water mark only
+for an event with no entry behind it.
+
+**3. `rederive(reset: true)` destroyed the chat and the review audit trail.** It deleted every row
+for the session and replayed the harness log, but Rails appends `chat_message`,
+`changeset_approved`/`rejected` and `participant_joined` itself and the record holds none of them —
+so the one operation an operator runs to REPAIR a session lost them permanently. The delete is now
+scoped to `store_seq NOT NULL`. Preserved rows keep their old, lower `id`s, so after a reset a
+mid-session chat message sorts before the transcript in an `id`-ordered feed; `ts` stays correct and
+a reset already forces a client reload. Documented in `http_api.md`.
+
 ## [1.15.0] — an interrupted run reports what it spent, and an interrupt is not a failure (additive)
 
 **`CONTRACT_VERSION` 1.14 → 1.15.** `RunInterruptedPayload` was `Record<string, never>` and now

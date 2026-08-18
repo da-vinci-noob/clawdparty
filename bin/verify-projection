@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+// Scenario S4 step 3 — : the Postgres projection can be RE-DERIVED from the harness's
+// record, and the audit that says whether it currently matches actually detects a mismatch.
+//
+// Runs a real run so the events are real, then checks, then wipes the projection and rebuilds it
+// from the store alone. Uses the cheapest live model available (llama3-1-8b via Converse: ~25
+// tokens for this prompt) because the point is the plumbing, not the answer.
+//
+// Usage: bin/verify-projection [base-url]
+
+const BASE = process.argv[2] ?? "http://localhost:3000";
+const MODEL = process.env.VERIFY_MODEL ?? "us.meta.llama3-1-8b-instruct-v1:0";
+const PROVIDER = process.env.VERIFY_PROVIDER ?? "bedrock-converse";
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+async function call(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  return { status: response.status, response, json: text ? JSON.parse(text) : null };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  console.log(`\nprojection re-derivation (S4.3) — against ${BASE}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "projection check", name: "Auditor", mode: "chat" }),
+  });
+  if (!created.ok) throw new Error(`create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = (created.headers.getSetCookie?.() ?? [])
+    .find((c) => c.startsWith("clawd_uid="))
+    ?.split(";")[0];
+  if (!cookie) throw new Error("no clawd_uid cookie");
+  console.log(`  session ${sessionId}\n`);
+
+  const started = await call(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt: "Reply with the single word: ok", provider: PROVIDER, model: MODEL },
+  });
+  check(started.status === 202, "run accepted", `${started.status} ${JSON.stringify(started.json)}`);
+  if (started.status !== 202) return;
+
+  const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+  let events = [];
+  for (let i = 0; i < 40; i += 1) {
+    const t0 = Date.now();
+    const { status, json } = await call(`/api/sessions/${sessionId}/events`, { cookie });
+    if (status !== 200) throw new Error(`events → ${status}: ${JSON.stringify(json)}`);
+    // A bare array, per `EventsController#index` — reading `json.events` here silently saw zero
+    // events forever and made the settle check unfailable.
+    events = json;
+    if (i === 0) console.log(`       first events poll: ${Date.now() - t0}ms`);
+    if (events.some((e) => TERMINAL.includes(e.type))) break;
+    await sleep(1000);
+  }
+  const terminal = events.find((e) => TERMINAL.includes(e.type));
+  check(Boolean(terminal), "run settled", terminal ? terminal.type : "still running after 40s");
+  console.log(`       ${events.length} events persisted\n`);
+
+  // A chat message, which exists ONLY in Postgres — nothing in the harness's record can put it
+  // back, so a reset that deletes it deletes it for good.
+  const chat = await call(`/api/sessions/${sessionId}/messages`, {
+    method: "POST",
+    cookie,
+    body: { body: "reviewed, looks fine" },
+  });
+  check(chat.status === 201, "chat message posted", String(chat.status));
+
+  // The audit. `store_seq` is what it matches on, and the two ways it could lie are a NULL column
+  // (nothing to compare, so it passes vacuously) and a wrong-but-present number (mismatch it
+  // cannot explain). Both have happened here.
+  const before = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  check(before.status === 200, "check is readable by the owner", String(before.status));
+  console.log(`       ${JSON.stringify(before.json)}\n`);
+  check(before.json?.diverged === false, "projection matches the record", before.json?.reason ?? "");
+
+  // The repair, at its most destructive setting: every row for the session deleted and rebuilt
+  // from `entriesFrom()` alone. If the record is truly the authority this is lossless.
+  const reset = await call(`/api/sessions/${sessionId}/projection/rederive?reset=true`, {
+    method: "POST",
+    cookie,
+  });
+  check(reset.status === 200, "rederive(reset) succeeded", String(reset.status));
+  console.log(`       ${JSON.stringify(reset.json)}\n`);
+  check(
+    reset.json?.accepted > 0,
+    "rebuilt rows from the store",
+    `accepted ${reset.json?.accepted}, rejected ${reset.json?.rejected}`,
+  );
+  check(reset.json?.rejected === 0, "nothing in the record was unusable");
+
+  const after = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(after.json)}\n`);
+  check(after.json?.diverged === false, "still matches after the rebuild", after.json?.reason ?? "");
+
+  const { json: replayed } = await call(`/api/sessions/${sessionId}/events`, { cookie });
+  check(replayed.length >= events.length, "the feed survived the wipe", `${replayed.length} events`);
+  // The record cannot rebuild these — Rails appends them and the harness never saw them. A reset
+  // used to delete them along with everything else.
+  for (const type of ["participant_joined", "chat_message"]) {
+    check(
+      replayed.some((e) => e.type === type),
+      `${type} survived the wipe`,
+    );
+  }
+
+  console.log(`\n${failures === 0 ? "all checks passed" : `${failures} FAILED`}\n`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+main().catch((error) => {
+  console.error(`\nverify aborted: ${error.message}\n`);
+  process.exitCode = 1;
+});
