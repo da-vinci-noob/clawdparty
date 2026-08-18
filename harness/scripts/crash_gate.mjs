@@ -12,6 +12,7 @@
 // notices.
 
 import { spawnSync } from "node:child_process";
+import { parseSummary } from "./crash_gate_parse.mjs";
 
 /**
  * Assertions currently allowed to be skipped, and why. Lower this the moment a skip is
@@ -38,9 +39,11 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-// Vitest prints `Tests  N passed | M skipped (T)`; the skipped clause is absent at zero.
-const line = output.match(/^\s*Tests\s+(.+)$/m)?.[1];
-if (!line) {
+// Vitest prints `Tests  N passed | M skipped (T)`; the skipped clause is absent at zero. Parsed in
+// `crash_gate_parse.mjs` so the reading is testable — the inline version could not match a
+// COLOURED line, and failed the gate with 50 assertions passing.
+const summary = parseSummary(output);
+if (!summary) {
   process.stderr.write(
     "\ncrash gate FAILED — could not find the test summary, so the skip count is unknown.\n" +
       "Unknown is not the same as zero, and the whole point of this gate is not guessing.\n",
@@ -48,8 +51,7 @@ if (!line) {
   process.exit(1);
 }
 
-const skipped = Number(line.match(/(\d+)\s+skipped/)?.[1] ?? 0);
-const passed = Number(line.match(/(\d+)\s+passed/)?.[1] ?? 0);
+const { passed, skipped } = summary;
 
 if (passed === 0) {
   // A path that matches no files, or a suite skipped entirely, would otherwise exit 0.
