@@ -294,7 +294,17 @@ export class RunLoop {
         // on a live run: pressing Stop produced `run_failed` with no explanation (S9).
         if (spec.signal.aborted) return this.interrupt(spec, normalizer, totalUsage);
         emit([turn.error.event]);
-        return this.fail(spec, normalizer, turn.error.stopReason, totalUsage);
+        // The MESSAGE too. `fail()` has taken one since contract 1.12 and the settle path passes it,
+        // but this path — the most common way a run dies — did not, so `run_failed.explanation` was
+        // null while the words sat in `turn.error`. Measured live: a `provider_error` reading "400 The
+        // provided model identifier is invalid" followed by a terminal event that said nothing.
+        return this.fail(
+          spec,
+          normalizer,
+          turn.error.stopReason,
+          totalUsage,
+          turn.error.explanation,
+        );
       }
 
       totalUsage = addUsage(totalUsage, turn.usage);
@@ -445,7 +455,7 @@ export class RunLoop {
      */
     usageReported: boolean;
     stopReason: StopReason | null;
-    error?: { event: EventEnvelope; stopReason: string };
+    error?: { event: EventEnvelope; stopReason: string; explanation: string };
   }> {
     const durableEvents: EventEnvelope[] = [];
     const blocks: unknown[] = [];
@@ -500,6 +510,9 @@ export class RunLoop {
             this.now(),
           ),
           stopReason: classified.kind,
+          // Carried so the TERMINAL event can state why the run ended. Without it `fail()` records
+          // `explanation: null` and the room is left correlating two events to answer one question.
+          explanation: classified.message,
         },
       };
     }

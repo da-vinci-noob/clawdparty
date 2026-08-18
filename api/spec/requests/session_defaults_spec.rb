@@ -199,4 +199,35 @@ RSpec.describe('Session run defaults') do
       expect(session.mode).to(eq('chat'))
     end
   end
+
+  # Found by probing the Settings tabs live: `default_model: "not-a-real-model"` saved with a 200, and
+  # every subsequent run failed. The model check short-circuits on `provider.blank?` — correct as far as
+  # it goes, since a model id only means something relative to a provider — but with no provider chosen
+  # it checked NOTHING, so a typo was stored and surfaced as a run failure instead of a refusal. This
+  # concern's own comment argues against exactly that: moving a failure from "cannot save" to "every run
+  # start fails" is strictly worse.
+  describe 'a model no provider on this host serves' do
+    it 'is refused even when no default provider is set' do
+      session = create(:session)
+      join_as(session, role: 'owner')
+
+      patch("/api/sessions/#{session.id}", params: { default_model: 'not-a-real-model' })
+
+      expect(response).to(have_http_status(:unprocessable_content))
+      expect(response.parsed_body['errors'].first['message']).to(match(/no provider|not served/i))
+      expect(session.reload.default_model).to(be_nil)
+    end
+
+    it 'still accepts a model some provider serves, with no provider pinned' do
+      session = create(:session)
+      join_as(session, role: 'owner')
+
+      # A model from the OTHER provider in the fixture, so this also proves the union is a union
+      # rather than a check against one arbitrary provider's list.
+      patch("/api/sessions/#{session.id}", params: { default_model: 'us.deepseek.r1-v1:0' })
+
+      expect(response).to(have_http_status(:ok))
+      expect(session.reload.default_model).to(eq('us.deepseek.r1-v1:0'))
+    end
+  end
 end

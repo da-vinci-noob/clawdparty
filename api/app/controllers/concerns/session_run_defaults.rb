@@ -57,11 +57,28 @@ module SessionRunDefaults
     return if providers.nil?
 
     provider = attrs.fetch(:default_provider, session.default_provider)
+    return validate_against_any_provider!(attrs[:default_model], providers) if provider.blank?
+
     models = providers[provider]
-    return if provider.blank? || models.nil?
+    return if models.nil?
     return if models.include?(attrs[:default_model])
 
     raise(InvalidDefault, "#{provider} does not serve model #{attrs[:default_model]}")
+  end
+
+  # With no provider pinned there is no provider-relative set to check — but "NO provider on this host
+  # serves this at all" is still knowable, and it is worth knowing: a typo used to save with a 200 and
+  # then fail every run start, which is the outcome this file's own header argues against. Weaker than
+  # the provider-relative check by design; it catches a model that does not exist, not a model paired
+  # with the wrong provider.
+  #
+  # An EMPTY union means discovery told us nothing useful (every provider unavailable), so it passes
+  # through — the same fail-open posture as `providers.nil?`, for the same reason.
+  def validate_against_any_provider!(model, providers)
+    known = providers.values.flatten
+    return if known.empty? || known.include?(model)
+
+    raise(InvalidDefault, "no provider on this host serves model #{model}")
   end
 
   def validate_profile!(profile)

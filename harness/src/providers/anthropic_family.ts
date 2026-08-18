@@ -243,6 +243,22 @@ export function classifyStreamError(
       remedy: "Wait and retry; reduce concurrent runs if this persists.",
     };
   }
+  if (status === 400) {
+    return {
+      kind: "api_error",
+      // The vendor's own words are the diagnostic here — "The provided model identifier is invalid"
+      // is the whole answer — while the remedy below is the instruction. Terse messages are fine for
+      // 401/403/429; a 400 can be any of a dozen things.
+      message: `the provider rejected the request as invalid (400): ${String(err)}`,
+      // NOT the `unreachable` hint. A 400 means the request reached the provider and was refused as
+      // invalid, so advice about network access and regions sends the reader somewhere there is
+      // nothing to find. Measured live: a session default of `not-a-real-model` produced "Could not
+      // reach Bedrock. Check network access and the region" for a rejected model id.
+      remedy:
+        "The provider rejected this request as invalid — check the model id first, since a model " +
+        "this provider does not serve is the usual cause. This is not a network problem.",
+    };
+  }
   return {
     kind: "api_error",
     message: String(err),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AnthropicBedrockAdapter } from "../../src/providers/anthropic_bedrock.js";
-import { classifyProbeFailure } from "../../src/providers/anthropic_family.js";
+import { classifyProbeFailure, classifyStreamError } from "../../src/providers/anthropic_family.js";
 import { listProviders } from "../../src/providers/discovery.js";
 
 /**
@@ -161,5 +161,55 @@ describe("an auth-resolution failure is not a network fault", () => {
     });
 
     expect(classifyProbeFailure(rejected, HINTS).reason).toBe("credential_expired");
+  });
+});
+
+/**
+ * A 400 is the CALLER's error, and it was being reported as a network fault.
+ *
+ * Measured live: a session whose default model was saved as `not-a-real-model` (Settings accepts an
+ * unknown model, while it refuses an unknown provider) produced
+ *
+ *   provider_error kind=api_error
+ *     remedy="Could not reach Bedrock. Check network access and the region, then retry the run"
+ *     message="Error: 400 The provided model identifier is invalid"
+ *
+ * Nothing was wrong with the network or the region. `classifyStreamError` branches on 401/403/429 and
+ * lets everything else fall to the `unreachable` hint, so a rejected REQUEST is answered with advice
+ * about connectivity — the same misclassification a third time, in a third place.
+ */
+describe("a rejected request is not a network fault", () => {
+  const HINTS = {
+    expired: "expired hint",
+    notEntitled: "entitlement hint",
+    unreachable: "Could not reach Bedrock. Check network access and the region",
+    noCredential: "no credential hint",
+  };
+
+  it("does not blame the network for a 400", () => {
+    const err = Object.assign(new Error("400 The provided model identifier is invalid"), {
+      status: 400,
+    });
+
+    const { remedy } = classifyStreamError(err, HINTS);
+    // Not "must never say the word network" — the remedy legitimately says this is NOT a network
+    // problem. What it must not do is hand back the connectivity ADVICE.
+    expect(remedy).not.toBe(HINTS.unreachable);
+    expect(remedy).not.toMatch(/check network access/i);
+  });
+
+  it("points at the request, and names the model as the usual cause", () => {
+    const err = Object.assign(new Error("400 The provided model identifier is invalid"), {
+      status: 400,
+    });
+
+    const { remedy } = classifyStreamError(err, HINTS);
+    expect(remedy).toMatch(/model/i);
+    expect(remedy).toMatch(/rejected|invalid/i);
+  });
+
+  it("still calls a genuine transport failure unreachable", () => {
+    const { remedy } = classifyStreamError(new Error("getaddrinfo ENOTFOUND"), HINTS);
+    expect(remedy).toMatch(/network|region/i);
   });
 });
