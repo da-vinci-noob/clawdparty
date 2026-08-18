@@ -27,7 +27,9 @@ RSpec.describe(Harness::HealthcheckJob) do
       expect(event.event_type).to(eq('run_failed'))
       expect(event.actor_kind).to(eq('system'))
       expect(event.ai_run_id).to(eq(run.id))
-      expect(event.seq).to(eq(1))
+      # Was `eq(1)`. Claiming a seq is what silently destroyed the harness's `recovery_applied`
+      # on a real crash — see `events/rails_seq_collision_spec.rb`.
+      expect(event.seq).to(be_nil)
     end
 
     it 'fails a queued run the harness never acknowledged' do

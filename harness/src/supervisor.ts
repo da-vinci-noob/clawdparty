@@ -484,11 +484,17 @@ export class Supervisor {
         void this.transport.deliverEphemeral(event);
         continue;
       }
-      // Null for an event the durability policy emitted without a matching entry, and for a
-      // session-scoped event that belongs to no run; the high-water mark is the honest upper
-      // bound for either.
+      // `store_seq` is present IFF the record holds this event's entry. An event with none —
+      // `recovery_applied`, which is emitted and never logged — gets null, NOT the high-water
+      // mark: that mark belongs to some other entry, and borrowing it made a healthy recovered
+      // session report `diverged: true, unexpected_rows` (Rails held a position the record's
+      // projection did not), while also making `rederive(reset:)` delete the event and be unable
+      // to rebuild it. Null is what marks a row the record cannot vouch for, which is exactly
+      // what this is.
       const own = event.ai_run_id === null ? null : store.storeSeqFor(event.ai_run_id, event.seq);
-      durable.push({ ...event, store_seq: own ?? store.maxStoreSeq() });
+      // Omitted, not null: the field is `store_seq?: number`, so "absent" is how the contract
+      // expresses this. Rails stores NULL either way.
+      durable.push(own === null ? event : { ...event, store_seq: own });
     }
     if (durable.length > 0) void this.transport.deliverDurable(durable);
   }

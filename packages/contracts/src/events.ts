@@ -167,8 +167,12 @@ export interface EventEnvelope<P = unknown> {
    * The harness store's session-wide cursor for this event (v1.5, additive and
    * OPTIONAL — the envelope's frozen fields are untouched).
    *
-   * Present on durable events shipped by the harness; absent on ephemeral ones,
-   * which were never persisted and so have no cursor. It exists so Rails can
+   * Present when the RECORD holds this event's entry; absent otherwise — on ephemeral
+   * events, which were never persisted, and on a durable event the harness emits without
+   * logging (`recovery_applied`). Absent is load-bearing: it marks a row re-derivation
+   * cannot rebuild, so `rederive(reset:)` preserves it instead of deleting it. Borrowing
+   * another entry's position here made a healthy recovered session report a divergence.
+   * It exists so Rails can
    * re-derive the projection from `entriesFrom(store_seq)` after an outage
    * — which is what makes a ring-buffer overflow degrade the live stream
    * without losing the record.

@@ -130,7 +130,12 @@ module Harness
           type: 'run_failed',
           actor: { kind: 'system' },
           ai_run_id: run.id,
-          seq: (run.events.maximum(:seq) || 0) + 1,
+          # NO seq. Rails computes its "next" from the PROJECTION, which is behind the record by
+          # definition, so any value it picks is one the harness may still use — and it then loses
+          # to `UNIQUE (ai_run_id, seq)`, which `Events::Ingest` reads as a retry and skips in
+          # silence. Measured on a real SIGKILL: this event took 18, the harness's `recovery_applied`
+          # was allocated 18 from the store, and the recovery was discarded. `seq` and `store_seq`
+          # are both properties of the RECORD, and Rails appended this itself, so it holds neither.
           payload: {
             stop_reason: 'harness_lost_run',
             api_error_status: nil,

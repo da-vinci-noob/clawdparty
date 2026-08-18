@@ -76,7 +76,10 @@ RSpec.describe('Projection repair') do
       expect(response.parsed_body['reset']).to(be(true))
       # The store_seq 5 row is gone and rebuilt as 1; the `participant_joined` that `join_as`
       # appended survives with a null store_seq, because no harness entry could put it back.
-      expect(Event.where(session: session).pluck(:store_seq)).to(eq([nil, 1]))
+      #
+      # Ordered by id, not bare `pluck`: a reset deletes and re-inserts, so physical row order is
+      # not the insertion order and the unordered version failed intermittently.
+      expect(Event.where(session: session).order(:id).pluck(:store_seq)).to(eq([nil, 1]))
     end
   end
 

@@ -468,6 +468,19 @@ describe("session-wide recovery on boot", () => {
     expect(JSON.stringify(shipped)).toContain("session_1");
     expect(JSON.stringify(shipped)).toContain("recovery_applied");
 
+    // `store_seq` NULL, because no entry backs this event — `recovery_applied` is emitted, never
+    // written to the log. Stamping it with the high-water mark instead made a HEALTHY recovered
+    // session report `diverged: true, reason: unexpected_rows`: the mark belonged to the synthesized
+    // `tool_failed` entry, which is store-only and therefore absent from the record's projection, so
+    // Rails held a position the record's projection did not. Measured on live session 145 —
+    // `rails: [24, 19]` against `harness: [23, 18]`. It would also lose the event on a
+    // `rederive(reset:)`, which deletes rows WITH a `store_seq` and could not rebuild this one.
+    const recovery = shipped
+      .flatMap((batch) => (batch as { events?: Array<Record<string, unknown>> }).events ?? [])
+      .filter((event) => event.type === "recovery_applied");
+    expect(recovery).not.toHaveLength(0);
+    for (const event of recovery) expect(event.store_seq).toBeUndefined();
+
     store = await open();
   });
 
