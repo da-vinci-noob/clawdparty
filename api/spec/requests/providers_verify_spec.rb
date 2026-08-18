@@ -80,4 +80,33 @@ RSpec.describe('Providers auth test') do
       expect(calls).to(eq(2))
     end
   end
+
+  # The auth test just learned something better than the cached model list did — it sent a REAL
+  # request. Screenshotted from the running app: a provider badged UNAVAILABLE next to VERIFIED, both
+  # on screen at once. The web now refetches discovery when a verdict lands, and that refetch is
+  # pointless if Rails answers from the same 60-second snapshot that produced the wrong badge.
+  describe 'the cached model list afterwards' do
+    # A REAL store for these examples. `config.cache_store = :null_store` in test makes `write` a
+    # no-op and `read` always nil, so the obvious assertion here passes whether or not the code
+    # deletes anything — a test that cannot fail.
+    around do |example|
+      original = Rails.cache
+      Rails.cache = ActiveSupport::Cache::MemoryStore.new
+      example.run
+    ensure
+      Rails.cache = original
+    end
+
+    it 'is dropped, so the next read reflects what the test just proved' do
+      join_as(create(:session), role: 'owner')
+      Rails.cache.write(ModelsController::CACHE_KEY, { 'providers' => [{ 'id' => 'stale' }] })
+      allow_any_instance_of(Harness::Client).to(receive(:verify_providers)
+        .and_return(Harness::Client::Result.new(status: 200, body: { 'providers' => [] })))
+
+      post('/api/providers/verify')
+
+      expect(response).to(have_http_status(:ok))
+      expect(Rails.cache.read(ModelsController::CACHE_KEY)).to(be_nil)
+    end
+  end
 end

@@ -9,7 +9,7 @@
 // refuses a valid-looking credential on entitlement, and a correctly-configured MCP server answered
 // `invalid_token`.
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export interface ProviderVerdict {
   id: string;
@@ -47,7 +47,22 @@ export function useProviderVerification(): {
   running: boolean;
   error: string | null;
 } {
-  const mutation = useMutation({ mutationFn: verify });
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: verify,
+    /**
+     * Refresh DISCOVERY once the test lands, because the test is the better information.
+     *
+     * Discovery is a cached snapshot — Rails holds `/api/models` for 60s — while a verdict comes from
+     * a real request just sent. Without this the two live in different generations and the panel can
+     * show a provider as UNAVAILABLE next to VERIFIED, which was screenshotted from the running app:
+     * Bedrock Converse, with a credential and a successful 22-in/3-out test, badged unavailable. Both
+     * cannot be true, and the one backed by an actual request is the one to believe.
+     */
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["models"] });
+    },
+  });
   return {
     verdicts: mutation.data ?? null,
     run: () => mutation.mutate(),

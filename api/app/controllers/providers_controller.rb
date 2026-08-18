@@ -21,6 +21,17 @@ class ProvidersController < ApplicationController
 
   # POST /api/providers/verify
   def verify
-    render(json: Harness::Client.new.verify_providers.body, status: :ok)
+    body = Harness::Client.new.verify_providers.body
+    # DROP the cached model list: this just learned something better than it knows. Discovery is a
+    # 60-second snapshot of what was FOUND; a verdict comes from a real request that was sent. Holding
+    # both let the panel show a provider as UNAVAILABLE beside VERIFIED — seen in the running app on
+    # Bedrock Converse, badged unavailable with a credential and a successful test on screen.
+    #
+    # Deleting rather than overwriting: the verify response is a different shape (verdicts, not model
+    # lists), so the next reader must re-derive discovery instead of being handed a translation of it.
+    # `:memory_store` is per-PROCESS: this clears the only copy while Puma runs in single mode, and
+    # would clear just one worker's if `WEB_CONCURRENCY` were ever set.
+    Rails.cache.delete(ModelsController::CACHE_KEY)
+    render(json: body, status: :ok)
   end
 end

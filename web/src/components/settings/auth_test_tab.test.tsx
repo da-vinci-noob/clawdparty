@@ -147,6 +147,59 @@ describe("after running the test", () => {
     );
   });
 
+  it("refreshes DISCOVERY after a verify, so the two badges cannot contradict each other", async () => {
+    // Screenshotted from the running app: "Amazon Bedrock (Converse)" showed UNAVAILABLE next to
+    // VERIFIED, with a credential and a successful 22-in/3-out test. Both cannot be true — a provider
+    // that just completed a real request is reachable with a working credential.
+    //
+    // Cause: discovery is a `useQuery(["models"])` and the test is a `useMutation` with no
+    // invalidation, so the badges come from two generations. Rails caches `/api/models` for 60s, so a
+    // transient failure gets pinned — and the page then holds that snapshot for as long as it is open.
+    // The verify is the BETTER information: it sent a real request.
+    let call = 0;
+    server.use(
+      http.get("/api/models", () => {
+        call += 1;
+        // First answer: a transient discovery failure, exactly what the cache would pin.
+        return HttpResponse.json({
+          providers: [
+            call === 1
+              ? unavailable("bedrock-converse", "Amazon Bedrock (Converse)")
+              : available("bedrock-converse", "Amazon Bedrock (Converse)"),
+          ],
+        });
+      }),
+    );
+    verdicts({
+      providers: [
+        {
+          id: "bedrock-converse",
+          displayName: "Amazon Bedrock (Converse)",
+          ok: true,
+          model: "us.meta.llama3-1-8b-instruct-v1:0",
+          credentialSource: "env:AWS_PROFILE",
+        },
+      ],
+    });
+    renderWithQuery(<AuthTestTab />);
+
+    expect(await screen.findByTestId("auth-discovered-bedrock-converse")).toHaveTextContent(
+      /unavailable/i,
+    );
+    fireEvent.click(await screen.findByTestId("auth-test-run"));
+
+    // The verdict proves it works, so the discovery badge must catch up rather than sit there
+    // contradicting it.
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-verdict-bedrock-converse")).toHaveTextContent(/verified/i),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-discovered-bedrock-converse")).toHaveTextContent(
+        /discovered/i,
+      ),
+    );
+  });
+
   it("shows the remedy AND the raw error when a good credential's request fails", async () => {
     // Screenshotted from the running app: the host-login card showed
     // `429 {"type":"error","error":{"type":"rate_limit_error","message":"Error"},"request_id":…}`
