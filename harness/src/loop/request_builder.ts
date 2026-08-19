@@ -294,7 +294,34 @@ export interface RequestSnapshot {
   effort: EffortLevel | null;
   system_prompt_digest: string;
   tool_schemas_digest: string;
+  /** Absent on headers written before contract 1.16. */
+  messages_digest?: string;
 }
+
+/**
+ * Whether the rebuilt messages are the ones that went out.
+ *
+ * A VERDICT rather than a refusal, because a mismatch here means something different from the other
+ * two digests: those guard a value the CALLER supplied, so a mismatch is the caller's error and
+ * refusing is right. This compares the fold against the record's own fingerprint, so a mismatch says
+ * the RECORD is no longer sufficient to rebuild what was sent — and the caller needs the rebuilt
+ * request in hand to investigate that.
+ *
+ * Three of the four states are "cannot answer", stated separately because collapsing any of them
+ * into `match` would manufacture a verification that never happened:
+ *
+ *   `unrecorded`       the header predates 1.16. Every older session would otherwise claim a pass.
+ *   `not_at_boundary`  the prefix extends PAST the turn whose header carried the digest. Headers
+ *                      are emit-on-change and fold forward, so comparing a later fold against an
+ *                      earlier turn's digest reports a mismatch that means nothing. The request
+ *                      the session would send NEXT — which `scripts/reconstruct.ts` deliberately
+ *                      emits — is exactly this case.
+ */
+export type MessagesVerdict =
+  | { status: "match"; digest: string }
+  | { status: "mismatch"; recorded: string; rebuilt: string }
+  | { status: "not_at_boundary" }
+  | { status: "unrecorded" };
 
 export interface ReconstructInput {
   /**
@@ -318,7 +345,12 @@ export interface ReconstructInput {
 }
 
 export type ReconstructResult =
-  | { ok: true; request: ProviderRequest; snapshot: RequestSnapshot }
+  | {
+      ok: true;
+      request: ProviderRequest;
+      snapshot: RequestSnapshot;
+      messages: MessagesVerdict;
+    }
   | { ok: false; reason: "no_snapshot" }
   | {
       ok: false;
@@ -345,7 +377,8 @@ export type ReconstructResult =
  * so folding forward to the latest one is what reproduces the turn's real configuration.
  */
 export function reconstruct(input: ReconstructInput): ReconstructResult {
-  const snapshot = latestSnapshot(input.entries);
+  const snapshotEntry = latestSnapshotEntry(input.entries);
+  const snapshot = snapshotEntry?.payload as RequestSnapshot | undefined;
   if (!snapshot) return { ok: false, reason: "no_snapshot" };
 
   const promptDigest = digest(input.systemPrompt);
@@ -381,13 +414,39 @@ export function reconstruct(input: ReconstructInput): ReconstructResult {
     signal: input.signal,
   });
 
-  return { ok: true, request, snapshot };
+  return {
+    ok: true,
+    request,
+    snapshot,
+    messages: verdict(request, snapshot, input.entries, snapshotEntry),
+  };
 }
 
-function latestSnapshot(entries: Entry[]): RequestSnapshot | null {
+function verdict(
+  rebuilt: ProviderRequest,
+  snapshot: RequestSnapshot,
+  entries: Entry[],
+  header: Entry | null,
+): MessagesVerdict {
+  const recorded = snapshot.messages_digest;
+  if (!recorded) return { status: "unrecorded" };
+
+  // The digest describes the messages of the turn whose header carried it, and a header is the LAST
+  // entry in the log at the moment its request goes out (what follows are the response's entries).
+  // So the prefix ending exactly there is the only one this digest can speak for.
+  const last = entries[entries.length - 1];
+  if (!header || !last || last.store_seq !== header.store_seq) return { status: "not_at_boundary" };
+
+  const digested = digest(JSON.stringify(rebuilt.messages));
+  return digested === recorded
+    ? { status: "match", digest: digested }
+    : { status: "mismatch", recorded, rebuilt: digested };
+}
+
+function latestSnapshotEntry(entries: Entry[]): Entry | null {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry?.type === "request_header") return entry.payload as RequestSnapshot;
+    if (entry?.type === "request_header") return entry;
   }
   return null;
 }

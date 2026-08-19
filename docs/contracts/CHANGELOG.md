@@ -241,6 +241,43 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [1.16.0] — `request_header.messages_digest`: the record vouches for its own fold (additive)
+
+**`CONTRACT_VERSION` 1.15 → 1.16.** `RequestHeaderPayload` gains one OPTIONAL field,
+`messages_digest`. Additive: a consumer that ignores it is unaffected, and a header written before
+1.16 has none — which readers MUST report as unverified rather than as matching.
+
+**Why it exists.**  says every request the model received can be rebuilt from the record.
+Gate 2 proves that byte-for-byte, but only because its scripted adapter keeps every
+`ProviderRequest` it was handed. Nothing kept them for a REAL session, so the acceptance
+walkthrough's S4 step 2 told a reader to `diff` the rebuild against `/tmp/actual-requests.jsonl` — a
+file no script in this repo writes. The header already fingerprinted the system prompt and the tool
+schemas, the two things the record does not copy; the messages array, which is the part the fold
+produces, had no fingerprint. Now any real session can be checked against its own record with no
+capture file, no cost, and no request bodies on disk.
+
+**Two constraints that the obvious implementation gets wrong**, both pinned by tests:
+
+1. **It is NOT part of the emit-on-change fingerprint.** `request_header` is emitted when
+   established or changed, and the messages array grows every turn — so fingerprinting the digest
+   forces a header on every single request, which is exactly what emit-on-change exists to prevent
+   ("20 identical events in a 20-turn run"). The first attempt did this and failed
+   `behaviour_parity.test.ts`'s "not once per request"; it was reverted and re-done with the digest
+   riding on the payload only.
+2. **The verdict is restricted to the prefix that ENDS at that header's request.** `latestSnapshot`
+   folds headers forward, so comparing a longer fold against an earlier turn's digest reports a
+   mismatch that means nothing — and the request the session would send NEXT, which
+   `scripts/reconstruct.ts` deliberately emits, is always such a prefix.
+
+**`reconstruct()` therefore returns a four-state verdict, and three of the four are "cannot
+answer".** `match` · `mismatch` (the record no longer implies what was sent — the real
+failure) · `not_at_boundary` · `unrecorded`. Collapsing any of the last three into `match` would
+manufacture a verification that never happened, which is the defect shape this project has now hit
+five times. `npm run reconstruct` prints the tally and names what each non-match means.
+
+Measured on the live stack: a fresh session reports `match=1 not_at_boundary=1`; a session recorded
+before this shipped reports `unrecorded=7`.
+
 ## [rails-seq-completion] — the fifth copy, and the table now says so (clarifying)
 
 No version bump. [recovery-reaches-the-room] fixed two of the FIVE places Rails computed

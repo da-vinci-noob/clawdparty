@@ -118,6 +118,7 @@ async function main(): Promise<void> {
 
   const lines: string[] = [];
   const skipped: string[] = [];
+  const verdicts: string[] = [];
 
   // Every run in the session, since a session's log spans runs and each one has its own ledger.
   const runIds = [
@@ -146,7 +147,17 @@ async function main(): Promise<void> {
       continue;
     }
     const { signal: _signal, ...comparable } = result.request;
-    lines.push(JSON.stringify({ up_to_store_seq: boundary, request: comparable }));
+    verdicts.push(result.messages.status);
+    lines.push(
+      JSON.stringify({
+        up_to_store_seq: boundary,
+        // The record's OWN answer to "is this the request that went out?" (contract 1.16). This is
+        // what makes S4 step 2 performable: before it, the step said to diff against a file no
+        // script writes, so there was no comparison side for a real session at all.
+        messages: result.messages,
+        request: comparable,
+      }),
+    );
   }
 
   mkdirSync(dirname(parsed.out), { recursive: true });
@@ -156,6 +167,29 @@ async function main(): Promise<void> {
   await opened.store.close();
 
   process.stdout.write(`reconstructed ${lines.length} request(s) -> ${parsed.out}\n`);
+
+  // The verdict tally, on stdout because it is the RESULT and not a caveat. `match` is the only
+  // line that says the record still rebuilds what was sent; the other three each say the check
+  // could not be made, for different reasons, and none of them is a pass.
+  const tally = new Map<string, number>();
+  for (const v of verdicts) tally.set(v, (tally.get(v) ?? 0) + 1);
+  const shown = [...tally].map(([k, n]) => `${k}=${n}`).join(" ");
+  process.stdout.write(`messages digest: ${shown || "none"}\n`);
+  if ((tally.get("mismatch") ?? 0) > 0) {
+    process.stdout.write(
+      "MISMATCH means the record no longer implies the request that was sent — that is the failure\nis about, not a tooling problem.\n",
+    );
+  }
+  if ((tally.get("unrecorded") ?? 0) > 0) {
+    process.stdout.write(
+      "unrecorded = header written before contract 1.16, so nothing to compare. NOT a pass.\n",
+    );
+  }
+  if ((tally.get("not_at_boundary") ?? 0) > 0) {
+    process.stdout.write(
+      "not_at_boundary = the prefix runs past the turn whose header carried the digest (the NEXT\nrequest is always one of these). Expected, and not a pass either.\n",
+    );
+  }
   if (skipped.length > 0) {
     // Never silent. A short file that looked complete would make an empty diff read as
     // "byte-identical" when it actually meant "nothing was compared".

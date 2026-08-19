@@ -22,7 +22,7 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 15 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 16 } as const;
 
 /**
  * The 31 frozen event type names. Adding or removing a name is a CONTRACT
@@ -467,6 +467,23 @@ export interface RequestHeaderPayload {
   effort: EffortLevel | null;
   system_prompt_digest: string;
   tool_schemas_digest: string;
+  /**
+   * The messages array that went out, fingerprinted (v1.16). OPTIONAL because headers written
+   * before 1.16 have none, and a reader MUST report those as unverified rather than as matching.
+   *
+   * The other two digests guard values the record does not COPY, so a stale supplied one is
+   * refused. This one guards what the record IMPLIES, so it answers a different question: whether
+   * the log is still sufficient to rebuild the request that was sent. Without it 's manual
+   * half had no comparison side (the acceptance walkthrough's S4 step 2 named a file no tool
+   * produces).
+   *
+   * DELIBERATELY EXCLUDED from the emit-on-change fingerprint. The messages array grows every
+   * turn, so including it forces a header on every request — the thing emit-on-change exists to
+   * avoid. It therefore describes only the turn whose header carried it, and a reader comparing a
+   * LONGER prefix against it would see a false mismatch; `reconstruct` reports `not_at_boundary`
+   * for those rather than a verdict it cannot support.
+   */
+  messages_digest?: string;
   plugins: string[];
 }
 

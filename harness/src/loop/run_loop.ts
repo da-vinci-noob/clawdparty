@@ -248,13 +248,20 @@ export class RunLoop {
         plugins: [...(spec.plugins ?? [])].sort(),
       };
 
-      // Emitted when ESTABLISHED OR CHANGED, not per request (the design record's
-      // "Request snapshot"). A reader folds the latest snapshot at or before any
-      // point, so re-stating an unchanged one adds no information — it would just
-      // put 20 identical events in a 20-turn run's feed.
+      // Emitted when ESTABLISHED OR CHANGED, not per request. A reader folds the
+      // latest snapshot at or before any point, so re-stating an unchanged one adds
+      // no information — it would just put 20 identical events in a 20-turn run's feed.
       const fingerprint = JSON.stringify(snapshot);
       const headerChanged = fingerprint !== this.lastSnapshot;
-      const header = headerChanged ? normalizer.requestHeader(snapshot, this.now()) : null;
+      // `messages_digest` rides on the PAYLOAD and is deliberately absent from `fingerprint`
+      // above. The messages array grows every turn, so fingerprinting it would emit a header per
+      // request — measured, and it fails behaviour_parity's "not once per request".
+      const header = headerChanged
+        ? normalizer.requestHeader(
+            { ...snapshot, messages_digest: request.digest(JSON.stringify(built.messages)) },
+            this.now(),
+          )
+        : null;
       this.lastSnapshot = fingerprint;
 
       // ── intent ──────────────────────────────────────────────────────────────
