@@ -135,7 +135,7 @@ summary. Every field below is bearer-authenticated  — placement is not the bou
   The harness is a HOST process on loopback, not a compose service .
 - **Harness → Rails:** `POST /internal/events` (batched, idempotent, `store_seq` per durable event);
   `POST /internal/harness/heartbeat` every 5s with `active_run_ids` + `store_seq_high_water`.
-- **Crash recovery:** harness dies → launchd/systemd restarts it; `Harness::HealthcheckJob` marks
+- **Crash recovery:** harness dies → the supervision unit restarts it **if one is installed**. Otherwise `bin/harness start` restarts it by hand.  Either way, `Harness::HealthcheckJob` marks
   runs stale >15s as failed; recovery reads the **total position marker** from the session's own
   SQLite store and switches on its phase — it never replays the log, which is what keeps recovery
   O(1) in session length. The harness owns the record now, so there is no SDK session file to resume
@@ -143,7 +143,15 @@ summary. Every field below is bearer-authenticated  — placement is not the bou
   ring-buffers events + retries with backoff (idempotent ingest); boot reconciliation marks orphans
   failed.
 
-**Harness files:** `index.ts` (Fastify + heartbeat), `supervisor.ts` (live runs, one store per session), `loop/` (run_loop · request_builder · checkpoint · stop_reasons · normalize), `store/` (the durable record), `providers/` (adapters + credential discovery), `tools/`, `extensions/` (the four points). (**the ONLY file that sees raw SDK shapes**; unknown types → `ai_raw`, never a crash), `transport.ts` (batch/retry), `hooks.ts` (Bash→terminal_output, Edit/Write→file_changed), `permissions.ts` (canUseTool allow-all for MVP — **the seam** for later Bash gating).
+**Harness files:** `index.ts` (Fastify + heartbeat), `supervisor.ts` (live runs; ONE store per session, shared by lanes), `transport.ts` (batched/idempotent POST + `store_seq`), `loop/` (`run_loop` · `request_builder` · `checkpoint` · `stop_reasons` · `normalize` — and **`normalize.ts` is the only file that maps a `ProviderEvent` to Contract-1**; an unknown shape becomes `ai_raw`, never a crash), `store/` (the SQLite/WAL record + the total position marker), `providers/` (**each adapter is the only code that may import its vendor SDK**), `tools/`, `extensions/` (the four points; `tool:before` is the command gate), plus `context/`, `mcp/`, `skills.ts`/`skills_admin.ts`, `capabilities.ts`, `pricing.ts`, `redaction.ts`, `auth.ts`, `config.ts`, `frontmatter.ts`.
+
+<!-- doc-truth:ignore -->
+Three SDK-era files are **gone** and are named here only to say so: `runner.ts` (its job is now
+`supervisor.ts` plus `loop/run_loop.ts`), `normalizer.ts` (now `loop/normalize.ts`), and
+`permissions.ts` — the last deliberately, because a seam that cannot intercept must not exist; the
+`tool:before` extension point replaced it. `hooks.ts` is gone too: Bash→`terminal_output` and
+Edit/Write→`file_changed` are emitted by the tools and the loop directly.
+<!-- doc-truth:end -->
 
 ## 8. Git isolation & approval flow
 
@@ -197,7 +205,7 @@ Work by week (each week's scope is one coherent slice; contracts make handoffs c
 **Milestone: full loop works — prompt → watch live → review diff → approve commits / reject reverts, roles enforced; clawdparty used on itself over the LAN; final verification run from a second laptop using only the README.**
 
 **Mon–Wed — final build:**
-- **Infrastructure + hardening:** harness supervision (container restart policy, SIGTERM/graceful shutdown, restart recovery via resume); LAN serving config (Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs); security hardening (token expiry/revocation, secret review, confirm harness/Vite ports stay unpublished); runbook + README incl. LAN join instructions.
+- **Infrastructure + hardening:** harness supervision ; LAN serving config (Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs); security hardening (token expiry/revocation, secret review, confirm harness/Vite ports stay unpublished); runbook + README incl. LAN join instructions.
 - **Review loop:** **changeset service: approve=commit / reject=revert + unit tests** (untracked, gitignored, empty diff, dirty-at-start, reject-leaves-clean); **diff viewer** (react-diff-view, per-file list, stats) + **approval UI** (review screen, approve/reject/revise, owner-gated); role-enforcement pass + request-spec matrix; mid-run join/reconnect resync + UI polish: loading/empty/error states; test backstop: auth/role/traversal specs, git edge specs, **one happy-path system test via fixture replay**.
 - The changeset service over real worktrees (the A↔B↔git seam) is the cross-stream piece — built with both backend and harness in view.
 

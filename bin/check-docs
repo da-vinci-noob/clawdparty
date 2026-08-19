@@ -143,6 +143,28 @@ for doc in "${GUIDANCE[@]}"; do
   done < <(readable "$doc" | grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
 done
 
+# The same claim, made WITHOUT a directory. The check above requires a slash, so a bare
+# `permissions.ts` was invisible to it — and that is exactly how docs/PLAN.md kept naming four
+# source files the SDK removal deleted, while this gate reported OK. A whole category of stale
+# claim walked through the hole in the gate written to catch it.
+#
+# Resolved by BASENAME against the tracked tree, which is what makes an unanchored name checkable:
+# a bare filename does not say which directory, so "does any file with this name exist?" is the
+# strongest honest question. It still catches the case that matters — a file that was DELETED has
+# no basename anywhere. Only source-like extensions, because prose mentions `package.json` and
+# `.env.local` generically and those are not component claims.
+basenames="$(mktemp)"
+git ls-files | xargs -n1 basename 2>/dev/null | sort -u >"$basenames"
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || continue
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    grep -qxF "$name" "$basenames" || fail "$doc names a file that exists nowhere in the tree: $name"
+  done < <(readable "$doc" |
+    grep -oE '`[A-Za-z0-9_][A-Za-z0-9_.-]*\.(ts|tsx|rb|mjs|sql)`' | tr -d '`' | sort -u)
+done
+rm -f "$basenames"
+
 echo "== 2. Ruby constants named in guidance resolve =================="
 for doc in "${GUIDANCE[@]}"; do
   [[ -f "$doc" ]] || continue
