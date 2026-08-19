@@ -86,8 +86,32 @@ export interface RunOutcome {
 
 const MAX_TURNS = 100;
 
+/**
+ * Consecutive IDENTICAL failing tool calls before the run is stopped.
+ *
+ * `MAX_TURNS` is a backstop, not a detector, and the difference is user-visible: measured on the
+ * live stack, `us.meta.llama3-1-8b` called `read("stdout")`, got "stdout is not available", and
+ * repeated it 52 times in 90 seconds with no text and no terminal event — heading for 100 paid
+ * requests and about three minutes before anything stopped it. To the room that is indistinguishable
+ * from a hang, and it is what the owner reported as "I have to refresh to see the response": there
+ * was no response.
+ *
+ * Three, not two: one failure is ordinary, a second can be a legitimate retry (a race, a file being
+ * written), and a third identical one is a model that is not going to recover on its own.
+ */
+const MAX_REPEATED_TOOL_FAILURES = 3;
+
 export class RunLoop {
   private readonly deps: RunLoopDeps;
+  /**
+   * The last failing `(tool, input)` and how many times in a row it has failed.
+   *
+   * Keyed on the INPUT, not just the tool: a model retrying with a corrected path is making
+   * progress and must be left alone. Sending the same bytes and getting the same error is not
+   * progress, and it is the only case this stops.
+   */
+  private repeatedFailure: { key: string; name: string; error: string; count: number } | null =
+    null;
   private readonly now: () => number;
   private readonly newId: () => string;
   /** Fingerprint of the last emitted request snapshot; drives emit-on-change. */
@@ -358,6 +382,23 @@ export class RunLoop {
         emit(turn.durableEvents);
 
         await this.dispatchTools(spec, normalizer, planned, turn.toolCalls);
+
+        // Checked HERE, at the turn boundary, rather than inside the dispatch loop: a turn's calls
+        // are allowed to fail together, and it is the repetition ACROSS turns that means the model
+        // is stuck. Stopping mid-turn would also leave some of the turn's `tool_use` blocks without
+        // a result, which  forbids.
+        const stuck = this.repeatedFailure;
+        if (stuck && stuck.count >= MAX_REPEATED_TOOL_FAILURES) {
+          return this.fail(
+            spec,
+            normalizer,
+            "api_error",
+            totalUsage,
+            `stopped after ${stuck.count} identical failing \`${stuck.name}\` calls, each ` +
+              `returning: ${stuck.error}. The model is repeating the same call rather than ` +
+              "recovering, so the run was ended instead of spending the remaining turns on it.",
+          );
+        }
         resumeAttempt = 0;
         continue;
       }
@@ -621,6 +662,8 @@ export class RunLoop {
         after && after.outcome.k !== "refuse" ? after.outcome.value.result : outcome.result;
       const text = finalResult.content.map((c) => c.text).join("\n");
 
+      this.noteToolOutcome(call.name, input, finalResult.isError, text);
+
       const events = [
         ...outcome.emitted,
         finalResult.isError
@@ -668,6 +711,22 @@ export class RunLoop {
    * Carries the call's `settlementKey` so a settlement can only ever land once, matching
    * what recovery writes for the same call.
    */
+  /**
+   * Track consecutive identical FAILURES. Any success, or any different call, clears the streak —
+   * the guard is about a model that is stuck, not about a run that has seen errors.
+   */
+  private noteToolOutcome(name: string, input: unknown, isError: boolean, text: string): void {
+    if (!isError) {
+      this.repeatedFailure = null;
+      return;
+    }
+    const key = `${name}:${JSON.stringify(input ?? null)}`;
+    this.repeatedFailure =
+      this.repeatedFailure?.key === key
+        ? { ...this.repeatedFailure, count: this.repeatedFailure.count + 1, error: text }
+        : { key, name, error: text, count: 1 };
+  }
+
   private toolResultWrite(spec: RunSpec, call: checkpoint.ToolCallPosition, block: unknown): Write {
     return {
       kind: "entry",
