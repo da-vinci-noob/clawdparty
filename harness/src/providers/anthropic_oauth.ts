@@ -24,6 +24,7 @@ import {
 } from "./credentials/discover.js";
 import { readKeychainToken } from "./credentials/keychain.js";
 import { KEYCHAIN_SOURCE } from "./credentials/sources.js";
+import { type SystemBlock, withClaudeCodeIdentity } from "./oauth_identity.js";
 
 /**
  * The host developer's Claude subscription or enterprise SSO login.
@@ -60,6 +61,18 @@ const PROBE_HINTS = {
   noCredential:
     "The SDK found no credential to send. Run `claude /login`, or `claude setup-token` and " +
     "export CLAUDE_CODE_OAUTH_TOKEN.",
+  // The 429 that is not a limit, with the cause MEASURED rather than guessed: same token, headers
+  // and model, only the system block changed — empty gave this 429, the Claude Code identity gave a
+  // 200. Named here rather than in the shared classifier because the cause belongs to this
+  // credential kind, and the shared text used to blame the account's entitlement, which was wrong.
+  quotaUnreported:
+    "The provider accepted this credential and then refused the request, reporting no limit and no " +
+    "retry time — so this is not your usage running out. A subscription token is issued to Claude " +
+    "Code, and this API refuses a request that does not identify as it. clawdparty does not send " +
+    "that identity unless you opt in, because doing so asserts a product identity it does not " +
+    "have — your account, your call. Set HARNESS_OAUTH_CLAUDE_CODE_IDENTITY=1 in .env.local and " +
+    "restart the harness to enable it, or use an API key or Amazon Bedrock, which need no such " +
+    "decision.",
 } as const;
 
 const CONSERVATIVE_FALLBACK: Capabilities = {
@@ -144,7 +157,10 @@ export class AnthropicOauthAdapter implements ProviderAdapter {
     thirdPartyClientPermitted: "owner_decision_required",
     note:
       "The host developer's Claude subscription or enterprise SSO seat. Whether a " +
-      "third-party client may drive it is the account owner's decision, not this app's.",
+      "third-party client may drive it is the account owner's decision, not this app's. " +
+      "MEASURED 2026-08-20: the seat IS able to drive this API — the request must identify as " +
+      "Claude Code, which clawdparty sends only when HARNESS_OAUTH_CLAUDE_CODE_IDENTITY is set. " +
+      "That flag is the owner's decision, taken per host, and is off by default.",
   };
 
   private readonly injectedClient?: Anthropic;
@@ -213,12 +229,24 @@ subscription.`,
     return this.capabilityCache.get(model) ?? CONSERVATIVE_FALLBACK;
   }
 
+  /**
+   * The system prompt this adapter actually sends.
+   *
+   * Public so the opt-in is testable without a live request, and because it is the ONE place the
+   * identity is applied — `verify.ts` probes through `stream()`, so the probe and real runs cannot
+   * disagree about what was sent. Two seams here is how the panel would report VERIFIED for a
+   * credential that then failed a run.
+   */
+  systemFor(system: readonly SystemBlock[]): SystemBlock[] {
+    return withClaudeCodeIdentity(system);
+  }
+
   async *stream(req: ProviderRequest): AsyncIterable<ProviderEvent> {
     const stream = this.client().messages.stream(
       {
         model: req.model,
         max_tokens: req.maxTokens,
-        system: req.system,
+        system: this.systemFor(req.system as readonly SystemBlock[]),
         messages: toAnthropicMessages(req.messages) as Anthropic.MessageParam[],
         tools: req.tools as Anthropic.ToolUnion[],
         ...(req.thinking ? { thinking: req.thinking } : {}),

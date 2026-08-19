@@ -261,10 +261,31 @@ describe("a 429 is read by what it reports", () => {
 
     const { remedy } = classifyStreamError(err, HINTS);
     expect(remedy).not.toMatch(/wait and retry/i);
-    // What the reader needs instead: it authenticated, nothing said you are over a limit, and here
-    // are the paths that do work.
+    // What the reader needs: it authenticated, and nothing said you are over a limit.
     expect(remedy).toMatch(/no.*(limit|quota)|reported no/i);
-    expect(remedy).toMatch(/API key|Bedrock/i);
+  });
+
+  it("does NOT guess a CAUSE the shared classifier cannot know", () => {
+    // This assertion replaces `toMatch(/API key|Bedrock/i)`, which pinned advice that turned out to
+    // be WRONG. The old text continued "a subscription seat is not necessarily permitted to drive
+    // this API directly" and steered the reader to an API key or Bedrock. Measured with the same
+    // token, headers and model, changing only the system block: empty → this 429, Claude Code
+    // identity → 200. The seat was permitted all along, so the advice sent the owner to ask a
+    // question whose answer was already yes, and the test had frozen it in place.
+    const { remedy } = classifyStreamError(with429({ "request-id": "req_x" }), HINTS);
+
+    expect(remedy).not.toMatch(/not necessarily permitted|account owner/i);
+  });
+
+  it("uses the ADAPTER's words for the cause when it declares them", () => {
+    // The split: the status is HTTP and classified here, the cause belongs to whichever
+    // credential kind produced it. Only the oauth adapter knows about the Claude Code identity.
+    const { remedy } = classifyStreamError(with429({ "request-id": "req_x" }), {
+      ...HINTS,
+      quotaUnreported: "identify as Claude Code; set HARNESS_OAUTH_CLAUDE_CODE_IDENTITY=1",
+    });
+
+    expect(remedy).toMatch(/HARNESS_OAUTH_CLAUDE_CODE_IDENTITY/);
   });
 
   it("treats a partial rate-limit header set as a real quota, erring toward retry", () => {

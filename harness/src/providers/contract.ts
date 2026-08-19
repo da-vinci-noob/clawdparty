@@ -64,6 +64,15 @@ export interface FailureHints {
   expired: string;
   /** 403 — the credential is valid but not permitted here. Re-authenticating fixes nothing. */
   notEntitled: string;
+  /**
+   * 429 that reported NO limit and NO retry time, so it is probably not usage.
+   *
+   * Adapter-supplied because the cause is credential-specific and generic advice here was actively
+   * wrong: a subscription token gets this when the request does not identify as Claude Code, and
+   * the old shared text blamed the account's entitlement — sending the developer to ask a question
+   * whose answer was already yes. Optional; without it the caller says only what it measured.
+   */
+  quotaUnreported?: string;
   /** Anything else. */
   unreachable: string;
 }

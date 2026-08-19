@@ -270,13 +270,20 @@ export function classifyStreamError(
           // response carried `anthropic-organization-id` and `anthropic-workspace-id` — so it
           // authenticated — and NO `retry-after` or `anthropic-ratelimit-*` header of any kind. A real
           // quota refusal states the limit, what remains and when it resets; this stated none, and the
-          // vendor's own `message` was the word "Error". Telling someone to wait for a limit nobody
-          // described sends them to wait forever, which is what happened.
+          // vendor's own `message` was the word "Error".
+          //
+          // What this file may say STOPS THERE. It used to continue "a subscription seat is not
+          // necessarily permitted to drive this API directly, which is the account owner's decision
+          // to check" — and that was WRONG, proven by sending the same token, headers and model with
+          // only the system block changed: empty → this 429, Claude Code identity → 200. The seat was
+          // permitted all along, and the advice sent the owner to ask a question already answered yes.
+          // The cause is credential-specific, so the words come from the ADAPTER, and
+          // the shared branch reports only what it measured.
           remedy:
+            hints?.quotaUnreported ??
             "The provider accepted this credential and then refused the request, reporting no limit " +
-            "and no retry time — so this is probably not your usage running out. A subscription seat " +
-            "is not necessarily permitted to drive this API directly, which is the account owner's " +
-            "decision to check. An API key or Amazon Bedrock are the paths that do not depend on it.",
+              "and no retry time — so this is probably not your usage running out. What else it might " +
+              "be depends on the credential, and this provider declares no hint for it.",
         };
   }
   if (status === 400) {
