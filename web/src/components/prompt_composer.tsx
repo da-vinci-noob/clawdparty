@@ -182,17 +182,32 @@ export const PromptComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   //
   // The per-run fallback is not redundant: `context_usage` is ephemeral and never backfilled, so
   // a reload or a late joiner has none of it and reads the durable figure instead.
-  const windowModelId = usageModel ?? model;
+  // The model the NEXT turn will use: the explicit selection when there is one, and otherwise the
+  // most recent run's model as the best available evidence of what the server will resolve.
+  //
+  // The SELECTION WINS, and it used to lose. This was `usageModel ?? model`, where `usageModel` is
+  // the last TERMINAL run's model (`selectLatestUsage` scans `run_finished`/`run_failed`) — so a
+  // finished run outranked the user's current pick indefinitely, until another run finished.
+  // Reported from the running app: the gauge read `US OpenAI GPT-5.6 Sol · 4K / 131K · 3%` beside a
+  // picker reading `Claude Opus 5`. The label going stale is the visible half; the DENOMINATOR going
+  // stale is the harmful one, because the percentage was then measured against a window the next run
+  // would not have — 3% of 131K where the truth was 0% of 1M.
+  //
+  // Token count is deliberately NOT re-based: a conversation's context carries across a model
+  // switch. Only the window belongs to the model.
+  const windowModelId = model || usageModel;
   const contextWindow =
     liveWindow ??
     models.find((m) => m.id === windowModelId)?.context_window ??
     DEFAULT_CONTEXT_WINDOW;
   const shownTokens = liveTokens ?? contextTokens;
   const contextPct = Math.min(100, Math.round((shownTokens / contextWindow) * 100));
-  // The model the latest run ACTUALLY used (from run_started), so a viewer can
-  // confirm the selection took effect — Claude can't reliably introspect this itself.
-  const runModelLabel = usageModel
-    ? (models.find((m) => m.id === usageModel)?.label ?? usageModel)
+  // Labels whichever model the DENOMINATOR belongs to, so the two can never disagree. It does not
+  // try to answer "did my selection take effect?" any more — the previous comment claimed to read
+  // `run_started` and did not, and answering that here is what made it contradict the picker. The
+  // activity feed's `run_started` and `request_header` record the model a run actually used.
+  const runModelLabel = windowModelId
+    ? (models.find((m) => m.id === windowModelId)?.label ?? windowModelId)
     : null;
 
   return (

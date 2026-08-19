@@ -717,6 +717,120 @@ describe("PromptComposer context bar", () => {
  * harness reports unavailable providers precisely so the gap can be explained , and
  * dropping that on the floor is what left participants with an empty picker and no reason.
  */
+/**
+ * Reported from the running app: the gauge read `US OpenAI GPT-5.6 Sol · 4K / 131K · 3%` while the
+ * picker underneath said `Claude Opus 5` and the footer said the run spends the Anthropic account.
+ * Three things on one screen disagreeing about which model is next.
+ *
+ * `windowModelId = usageModel ?? model` — and `usageModel` is the LAST TERMINAL RUN's model
+ * (`selectLatestUsage` scans `run_finished`/`run_failed`). So a finished run's model outranks the
+ * user's current selection, indefinitely, until another run finishes. The label goes stale AND the
+ * denominator does, which is worse: the percentage is then computed against a window the next run
+ * will not have.
+ *
+ * The token count is not the stale part — a conversation's context carries across a model switch.
+ * The WINDOW is what belongs to the model, so it has to follow whichever model runs next.
+ */
+describe("PromptComposer context bar after a model switch", () => {
+  function finishedRunOn(model: string, inputTokens: number) {
+    const started: EventEnvelope = {
+      id: 1,
+      session_id: "s",
+      ai_run_id: "9",
+      seq: 1,
+      type: "run_started",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-08-20T00:00:00.000Z",
+      payload: { model, cwd: "/r" },
+    };
+    useEventStore.getState().applyMany([
+      started,
+      {
+        ...started,
+        id: 2,
+        seq: 9,
+        type: "run_finished",
+        actor: { kind: "claude" },
+        payload: { usage: { input_tokens: inputTokens } },
+      } as EventEnvelope,
+    ]);
+  }
+
+  const twoModels = () =>
+    server.use(
+      http.get("/api/models", () =>
+        HttpResponse.json(
+          providersResponse([
+            { id: "us.openai.gpt-5.6-sol", label: "US OpenAI GPT-5.6 Sol", window: 131_072 },
+            { id: "claude-opus-5", label: "Claude Opus 5", window: 1_000_000 },
+          ]),
+        ),
+      ),
+    );
+
+  it("follows the SELECTED model's window once the user picks a different one", async () => {
+    twoModels();
+    setRole("owner");
+    finishedRunOn("us.openai.gpt-5.6-sol", 4000);
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    // Baseline: with nothing selected, the last run's model is the honest answer.
+    await waitFor(() =>
+      expect(screen.getByTestId("context-usage")).toHaveTextContent("4K / 131K · 3%"),
+    );
+
+    const picker = (await screen.findByTestId("model")) as HTMLSelectElement;
+    // Wait for discovery: setting a <select> to a value that is not yet an option is a silent
+    // no-op, and the first version of this test did exactly that and blamed the component.
+    await waitFor(() =>
+      expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"),
+    );
+    fireEvent.change(picker, { target: { value: "claude-opus-5" } });
+    await waitFor(() => expect(picker.value).toBe("claude-opus-5"));
+
+    // The tokens carry over; the window is Opus 5's. 4K of 1M is 0%, not 3% of a window that
+    // belongs to a model the next run will not use.
+    await waitFor(() =>
+      expect(screen.getByTestId("context-usage")).toHaveTextContent("4K / 1M · 0%"),
+    );
+  });
+
+  it("names the SELECTED model, not the one a previous run used", async () => {
+    twoModels();
+    setRole("owner");
+    finishedRunOn("us.openai.gpt-5.6-sol", 4000);
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    const picker = (await screen.findByTestId("model")) as HTMLSelectElement;
+    // Wait for discovery: setting a <select> to a value that is not yet an option is a silent
+    // no-op, and the first version of this test did exactly that and blamed the component.
+    await waitFor(() =>
+      expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"),
+    );
+    fireEvent.change(picker, { target: { value: "claude-opus-5" } });
+    await waitFor(() => expect(picker.value).toBe("claude-opus-5"));
+
+    // The screenshot's contradiction: this said "US OpenAI GPT-5.6 Sol" next to a picker reading
+    // "Claude Opus 5".
+    await waitFor(() =>
+      expect(screen.getByTestId("context-model")).toHaveTextContent("Claude Opus 5"),
+    );
+  });
+
+  it("still shows the last run's model when the user has selected NOTHING", async () => {
+    // The property the original code was reaching for, kept: with no selection the server resolves
+    // the default, so the most recent run is the best available evidence of what will run.
+    twoModels();
+    setRole("owner");
+    finishedRunOn("us.openai.gpt-5.6-sol", 4000);
+    renderComposer(<PromptComposer sessionId="s" />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("context-model")).toHaveTextContent("US OpenAI GPT-5.6 Sol"),
+    );
+  });
+});
+
 describe("PromptComposer unavailable providers", () => {
   beforeEach(() => {
     useParticipantStore.getState().clear();
