@@ -187,6 +187,25 @@ A **null `id` marks ephemerality.** Ephemeral events bypass REST backfill and ar
 | `recovery_applied` | **system** | durable | run | `ai_run_id` + `seq` |
 | `ai_raw` | system | durable | run | `ai_run_id` + `seq` |
 
+> **`seq` is the RECORD's numbering, and RAILS-APPENDED events carry none.** The table's `carries`
+> column describes the normal case: the harness emitted it, so the record holds the entry the number
+> belongs to. Rails also appends four run-scoped types itself, and those arrive with `ai_run_id` and
+> a **null `seq`** — `run_failed` from the staleness sweep and from boot reconciliation, and
+> `run_interrupted` when an interrupt reaches a harness that no longer holds the run.
+>
+> This is not a loosening; it closes a defect. Rails computed its "next" seq from the PROJECTION,
+> which is behind the record by definition, so the value was always one the harness might still use —
+> and when it did, the insert lost to `UNIQUE (ai_run_id, seq)` and `Events::Ingest` reported the
+> loser as `skipped`, indistinguishable from a retry. It destroyed `recovery_applied` on every real
+> crash. `seq` and `store_seq` are both properties of the record; an event Rails appended
+> holds neither, which is also what makes `rederive(reset:)` preserve it rather than delete it.
+>
+> `changeset_ready`/`approved`/`rejected` DO carry a seq, and that is safe rather than inconsistent:
+> those fire only when the run is terminal from the harness's side, and the terminal entry and the
+> terminal position marker are written in ONE `store.commit` — so recovery can never allocate again
+> for that run. There the uniqueness also does real work, stopping two concurrent reviewers from
+> appending twice.
+
 Note the deliberate splits: run lifecycle is **system** (`run_finished`/`run_failed`) except
 `run_interrupted`, which is a **human** action and so is **user**-attributed; `run_started`,
 `changeset_approved`, and `changeset_rejected` are also **user** acts.

@@ -241,6 +241,31 @@ The governance table above is corrected accordingly. What has NOT changed: every
 still needs an entry here and still must fall inside the window. The looser rule is about
 which number moves, not about whether the change is recorded.
 
+## [rails-seq-completion] — the fifth copy, and the table now says so (clarifying)
+
+No version bump. [recovery-reaches-the-room] fixed two of the FIVE places Rails computed
+`seq: (run.events.maximum(:seq) || 0) + 1`; the rest surfaced in a follow-up audit that grepped for
+the pattern rather than for the symptom.
+
+**`RunsController#reconcile_interrupted` was the one still exposed**, and its comment asserted the
+very thing that had just been disproved — "Rails owns the next seq since the harness is no longer
+emitting for this run". That path runs when the harness answers `UnknownRun` because it RESTARTED,
+and a restarted harness runs boot recovery over that same run and emits from its own store. Shipping
+is async and retried, so the POST can still be in flight when the interrupt lands. Fixed the same
+way: no `seq`.
+
+**The three `changeset_*` sites keep their seq, and that is a conclusion rather than an omission.**
+They fire only when the run is terminal from the harness's side, and `run_loop.ts` writes the
+terminal entry and the terminal position marker in ONE `store.commit` — so recovery can never
+allocate another seq for that run. Removing it there would also have cost real protection: the
+uniqueness is what stops two concurrent reviewers appending twice. Each site now says so, because an
+unexplained difference between five near-identical expressions is how the next person re-introduces
+the bug in either direction.
+
+`events.md`'s per-type table gains a note stating which four types arrive Rails-appended with a null
+`seq`, and why the `changeset_*` rows differ. The table itself is unchanged — it describes the normal
+case, which is still the harness emitting.
+
 ## [recovery-reaches-the-room] — two writers on one `seq`, and a borrowed `store_seq` (clarifying)
 
 No version bump: no field is added or removed. `recovery_applied` simply never arrived, and the audit

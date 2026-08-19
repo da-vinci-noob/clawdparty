@@ -144,16 +144,26 @@ class RunsController < ApplicationController
     AiRun.find_by(id: params[:id]) || raise(ActiveRecord::RecordNotFound)
   end
 
-  # Harness-less finalize: ingest a synthetic run_interrupted (Rails owns the next
-  # seq since the harness is no longer emitting for this run) so it persists,
-  # broadcasts (clients drop it from active), and Runs::Finalize transitions it.
+  # Harness-less finalize: ingest a synthetic run_interrupted so it persists, broadcasts (clients
+  # drop it from active), and Runs::Finalize transitions it.
+  #
+  # NO seq, and the comment here used to say the opposite — "Rails owns the next seq since the
+  # harness is no longer emitting for this run". That is the same assumption that made
+  # `HealthcheckJob` silently destroy `recovery_applied`, and it is false for the same
+  # reason: this path runs when the harness answers UnknownRun because it RESTARTED, and a
+  # restarted harness runs boot recovery over this very run and emits from its own store. Shipping
+  # is async and retried, so that POST can still be in flight when the interrupt lands. Rails would
+  # take the seq recovery already used, and `Events::Ingest` reports the loser as `skipped`.
+  #
+  # `seq` and `store_seq` are properties of the RECORD; Rails appended this itself, so it holds
+  # neither. Unlike the `changeset_*` appends this one is genuinely exposed, because the run is
+  # ACTIVE and the harness still holds a non-terminal position marker.
   def reconcile_interrupted(run, participant)
     return unless run.active?
 
     Events::Ingest.call(
       'session_id' => run.session_id,
       'ai_run_id' => run.id,
-      'seq' => (run.events.maximum(:seq) || 0) + 1,
       'type' => 'run_interrupted',
       'actor' => { 'kind' => 'user', 'id' => participant.id },
       'payload' => {}

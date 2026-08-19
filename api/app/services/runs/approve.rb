@@ -35,6 +35,10 @@ module Runs
           type: 'changeset_approved',
           actor: { kind: 'user', id: @reviewed_by.id },
           ai_run_id: @run.id,
+          # A seq here is SAFE, unlike the harness-less paths: this run is terminal from the
+          # harness's side, and the terminal entry and terminal position marker are written in ONE
+          # `store.commit`, so recovery can never allocate another seq for it. The uniqueness is
+          # also doing real work — it is what stops two concurrent reviewers appending twice.
           seq: (@run.events.maximum(:seq) || 0) + 1,
           # The contract's `commit_sha`, which `commit!` already returns. A branch pointer moves
           # and the database may not outlive the repo, so the approval names its own commit.
