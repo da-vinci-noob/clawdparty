@@ -28,7 +28,8 @@
     "probe:limits": "node --import tsx scripts/probe_limits.ts",
     "test:plugin-adversarial": "vitest run test/plugins",
     "reconstruct": "node --import tsx scripts/reconstruct.ts",
-    "probe:context": "node --import tsx scripts/probe_context_windows.ts"
+    "probe:context": "node --import tsx scripts/probe_context_windows.ts",
+    "measure:stream": "node --import tsx scripts/measure_stream_latency.ts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.4",
