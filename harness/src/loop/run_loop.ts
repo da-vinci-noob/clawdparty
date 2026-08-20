@@ -1004,11 +1004,26 @@ function toolResultBlock(toolUseId: string, text: string, isError: boolean): unk
  * model produced content, and `foldSurface` merges it into the assistant message in
  * provider block order.
  *
- * Returns -1 when the turn produced no claude-actored entry. A compaction-only turn is
- * that case (`context_compacted` is system-actored) and is NOT handled here — a follow-up covers it.
+ * FALLBACK for a compaction-only turn. `context_compacted` is system-actored, so a turn whose
+ * only content is a compaction block had NO carrier and the block reached the surface nowhere — and
+ * that is the worst turn to lose, because the next request then re-sent the entire span the provider
+ * had just replaced, at full token cost, on a session that had already exhausted its window.
+ *
+ * The consequence of carrying it on a system-actored entry is that `request_builder` folds it into a
+ * USER message rather than an assistant one. This deliberately waited on measuring that rather
+ * than guessing it, because a wrong role produces a request that looks right and is refused.
+ * Measured against the live API (claude-opus-5 over the host login, once that path worked):
+ * a `compaction` block returns 200 in an assistant message AND in a user message, with identical
+ * input_tokens, and the API's own block-type enumeration lists `compaction` as valid in both. So the
+ * user placement carries no rejection risk. Semantic equivalence between the two roles is NOT
+ * claimed — only that neither is refused, which is what unblocked this.
+ *
+ * Still -1 when the turn produced nothing at all, which is a turn with no content to carry.
  */
 function blockCarrier(durable: EventEnvelope[]): number {
-  return durable.findIndex((event) => event.actor.kind === "claude");
+  const claude = durable.findIndex((event) => event.actor.kind === "claude");
+  if (claude !== -1) return claude;
+  return durable.findIndex((event) => event.type === "context_compacted");
 }
 
 /**

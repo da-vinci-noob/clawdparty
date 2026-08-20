@@ -16,12 +16,21 @@ import type { Capabilities } from "../providers/contract.js";
  * wall again, because nothing had ever requested compaction. The loop's retry was correct and
  * the request it retried was not.
  *
- * **Verification status, stated plainly: the live path is UNVERIFIED.** This host serves neither
- * first-party Anthropic path (no API key, no OAuth token) and `anthropic-bedrock` declares
- * `serverSideCompaction: false` — the SDK says Bedrock has no such support. So the directive
- * below is built from the documented shape and gated so it is only ever sent to a model that
- * reported supporting that exact edit type. Everything downstream of the request (carrying the
- * block back, emitting `context_compacted`, rendering it) IS testable and is tested.
+ * **Verification status: the REQUEST SHAPE is now measured, and the documented guess was
+ * right.** Against `claude-opus-5` over the host login — possible only once that path was made
+ * usable — `context_management: { edits: [{ type: "compact_20260112" }] }` with beta
+ * `compact-2026-01-12` returns 200; dropping the beta is a 400 ("context_management: Extra inputs
+ * are not permitted", which is what the next line's "sending one without the other is a 400" now
+ * rests on); and a deliberately wrong edit type makes the API enumerate exactly
+ * `clear_tool_uses_20250919` and `compact_20260112`, so both constants here are real and correctly
+ * spelled. A `compaction` block is also accepted in a USER message and in an ASSISTANT one, with
+ * identical input_tokens — which is what unblocked the carrier choice.
+ *
+ * What is still UNVERIFIED is a compaction actually FIRING: that needs a session driven past a 1M
+ * window, which costs real money to reach, so no response containing a provider-generated
+ * `compaction` block has been observed. The block's shape in the fold is therefore still taken from
+ * the documentation. Everything else downstream (carrying the block back, emitting
+ * `context_compacted`, rendering it) is tested.
  */
 
 /** The edit type and its beta, together — sending one without the other is a 400. */

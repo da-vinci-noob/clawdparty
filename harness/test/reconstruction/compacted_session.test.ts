@@ -278,7 +278,7 @@ describe("every on-surface entry carries blocks (invariant 4)", () => {
     }
   });
 
-  it("does NOT yet carry a compaction block from a turn with no other content", async () => {
+  it("carries a compaction block from a turn with NO other content", async () => {
     await run([
       turn([compaction(0)], "model_context_window_exceeded"),
       turn([text(0, "answer")], "end_turn"),
@@ -286,17 +286,19 @@ describe("every on-surface entry carries blocks (invariant 4)", () => {
 
     const surface = (await reopen()).surfaceFrom(0);
 
-    // A KNOWN GAP, asserted as-is so it is visible rather than assumed fixed.
+    // This assertion was once inverted — `not.toContain` — held deliberately so the gap
+    // stayed visible instead of being assumed fixed, and it flipped the moment the fix landed.
+    // Which is the point of asserting an absence.
     //
-    // The turn's blocks ride on its first CLAUDE-actored entry, and `context_compacted` is
-    // system-actored — so a compaction-only turn has no carrier. The fix is not just
-    // "make it a carrier": folding a system-actored entry would put the compaction block in
-    // a USER message, and which role the API expects it in is a provider detail this
-    // codebase has never exercised (`serverSideCompaction` is derived live and was false on
-    // every model tried). Guessing would produce a request that looks right and is wrong.
+    // The turn's blocks ride on its first CLAUDE-actored entry and `context_compacted` is
+    // system-actored, so a compaction-only turn had no carrier and the provider's summary was
+    // dropped — worst of all on the one turn that exists because the window ran out.
     //
-    // Reachable only when a model reports context management AND compacts without emitting
-    // any text, which is why it is a follow-up rather than a blocker. A follow-up pins the role first.
-    expect(JSON.stringify(surface.map((e) => e.blocks))).not.toContain(COMPACTION_BLOCK.summary);
+    // What kept it open was the ROLE, not the carrier: folding a system-actored entry puts the
+    // block in a USER message, and guessing wrong produces a request that looks right and is
+    // refused. Measured against the live API once the host-login path became usable — a
+    // `compaction` block returns 200 in a user message AND in an assistant one, with identical
+    // input_tokens, and the API enumerates `compaction` as valid in both roles.
+    expect(JSON.stringify(surface.map((e) => e.blocks))).toContain(COMPACTION_BLOCK.summary);
   });
 });
