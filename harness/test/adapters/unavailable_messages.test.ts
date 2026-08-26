@@ -144,18 +144,26 @@ describe("the wrong provider for the credential that won", () => {
     // The unreadable case above sets the process-wide negative cache, so without this the readable
     // case reads nothing and the test passes or fails on ORDER. Same hazard, one file over.
     forgetKeychainFailure();
-    const adapter = new AnthropicOauthAdapter({
-      discovery: { source: "keychain:anthropic-oauth", usable: true },
-      readKeychain: () => "sample-not-real",
-      client: { models: { list: async () => ({ data: [] }) } } as never,
-    });
+    // Force darwin: the reader's platform guard returns null on CI's Linux, so without this the
+    // adapter reports unavailable there and the test passes only on a Mac.
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+    try {
+      const adapter = new AnthropicOauthAdapter({
+        discovery: { source: "keychain:anthropic-oauth", usable: true },
+        readKeychain: () => "sample-not-real",
+        client: { models: { list: async () => ({ data: [] }) } } as never,
+      });
 
-    // The complement, so "unavailable" cannot quietly become the answer for every Keychain host
-    // again: a readable token means this adapter serves the run.
-    expect(await adapter.probe()).toMatchObject({
-      available: true,
-      credentialSource: "keychain:anthropic-oauth",
-    });
+      // The complement, so "unavailable" cannot quietly become the answer for every Keychain host
+      // again: a readable token means this adapter serves the run.
+      expect(await adapter.probe()).toMatchObject({
+        available: true,
+        credentialSource: "keychain:anthropic-oauth",
+      });
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
   });
 });
 

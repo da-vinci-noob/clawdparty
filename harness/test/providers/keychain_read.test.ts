@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AnthropicOauthAdapter } from "../../src/providers/anthropic_oauth.js";
 import {
   KEYCHAIN_READ_QUERY,
@@ -35,8 +35,16 @@ const SAMPLE = "sample-keychain-token-not-real";
  * The negative cache is module state, so it leaks between tests unless reset — which it promptly did:
  * a failing case earlier in the file made every later read return null. Explicit rather than ordered.
  */
+// Force darwin: the reader's platform guard would otherwise return null on CI's Linux,
+// making every injected-reader assertion below pass vacuously on a Mac and fail on CI.
+// The reader logic under test is platform-independent; only the real spawn is not.
+const originalPlatform = process.platform;
 beforeEach(() => {
   forgetKeychainFailure();
+  Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+});
+afterEach(() => {
+  Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
 });
 
 /** What Claude Code actually stores: a JSON blob, not a bare token. Both shapes are handled. */
