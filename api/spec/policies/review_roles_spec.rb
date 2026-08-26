@@ -2,7 +2,7 @@
 
 require 'rails_helper'
 
-# review is a SHARED-ROOM capability, not an owner privilege.
+# REVIEW: is a SHARED-ROOM capability, not an owner privilege.
 #
 # Asserted against SessionPolicy::MATRIX directly rather than through a controller.
 # A request spec proves one endpoint behaves today; this proves the RULE, so a later

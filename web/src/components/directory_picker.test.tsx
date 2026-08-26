@@ -5,8 +5,8 @@ import { server } from "../../test/msw_server";
 import { DirectoryPicker } from "./directory_picker";
 
 // A branching handler mirroring the real three levels: the synthetic root list, a
-// browse root, and a repo inside it. Paths are ABSOLUTE ( — with a configurable
-// SET of roots a relative path has no unambiguous base), and each level supplies its
+// browse root, and a repo inside it. Paths are ABSOLUTE — with a configurable
+// SET of roots a relative path has no unambiguous base, and each level supplies its
 // own `parent`, which is what the client navigates by.
 const ROOT = "/hosts/dev";
 

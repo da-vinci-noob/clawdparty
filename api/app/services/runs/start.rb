@@ -117,7 +117,7 @@ module Runs
     # A REJECT still severs the chain, and that is the whole point: reject reverts
     # the worktree, so the recorded conversation describes edits that no longer
     # exist. Resuming it would have Claude reason about files it cannot see
-    #. `revise` deliberately does resume — it keeps the dirty tree.
+    # . `revise` deliberately does resume — it keeps the dirty tree.
     # Scoped to THIS LANE. A reject severs the rejected lane's context and must
     # not leak into another: reading the session's latest run across all lanes would let lane B's
     # rejection sever lane A, and would resume lane A's conversation into lane B.

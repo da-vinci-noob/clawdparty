@@ -70,6 +70,11 @@ describe("the query it runs", () => {
 });
 
 describe("what it reports", () => {
+  // These inject a runner to test the REPORTING logic, which is platform-independent. Force darwin
+  // so the real-reader platform guard does not short-circuit them to false on CI's Linux (the
+  // top-level afterEach restores). The dedicated "platform gating" block below owns the OS behaviour.
+  beforeEach(() => pretendPlatform("darwin"));
+
   it("true when `security` exits 0 — the item is there", () => {
     expect(keychainHasToken(() => 0)).toBe(true);
   });
