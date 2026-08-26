@@ -12,9 +12,6 @@ on:
 jobs:
   harness:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: harness
 
     steps:
       - uses: actions/checkout@v4
@@ -26,70 +23,14 @@ jobs:
 
       # The contracts package is a file: dependency; install resolves the symlink.
       - name: Install
+        working-directory: harness
         run: npm install --no-audit --no-fund
 
-      - name: Biome
-        run: npx @biomejs/biome@1.9.4 check .
-
-      - name: Typecheck
-        run: npx tsc --noEmit
-
-      - name: Vitest
-        run: npx vitest run
-
-      # The extension-point gate, run as its own REQUIRED step rather than relying
-      # on the full suite. `tool:before` is the only thing that can refuse a
-      # model-directed command once the harness runs on the host, so a regression
-      # here should be legible in the CI output instead of one line among 167.
-      - name: Extension points gate (test:extensions)
-        run: npm run test:extensions
-
-      # The host-topology gate, also its own REQUIRED step. With the harness on the
-      # host, two properties stop being enforced by placement and start being enforced
-      # only by code: that every control route authenticates  and that there is
-      # no input path to a shell. A container made both partly structural; a
-      # host process does not, so they need to fail loudly on their own line.
-      - name: Host-topology gate (test:security)
-        run: npm run test:security
-
-      # Run ALONE, which is the point. Excluded from the default suite because a
-      # wall-clock percentile measured while 77 other test files compete for the same disk
-      # measures the machine, not the store.
-      - name: Durable-write cost gate (p99 < 5ms per step)
-        run: npm run test:perf
-
-      # which under  option A is an ABSENCE: no code path loads foreign code. Wired now
-      # that the tests exist — it was deliberately left unwired while the glob matched nothing.
-      - name: Plugin-adversarial gate (no third-party loading)
-        run: npm run test:plugin-adversarial
-
-      # Gate 1. Its own REQUIRED step because it is the only thing that
-      # exercises a real SIGKILL: it spawns a child, kills it at every commit boundary,
-      # and asserts no `never` tool ran twice and no call went unanswered. It has already
-      # found three defects invisible to every other test, so a regression here must be
-      # legible instead of one line among 350.
-      #
-      # Runs through scripts/crash_gate.mjs, which enforces a SKIP BUDGET: vitest exits 0
-      # on skipped assertions, so without it the gate reported green while 12 of its 50
-      # assertions were switched off. The budget fails in BOTH directions -- over it is a
-      # regression, under it means lower the budget.
-      - name: Crash injection gate (test:crash)
-        run: npm run test:crash
-
-      # Adapter conformance. It passed locally for a while WITHOUT being wired here,
-      # which is the failure mode a required-gate list exists to catch: a gate that
-      # exists, works, and enforces nothing.
-      - name: Adapter conformance gate (test:adapters)
-        run: npm run test:adapters
-
-      # Gate 3. Two properties that only fail in ways nobody notices: a request that
-      # can no longer be rebuilt from the record, and a credential value reaching the store.
-      # The first degrades silently — every run still works, and the claim that the record
-      # explains them stops being true. The second is a leaked key that looks like a normal
-      # session until someone reads the file.
-      #
-      # `npm run test:reconstruction` pointed at an empty directory for a while and exited
-      # 1 with "No test files found", so it was neither passing nor wired — the same
-      # exists-but-enforces-nothing shape as the adapter gate above.
-      - name: Reconstruction + no-secrets gate (test:reconstruction)
-        run: npm run test:reconstruction
+      # ONE source of truth: `bin/tests harness` runs Biome + tsc + the full Vitest
+      # suite (which already covers the extensions / security / adapters /
+      # reconstruction / plugin-adversarial subtrees), PLUS the two gates the
+      # default run excludes — test:crash (a node script, enforces its own skip
+      # budget) and test:perf (own config, so a contended p99 cannot flake it).
+      # Adding a gate in bin/tests reaches CI here with no edit to this file.
+      - name: Checks (bin/tests harness)
+        run: bin/tests harness

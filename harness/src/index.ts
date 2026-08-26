@@ -77,7 +77,9 @@ export function buildServer(
   supervisor: Supervisor,
   config: Pick<HarnessConfig, "sharedSecret">,
 ): FastifyInstance {
-  const app = Fastify({ logger: true });
+  // Silent under test: the suite starts real servers, and pino's per-request JSON
+  // ("incoming request") drowns the test runner's own progress. Production logs fully.
+  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 
   /**
    * EVERY route authenticates, `/healthz` included  — there is no exempt

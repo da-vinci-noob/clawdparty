@@ -782,9 +782,7 @@ describe("PromptComposer context bar after a model switch", () => {
     const picker = (await screen.findByTestId("model")) as HTMLSelectElement;
     // Wait for discovery: setting a <select> to a value that is not yet an option is a silent
     // no-op, and the first version of this test did exactly that and blamed the component.
-    await waitFor(() =>
-      expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"),
-    );
+    await waitFor(() => expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"));
     fireEvent.change(picker, { target: { value: "claude-opus-5" } });
     await waitFor(() => expect(picker.value).toBe("claude-opus-5"));
 
@@ -804,9 +802,7 @@ describe("PromptComposer context bar after a model switch", () => {
     const picker = (await screen.findByTestId("model")) as HTMLSelectElement;
     // Wait for discovery: setting a <select> to a value that is not yet an option is a silent
     // no-op, and the first version of this test did exactly that and blamed the component.
-    await waitFor(() =>
-      expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"),
-    );
+    await waitFor(() => expect([...picker.options].map((o) => o.value)).toContain("claude-opus-5"));
     fireEvent.change(picker, { target: { value: "claude-opus-5" } });
     await waitFor(() => expect(picker.value).toBe("claude-opus-5"));
 

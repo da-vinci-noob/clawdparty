@@ -29,12 +29,17 @@ import {
 
 const ORIGINAL = process.env.HARNESS_OAUTH_CLAUDE_CODE_IDENTITY;
 
+// UNSET, not `= undefined`: Node coerces env values to strings, so assigning undefined leaves the
+// var PRESENT as the string "undefined" — the opposite of opt-in-absent. `Reflect.deleteProperty`
+// removes the key like `delete` does, without the `delete` operator `noDelete` forbids.
+const KEY = "HARNESS_OAUTH_CLAUDE_CODE_IDENTITY";
+
 beforeEach(() => {
-  delete process.env.HARNESS_OAUTH_CLAUDE_CODE_IDENTITY;
+  Reflect.deleteProperty(process.env, KEY);
 });
 afterEach(() => {
-  if (ORIGINAL === undefined) delete process.env.HARNESS_OAUTH_CLAUDE_CODE_IDENTITY;
-  else process.env.HARNESS_OAUTH_CLAUDE_CODE_IDENTITY = ORIGINAL;
+  if (ORIGINAL === undefined) Reflect.deleteProperty(process.env, KEY);
+  else process.env[KEY] = ORIGINAL;
 });
 
 describe("the identity is opt-in", () => {

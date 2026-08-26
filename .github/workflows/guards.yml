@@ -2,8 +2,7 @@ name: guards
 
 # No `paths` filter, deliberately. The stream workflows scope to their own
 # directory, but both guards here break from ANY direction — deleting a file,
-# renaming a service class, adding a dependency, or editing guidance. Scoping them
-# would miss the common case: the tree moved and the invariant did not follow.
+# renaming a service class, adding a dependency, or editing guidance.
 on:
   push:
     branches: ["main"]
@@ -15,11 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Doc-truth gate
-        run: bin/check-docs
-
-      # is the requirement group that ranks above all others, and it
-      # is the kind of thing a refactor erodes one reasonable-looking change at a
-      # time. A source guard is the only thing that catches an ADDITION.
-      - name: Shared-room gate
-        run: bin/check-room
+      # ONE source of truth: bin/check-docs  and bin/check-room
+      # run identically in CI and locally, so `bin/tests guards`
+      # is the exact pair.
+      - name: Checks (bin/tests guards)
+        run: bin/tests guards

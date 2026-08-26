@@ -394,9 +394,7 @@ export class RunLoop {
             normalizer,
             "api_error",
             totalUsage,
-            `stopped after ${stuck.count} identical failing \`${stuck.name}\` calls, each ` +
-              `returning: ${stuck.error}. The model is repeating the same call rather than ` +
-              "recovering, so the run was ended instead of spending the remaining turns on it.",
+            `stopped after ${stuck.count} identical failing \`${stuck.name}\` calls, each returning: ${stuck.error}. The model is repeating the same call rather than recovering, so the run was ended instead of spending the remaining turns on it.`,
           );
         }
         resumeAttempt = 0;

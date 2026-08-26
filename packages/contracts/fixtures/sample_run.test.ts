@@ -65,6 +65,7 @@ const ACTOR_KIND: Record<EnvelopeType, Actor["kind"]> = {
   task_created: "user",
   task_updated: "user",
   participant_joined: "user",
+  participant_removed: "user",
   presence_changed: "user",
   // Harness types (v1.5). The harness itself acts, so these are `system` —
   // except the plugin toggles, which are a human's decision about the room.
@@ -74,6 +75,7 @@ const ACTOR_KIND: Record<EnvelopeType, Actor["kind"]> = {
   tool_refused: "system",
   plugin_enabled: "user",
   plugin_disabled: "user",
+  skill_changed: "user",
   provider_error: "system",
   recovery_applied: "system",
   ai_raw: "system",
