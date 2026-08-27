@@ -5,7 +5,7 @@
 // last-writer-wins per participant. Selectors keep a delta flood from
 // re-rendering the durable log. Mirrors the frozen event-envelope two-tier rule.
 
-import type { EventEnvelope } from "@clawdparty/contracts";
+import type { ContextUsagePayload, EventEnvelope } from "@clawdparty/contracts";
 import { create } from "zustand";
 
 // `block` is treated as an opaque accumulation key (resolved to
@@ -23,31 +23,57 @@ interface PresencePayload {
   online?: boolean;
 }
 
+type LiveFields = Pick<
+  EventStoreState,
+  "textByBlock" | "thinkingByBlock" | "settledBlocks" | "terminatedRuns"
+>;
+
 // When a durable block settles (ai_text/ai_thinking), drop its live accumulator so
-// the block is not rendered twice (live + durable). On a terminal run event, sweep
-// every live block for that run as a safety net (in case a block event was missed).
-function reconcileLive(
-  state: EventStoreState,
-  event: EventEnvelope,
-): Partial<Pick<EventStoreState, "textByBlock" | "thinkingByBlock">> {
+// the block is not rendered twice (live + durable), and REMEMBER that it settled so a
+// late delta cannot re-create it. Deltas and durable events travel over two independent
+// channels — deltas are coalesced into a ~150ms window in the harness while durable
+// batches POST immediately — so `ai_text` routinely lands before the tail of its own
+// delta stream. Deleting the accumulator without remembering left the late delta free to
+// rebuild it, and `activity_feed.tsx` renders every accumulator: the paragraph appeared
+// twice, once settled and once as a fragment below it.
+//
+// On a terminal run event, sweep every live block for that run as a safety net (in case
+// a block event was missed) and forget its settled keys, which is what bounds the set.
+function reconcileLive(state: EventStoreState, event: EventEnvelope): Partial<LiveFields> {
   if (event.type === "ai_text" || event.type === "ai_thinking") {
     const key = deltaKey(event.ai_run_id, (event.payload as DeltaPayload).block ?? "");
     const field = event.type === "ai_text" ? "textByBlock" : "thinkingByBlock";
+    const settledBlocks = new Set(state.settledBlocks).add(settledKey(field, key));
     if (!state[field].has(key)) {
-      return {};
+      return { settledBlocks };
     }
     const next = new Map(state[field]);
     next.delete(key);
-    return { [field]: next };
+    return { [field]: next, settledBlocks };
   }
   if (TERMINAL_RUN_TYPES.has(event.type) && event.ai_run_id) {
     const prefix = `${event.ai_run_id}::`;
     return {
       textByBlock: withoutPrefix(state.textByBlock, prefix),
       thinkingByBlock: withoutPrefix(state.thinkingByBlock, prefix),
+      // The run is RECORDED as over, rather than its settled keys being forgotten.
+      //
+      // Forgetting them bounded the set but opened the exact hole the set closes: ephemerals are
+      // delayed ~150ms while durables POST immediately, so the true order is `ai_text` ->
+      // `run_finished` -> the block's last deltas. With the keys dropped, that straggler
+      // re-created the accumulator, and the feed renders every accumulator — the answer appeared
+      // twice, the second copy with a live cursor, until a refresh (which backfills durables
+      // only). One entry per RUN is a tighter bound than one per block anyway, and it also covers
+      // a run that failed mid-block, where no `ai_text` ever settled anything.
+      terminatedRuns: new Set(state.terminatedRuns).add(event.ai_run_id),
     };
   }
   return {};
+}
+
+/** Namespaced so a text block and a thinking block of the same name settle independently. */
+function settledKey(field: "textByBlock" | "thinkingByBlock", key: string): string {
+  return `${field === "textByBlock" ? "t" : "k"}:${key}`;
 }
 
 function withoutPrefix(map: Map<string, string>, prefix: string): Map<string, string> {
@@ -71,13 +97,35 @@ export interface EventStoreState {
   textByBlock: Map<string, string>;
   // In-progress streamed thinking, keyed by (ai_run_id, block).
   thinkingByBlock: Map<string, string>;
+  // Blocks whose durable ai_text/ai_thinking has already been applied — deltas for these
+  // are ignored.
+  settledBlocks: Set<string>;
+  /** Runs that have reached a terminal event. A delta arriving for one is stale by definition. */
+  terminatedRuns: Set<string>;
   // Presence, last-writer-wins per participant id.
   presenceByParticipant: Map<string, boolean>;
+  /**
+   * The most recent LIVE context reading , or null before the first turn reports one.
+   *
+   * Ephemeral and never persisted, so a reload has none of it — the bar falls back to the
+   * durable per-run figure on `run_finished`/`run_failed`, which is why both sources exist.
+   */
+  liveContextUsage: ContextUsagePayload | null;
   // The catch-up / reconnect cursor: the max applied durable id (0 if none).
   maxAppliedId: number;
+  /**
+   * A run was SUBMITTED but has emitted nothing yet.
+   *
+   * UI state, set explicitly rather than derived, because there is no event to derive it from:
+   * between a successful POST and the harness's first `run_started` the event stream is silent,
+   * and the feed showed no activity at all — which read as "it is not even processing".
+   */
+  runPending: boolean;
 
   apply: (event: EventEnvelope) => void;
   applyMany: (events: EventEnvelope[]) => void;
+  markRunPending: () => void;
+  clearRunPending: () => void;
   reset: () => void;
 }
 
@@ -86,8 +134,12 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   seenIds: new Set(),
   textByBlock: new Map(),
   thinkingByBlock: new Map(),
+  settledBlocks: new Set(),
+  terminatedRuns: new Set(),
   presenceByParticipant: new Map(),
+  liveContextUsage: null,
   maxAppliedId: 0,
+  runPending: false,
 
   apply: (event) => {
     // Ephemeral: null id. Never deduped by id, never in the durable list.
@@ -96,6 +148,14 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         const payload = (event.payload ?? {}) as DeltaPayload;
         const key = deltaKey(event.ai_run_id, payload.block ?? "");
         const field = event.type === "ai_text_delta" ? "textByBlock" : "thinkingByBlock";
+        // Stale if the block already settled, OR if the whole run is over — the second case is
+        // what a delayed delta after `run_finished` actually is.
+        if (
+          get().settledBlocks.has(settledKey(field, key)) ||
+          (event.ai_run_id !== null && get().terminatedRuns.has(event.ai_run_id))
+        ) {
+          return;
+        }
         const next = new Map(get()[field]);
         next.set(key, (next.get(key) ?? "") + (payload.text ?? ""));
         set({ [field]: next } as Pick<EventStoreState, "textByBlock" | "thinkingByBlock">);
@@ -110,6 +170,14 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         }
         return;
       }
+      if (event.type === "context_usage") {
+        // Last-writer-wins, like presence: it is a whole reading of current pressure, not an
+        // increment to accumulate. The harness sends the window of the model IN USE, so a
+        // mid-session model switch re-bases the denominator with no client-side lookup
+        //.
+        set({ liveContextUsage: (event.payload ?? null) as ContextUsagePayload | null });
+        return;
+      }
       // Any other null-id event is ephemeral-by-envelope; apply nothing durable.
       return;
     }
@@ -122,6 +190,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       const seenIds = new Set(state.seenIds);
       seenIds.add(event.id as number);
       return {
+        // The harness is emitting now, so the optimistic flag is redundant. Clearing it here
+        // rather than only on run_started means a run that fails before starting still settles.
+        runPending: event.ai_run_id === null ? state.runPending : false,
         // New array identity ONLY on a real append (stable across no-op re-applies).
         durableList: [...state.durableList, event],
         seenIds,
@@ -139,14 +210,22 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     }
   },
 
+  markRunPending: () => set({ runPending: true }),
+  // Explicit, because a REFUSED submit emits no event and nothing else would ever clear it.
+  clearRunPending: () => set({ runPending: false }),
+
   reset: () =>
     set({
       durableList: [],
       seenIds: new Set(),
       textByBlock: new Map(),
       thinkingByBlock: new Map(),
+      settledBlocks: new Set(),
+      terminatedRuns: new Set(),
       presenceByParticipant: new Map(),
+      liveContextUsage: null,
       maxAppliedId: 0,
+      runPending: false,
     }),
 }));
 
@@ -222,29 +301,82 @@ export function selectAwaitingReviewRunId(state: EventStoreState): string | null
   return awaiting ? currentRun : null;
 }
 
-// The most recently started run, if it ran in `plan` mode and has finished (no
-// active run) — the signal to offer "Execute plan". Plan runs make no edits, so
-// they never enter review; this is how the composer knows to surface execution.
-// Reads permission_mode from the run_started payload (no new event type/column).
-export function selectExecutablePlanRunId(state: EventStoreState): string | null {
-  let lastStarted: EventEnvelope | null = null;
+/**
+ * Paths the CURRENT run reported changing, de-duplicated, in first-touch order.
+ *
+ * A chat run has no worktree and no changeset, so `GET /api/runs/:id/diff` has nothing to
+ * describe — these events are the only record of what was touched, and without them a
+ * participant who watched Claude edit files has no way to see which ones.
+ *
+ * Returns a NEW array each call, so subscribe to the stable `durableList` and derive from
+ * it — passing this straight to `useEventStore` would re-render forever. The parameter is
+ * narrowed to the one field it reads so callers can hand it that slice.
+ */
+export function selectChangedPaths(state: Pick<EventStoreState, "durableList">): string[] {
+  let currentRun: string | null = null;
   for (const e of state.durableList) {
     if (e.type === "run_started" && e.ai_run_id !== null) {
-      lastStarted = e;
+      currentRun = e.ai_run_id;
     }
   }
-  if (lastStarted === null || lastStarted.ai_run_id === null) {
+  if (currentRun === null) {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const e of state.durableList) {
+    if (e.ai_run_id !== currentRun || e.type !== "file_changed") {
+      continue;
+    }
+    const path = (e.payload as { path?: string }).path;
+    if (path) {
+      seen.add(path);
+    }
+  }
+  return [...seen];
+}
+
+/**
+ * The LIVE context reading, preferred over the per-run one when a turn has reported it.
+ *
+ * `window` comes from the event, not from a client-side model lookup: it is the adapter's real
+ * `capabilities().contextWindow` for the model in use, so switching models mid-session re-bases
+ * the denominator without the client knowing anything about models.
+ */
+export function selectLiveContext(
+  state: EventStoreState,
+): { contextTokens: number; window: number } | null {
+  const usage = state.liveContextUsage;
+  if (usage === null) {
     return null;
   }
-  const mode = (lastStarted.payload as { permission_mode?: string }).permission_mode;
-  if (mode !== "plan") {
-    return null;
+  return {
+    // Everything SENT this turn — the same sum the per-run figure uses, so the bar does not
+    // jump when it switches source at run end.
+    contextTokens: (usage.input ?? 0) + (usage.cache_read ?? 0) + (usage.cache_creation ?? 0),
+    window: usage.window,
+  };
+}
+
+/**
+ * Which lane each run belongs to, from `run_started`.
+ *
+ * A PLAIN FUNCTION over the durable list, deliberately NOT a Zustand selector. It builds a new `Map`
+ * each call, and `useEventStore(selector)` compares by reference — so subscribing to it re-rendered
+ * on every render and React aborted with "Maximum update depth exceeded". The same hazard
+ * `selectDurableEvents` exists to avoid: callers subscribe to the STABLE array and derive from it.
+ *
+ * The mapping is derivable because every event carries `ai_run_id` and `run_started` names the lane.
+ * A run absent from the map is in the default lane — the payload omits `lane` for `main`, so absence
+ * is the answer rather than a gap.
+ */
+export function laneByRun(durable: EventEnvelope[]): Map<string, string> {
+  const lanes = new Map<string, string>();
+  for (const event of durable) {
+    if (event.type !== "run_started" || event.ai_run_id === null) continue;
+    const lane = (event.payload as { lane?: string }).lane;
+    if (typeof lane === "string" && lane !== "") lanes.set(event.ai_run_id, lane);
   }
-  const runId = lastStarted.ai_run_id;
-  const finished = state.durableList.some(
-    (e) => e.ai_run_id === runId && TERMINAL_RUN_TYPES.has(e.type),
-  );
-  return finished ? runId : null;
+  return lanes;
 }
 
 export interface ContextUsage {
@@ -256,7 +388,7 @@ export interface ContextUsage {
 }
 
 // The latest completed run's token usage, an approximate "context filled" gauge.
-// `usage` rides run_finished/run_failed (sidecar-populated) and lands in durableList.
+// `usage` rides run_finished/run_failed (harness-populated) and lands in durableList.
 // Returns null before any run completes. NOTE: the SDK only reports usage on the
 // result message, so this reflects the LAST COMPLETED run — it updates at run end,
 // not live mid-stream. run_interrupted carries no usage and is ignored here.

@@ -5,7 +5,7 @@ TBD - created by archiving change web-scaffold. Update Purpose after archive.
 ## Requirements
 ### Requirement: Vite + React 19 + TypeScript + Tailwind project
 
-The repository SHALL contain a `web/` package configured as a Vite + React 19 + TypeScript single-page application with **Tailwind v4** wired through the `@tailwindcss/vite` plugin (CSS-first configuration; no PostCSS pipeline and no `tailwind.config` JS file). The Tailwind major version SHALL be pinned like the rest of the toolchain (Node 24, React 19). The package SHALL pin the Node toolchain to **Node 24** (consistent with `sidecar/`), and SHALL define `dev`, `build`, `lint`, `typecheck`, and `test` scripts. `npm run build` and `tsc` SHALL succeed on the scaffold with no feature code.
+The repository SHALL contain a `web/` package configured as a Vite + React 19 + TypeScript single-page application with **Tailwind v4** wired through the `@tailwindcss/vite` plugin (CSS-first configuration; no PostCSS pipeline and no `tailwind.config` JS file). The Tailwind major version SHALL be pinned like the rest of the toolchain (Node 24, React 19). The package SHALL pin the Node toolchain to **Node 24** (consistent with `harness/`), and SHALL define `dev`, `build`, `lint`, `typecheck`, and `test` scripts. `npm run build` and `tsc` SHALL succeed on the scaffold with no feature code.
 
 #### Scenario: Dev server boots
 

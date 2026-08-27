@@ -1,0 +1,287 @@
+{
+  "provenance": {
+    "region": "us-west-2",
+    "probed_at": "2026-08-16T17:55:26.753Z",
+    "note": "Measured via ConverseStream, one probe per model (text) plus one with a toolConfig. Bedrock exposes no tool-support flag, so this matrix is the only source for it."
+  },
+  "rows": [
+    {
+      "profile_id": "us.meta.llama3-1-8b-instruct-v1:0",
+      "vendor": "meta",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.meta.llama3-1-70b-instruct-v1:0",
+      "vendor": "meta",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.meta.llama3-3-70b-instruct-v1:0",
+      "vendor": "meta",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "accepted:end_turn",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.deepseek.r1-v1:0",
+      "vendor": "deepseek",
+      "text": "empty",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "no:unsupported",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": "reasoning_text"
+    },
+    {
+      "profile_id": "us.mistral.pixtral-large-2502-v1:0",
+      "vendor": "mistral",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.writer.palmyra-x4-v1:0",
+      "vendor": "writer",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.writer.palmyra-x5-v1:0",
+      "vendor": "writer",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.amazon.nova-premier-v1:0",
+      "vendor": "amazon",
+      "text": "error: ResourceNotFoundException",
+      "tool_use_stream": "error:Access denied. This Model is marked by p",
+      "tool_use_nonstream": "error:Access denied. This Model is marked by p",
+      "stop_reason": null,
+      "vocabulary": [],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.twelvelabs.pegasus-1-2-v1:0",
+      "vendor": "twelvelabs",
+      "text": "error: ValidationException",
+      "tool_use_stream": "error:This action doesn't support the model th",
+      "tool_use_nonstream": "error:This action doesn't support the model th",
+      "stop_reason": null,
+      "vocabulary": [],
+      "reasoning": null
+    },
+    {
+      "profile_id": "global.amazon.nova-2-lite-v1:0",
+      "vendor": "amazon",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.amazon.nova-micro-v1:0",
+      "vendor": "amazon",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+      "vendor": "meta",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.meta.llama4-scout-17b-instruct-v1:0",
+      "vendor": "meta",
+      "text": "ok",
+      "tool_use_stream": "no:streaming-only-limit",
+      "tool_use_nonstream": "yes",
+      "stop_reason": null,
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.amazon.nova-lite-v1:0",
+      "vendor": "amazon",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.amazon.nova-pro-v1:0",
+      "vendor": "amazon",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-sol",
+      "vendor": "openai",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": "redacted_bytes"
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-terra",
+      "vendor": "openai",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-luna",
+      "vendor": "openai",
+      "text": "ok",
+      "tool_use_stream": "yes",
+      "tool_use_nonstream": "yes",
+      "stop_reason": "tool_use",
+      "vocabulary": [
+        "messageStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata"
+      ],
+      "reasoning": null
+    }
+  ]
+}

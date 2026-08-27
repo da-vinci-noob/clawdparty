@@ -5,16 +5,23 @@ TBD - created by archiving change sdk-message-spike. Update Purpose after archiv
 ## Requirements
 ### Requirement: Spike harness runs a real query() using the host's inherited login
 
-The sidecar SHALL contain a spike harness that runs a real `@anthropic-ai/claude-agent-sdk` `query()` against
-a throwaway git repository bind-mounted at `/repo`, exercising a representative run: assistant text, thinking,
-at least one file-editing tool call, at least one Bash command, and run completion/result. The harness SHALL
-authenticate using the host developer's inherited Claude login (the SDK auto-detects from the passed-through
-environment and read-only mounts), and SHALL contain no app-owned credential and no auth-method selection,
-consistent with the `claude-auth-passthrough` capability.
+The event taxonomy SHALL be derived from a real captured run rather than from documentation: a spike SHALL
+exercise assistant text, thinking, at least one file-editing tool call, at least one Bash command, and
+completion, against a throwaway git repository, and its captured output SHALL be what the taxonomy is built
+from. The spike SHALL authenticate using the host developer's inherited Claude login and SHALL contain no
+app-owned credential and no auth-method selection, consistent with the `claude-auth-passthrough` capability.
+
+<!-- doc-truth:ignore -->
+HISTORICAL, and kept for the derivation rule above rather than for its mechanism. The M0 spike ran a real
+`@anthropic-ai/claude-agent-sdk` `query()` in a container against `/repo`; that dependency is gone — the harness
+owns the loop and vendor SDKs are provider adapters behind one contract. What survives is why
+`packages/contracts/fixtures/sample_run.jsonl` is REGENERATED from a real harness run and never hand-edited.
+Nothing in the tree implements the original mechanism today, by design.
+<!-- doc-truth:end -->
 
 #### Scenario: Spike authenticates via the host login with no app-owned credential
 
-- **WHEN** the spike harness runs `query()` in the sidecar container
+- **WHEN** the spike harness runs `query()` in the harness container
 - **THEN** it authenticates using the host's inherited login (API key, subscription/enterprise OAuth, or
   Bedrock — whichever the host has) and contains no app-owned credential or method-selection code
 
@@ -24,10 +31,10 @@ consistent with the `claude-auth-passthrough` capability.
 - **THEN** the run produces assistant text, thinking, at least one file-editing tool call, at least one Bash
   command, and a run-completion/result message
 
-### Requirement: Raw SDK messages are captured verbatim to the sidecar-owned fixture
+### Requirement: Raw SDK messages are captured verbatim to the harness-owned fixture
 
 The harness SHALL write every raw SDK message yielded by `query()` verbatim to
-`sidecar/test/fixtures/raw_run.jsonl` — the raw-input fixture owned by the sidecar stream, distinct from the
+`harness/test/fixtures/raw_run.jsonl` — the raw-input fixture owned by the harness stream, distinct from the
 post-normalization `packages/contracts/fixtures/sample_run.jsonl`. The capture SHALL NOT transform, redact, or
 reorder messages (redaction is the normalizer's runtime job, verified separately): messages SHALL be written in
 the exact order `query()` yields them, so the fixture is a deterministic, replayable input for the normalizer
@@ -37,13 +44,13 @@ to contain no real secret, and the prompt/repo SHALL be scoped so no credential 
 #### Scenario: Every raw message is captured unmodified and in yield order
 
 - **WHEN** the spike `query()` yields SDK messages
-- **THEN** each is written verbatim to `sidecar/test/fixtures/raw_run.jsonl` in the exact order `query()` yielded
+- **THEN** each is written verbatim to `harness/test/fixtures/raw_run.jsonl` in the exact order `query()` yielded
   it, with no transformation or reordering, so the fixture replays deterministically through the normalizer
 
 #### Scenario: Raw fixture is distinct from the contract fixture
 
 - **WHEN** the fixtures are inspected
-- **THEN** `sidecar/test/fixtures/raw_run.jsonl` holds raw SDK messages (normalizer input) while
+- **THEN** `harness/test/fixtures/raw_run.jsonl` holds raw SDK messages (normalizer input) while
   `packages/contracts/fixtures/sample_run.jsonl` holds post-normalization Contract-1 envelopes (the executable
   contract)
 

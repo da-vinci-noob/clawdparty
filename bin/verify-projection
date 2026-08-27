@@ -1,0 +1,203 @@
+#!/usr/bin/env node
+// Scenario S4 steps 3 and 4 — three of S4's four pass conditions, against the live stack:
+// the projection RE-DERIVES from the record , an INJECTED divergence is detected
+//, and no credential value is anywhere in the record.
+//
+// The fourth — byte-identical reconstruction of a compacted session  — is S4 steps 1-2
+// and needs a session with a tool-surface change and a compaction, so it stays manual.
+//
+// Runs a real run so the events are real. Uses the cheapest live model available (llama3-1-8b via
+// Converse, ~25 tokens for this prompt) because the point is the plumbing, not the answer.
+//
+// Usage: bin/verify-projection [base-url]
+
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+
+const BASE = process.argv[2] ?? "http://localhost:3000";
+const MODEL = process.env.VERIFY_MODEL ?? "us.meta.llama3-1-8b-instruct-v1:0";
+const PROVIDER = process.env.VERIFY_PROVIDER ?? "bedrock-converse";
+const DB = process.env.VERIFY_DB ?? "clawdparty_development";
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+async function call(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  return { status: response.status, response, json: text ? JSON.parse(text) : null };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Postgres runs in a container, so the injection goes through compose rather than a local psql. */
+function psql(sql) {
+  return execFileSync(
+    "docker",
+    ["compose", "exec", "-T", "postgres", "psql", "-U", "postgres", "-d", DB, "-c", sql],
+    { encoding: "utf8" },
+  );
+}
+
+async function main() {
+  console.log(`\nprojection: re-derive, detect, scan (S4.3-4) — against ${BASE}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "projection check", name: "Auditor", mode: "chat" }),
+  });
+  if (!created.ok) throw new Error(`create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = (created.headers.getSetCookie?.() ?? [])
+    .find((c) => c.startsWith("clawd_uid="))
+    ?.split(";")[0];
+  if (!cookie) throw new Error("no clawd_uid cookie");
+  console.log(`  session ${sessionId}\n`);
+
+  const started = await call(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt: "Reply with the single word: ok", provider: PROVIDER, model: MODEL },
+  });
+  check(started.status === 202, "run accepted", `${started.status} ${JSON.stringify(started.json)}`);
+  if (started.status !== 202) return;
+
+  const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+  let events = [];
+  for (let i = 0; i < 40; i += 1) {
+    const t0 = Date.now();
+    const { status, json } = await call(`/api/sessions/${sessionId}/events`, { cookie });
+    if (status !== 200) throw new Error(`events → ${status}: ${JSON.stringify(json)}`);
+    // A bare array, per `EventsController#index` — reading `json.events` here silently saw zero
+    // events forever and made the settle check unfailable.
+    events = json;
+    if (i === 0) console.log(`       first events poll: ${Date.now() - t0}ms`);
+    if (events.some((e) => TERMINAL.includes(e.type))) break;
+    await sleep(1000);
+  }
+  const terminal = events.find((e) => TERMINAL.includes(e.type));
+  check(Boolean(terminal), "run settled", terminal ? terminal.type : "still running after 40s");
+  console.log(`       ${events.length} events persisted\n`);
+
+  // A chat message, which exists ONLY in Postgres — nothing in the harness's record can put it
+  // back, so a reset that deletes it deletes it for good.
+  const chat = await call(`/api/sessions/${sessionId}/messages`, {
+    method: "POST",
+    cookie,
+    body: { body: "reviewed, looks fine" },
+  });
+  check(chat.status === 201, "chat message posted", String(chat.status));
+
+  // The audit. `store_seq` is what it matches on, and the two ways it could lie are a NULL column
+  // (nothing to compare, so it passes vacuously) and a wrong-but-present number (mismatch it
+  // cannot explain). Both have happened here.
+  const before = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  check(before.status === 200, "check is readable by the owner", String(before.status));
+  console.log(`       ${JSON.stringify(before.json)}\n`);
+  check(before.json?.diverged === false, "projection matches the record", before.json?.reason ?? "");
+
+  // The repair, at its most destructive setting: every row for the session deleted and rebuilt
+  // from `entriesFrom()` alone. If the record is truly the authority this is lossless.
+  const reset = await call(`/api/sessions/${sessionId}/projection/rederive?reset=true`, {
+    method: "POST",
+    cookie,
+  });
+  check(reset.status === 200, "rederive(reset) succeeded", String(reset.status));
+  console.log(`       ${JSON.stringify(reset.json)}\n`);
+  check(
+    reset.json?.accepted > 0,
+    "rebuilt rows from the store",
+    `accepted ${reset.json?.accepted}, rejected ${reset.json?.rejected}`,
+  );
+  check(reset.json?.rejected === 0, "nothing in the record was unusable");
+
+  const after = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(after.json)}\n`);
+  check(after.json?.diverged === false, "still matches after the rebuild", after.json?.reason ?? "");
+
+  const { json: replayed } = await call(`/api/sessions/${sessionId}/events`, { cookie });
+  check(replayed.length >= events.length, "the feed survived the wipe", `${replayed.length} events`);
+  // The record cannot rebuild these — Rails appends them and the harness never saw them. A reset
+  // used to delete them along with everything else.
+  for (const type of ["participant_joined", "chat_message"]) {
+    check(
+      replayed.some((e) => e.type === type),
+      `${type} survived the wipe`,
+    );
+  }
+
+  // the check must DETECT a divergence, not merely agree when there is none. Unit specs
+  // ask this of a stubbed harness; this asks it of a real store, which is the half that matters
+  // after both sides of the comparison were just changed.
+  //
+  // `event_type` and not `payload`: the digest covers the ordered `(store_seq, type, seq)` triples
+  // and deliberately EXCLUDES payload, because JSONB key order is not stable across a round trip.
+  const target = `and store_seq = (select max(store_seq) from events where session_id = ${sessionId})`;
+  const mutated = psql(
+    `update events set event_type = 'ai_thinking'
+       where session_id = ${sessionId} and event_type <> 'ai_thinking' ${target};`,
+  );
+  check(mutated.includes("UPDATE 1"), "mutated one projected row", mutated.trim().split("\n")[0]);
+
+  const injected = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(injected.json)}\n`);
+  const detected = injected.json?.diverged === true;
+  check(detected, "the mutation is DETECTED", detected ? "" : "reported no divergence");
+  check(
+    injected.json?.reason === "content_mismatch",
+    "and named as content_mismatch",
+    String(injected.json?.reason),
+  );
+  // Detecting it must not fix it: a silent auto-heal destroys the evidence an operator came for.
+  const stillThere = psql(
+    `select count(*) from events where session_id = ${sessionId}
+       and event_type = 'ai_thinking' ${target};`,
+  );
+  check(/^\s*1$/m.test(stillThere), "the check repaired nothing");
+
+  // The exclusion, asserted rather than assumed. A payload-only mutation is NOT reported, so the
+  // check's own comment claiming it "catches a MUTATED row" is true of the structural triple and
+  // not of content. Worth knowing before trusting a green check to mean the rows are intact.
+  psql(`update events set event_type = '${terminal.type}' where session_id = ${sessionId} ${target};`);
+  psql(
+    `update events set payload = payload || '{"text":"tampered"}'::jsonb
+       where session_id = ${sessionId} ${target};`,
+  );
+  const payloadOnly = await call(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  check(
+    payloadOnly.json?.diverged === false,
+    "a payload-only mutation is deliberately NOT detected",
+    `reported ${payloadOnly.json?.reason}`,
+  );
+
+  // zero credential values anywhere in the record. The store IS the record, so it is the
+  // thing to scan. No secret is planted, so this asserts the absence of real host credential
+  // material rather than of a sample.
+  const store = `${process.env.HOME}/.local/state/clawdparty/sessions/session-${sessionId}.sqlite3`;
+  if (existsSync(store)) {
+    const dump = execFileSync("sqlite3", [store, "select payload, blocks from entries;"], {
+      encoding: "utf8",
+    });
+    for (const marker of ["sk-ant-", "ASIA", "AKIA", "aws_secret_access_key", "Bearer "]) {
+      check(!dump.includes(marker), `no ${marker.trim()} in the record`);
+    }
+  } else {
+    check(false, "store file found to scan", store);
+  }
+
+  console.log(`\n${failures === 0 ? "all checks passed" : `${failures} FAILED`}\n`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+main().catch((error) => {
+  console.error(`\nverify aborted: ${error.message}\n`);
+  process.exitCode = 1;
+});

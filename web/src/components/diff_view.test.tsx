@@ -274,7 +274,6 @@ describe("PromptComposer — revise while awaiting review", () => {
       expect(body).toEqual({
         prompt: "tweak it",
         mode: "revise",
-        permission_mode: "acceptEdits",
       }),
     );
   });
@@ -296,8 +295,112 @@ describe("PromptComposer — revise while awaiting review", () => {
     await waitFor(() =>
       expect(body).toEqual({
         prompt: "do it",
-        permission_mode: "acceptEdits",
       }),
     );
+  });
+});
+
+/**
+ * the reviewer is TOLD when another lane changed the same file.
+ *
+ * This is the only place the overlap becomes visible. Each lane has its own worktree and branch, so
+ * git never sees the two changes meet: no merge conflict, no warning, nothing — and approving both
+ * leaves two divergent versions with nothing to reconcile them.
+ */
+describe("cross-lane conflicts", () => {
+  beforeEach(() => {
+    useParticipantStore.getState().clear();
+    setRole("owner");
+  });
+  afterEach(() => useParticipantStore.getState().clear());
+
+  function mockWithConflicts(
+    conflicts: Array<{ path: string; lane: string; kind: "unreviewed" | "approved" }>,
+    lane = "review",
+  ) {
+    server.use(
+      http.get("/api/runs/run_1/diff", () =>
+        HttpResponse.json(
+          {
+            run_id: "run_1",
+            lane,
+            base_sha: "abc123",
+            files: [{ path: "hello.txt", insertions: 2, deletions: 1, binary: false }],
+            patch: SAMPLE_PATCH,
+            conflicts,
+          },
+          { status: 200 },
+        ),
+      ),
+    );
+  }
+
+  it("names the file and the other lane", async () => {
+    mockWithConflicts([{ path: "hello.txt", lane: "main", kind: "unreviewed" }]);
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    const row = await screen.findByTestId("diff-conflict-row");
+    expect(row).toHaveTextContent("hello.txt");
+    expect(row).toHaveTextContent("main");
+    expect(row).toHaveTextContent(/unreviewed change/);
+  });
+
+  it("distinguishes an already-approved change from an unreviewed one", async () => {
+    mockWithConflicts([{ path: "hello.txt", lane: "main", kind: "approved" }]);
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    // Different judgement: this changeset is built on a version the session has moved past.
+    expect(await screen.findByTestId("diff-conflict-row")).toHaveTextContent(/already approved/);
+  });
+
+  it("says outright that nothing merges them", async () => {
+    mockWithConflicts([{ path: "hello.txt", lane: "main", kind: "unreviewed" }]);
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    // "Surfaced rather than silently resolved" means the consequence is stated, not implied.
+    expect(await screen.findByTestId("diff-conflicts-note")).toHaveTextContent(/nothing merges/i);
+  });
+
+  it("lists every conflicting lane for one file", async () => {
+    mockWithConflicts([
+      { path: "hello.txt", lane: "main", kind: "unreviewed" },
+      { path: "hello.txt", lane: "third", kind: "approved" },
+    ]);
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    expect(await screen.findAllByTestId("diff-conflict-row")).toHaveLength(2);
+  });
+
+  it("shows nothing when there are no conflicts", async () => {
+    mockWithConflicts([]);
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    await screen.findByTestId("diff-summary");
+    // A banner reading "0 files also changed" is noise that teaches a reviewer to skip it.
+    expect(screen.queryByTestId("diff-conflicts")).not.toBeInTheDocument();
+  });
+
+  it("shows nothing when the server does not report conflicts at all", async () => {
+    mockDiff();
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    // A pre-lane server omits the key. Absent must read as "none", never as a crash.
+    await screen.findByTestId("diff-summary");
+    expect(screen.queryByTestId("diff-conflicts")).not.toBeInTheDocument();
+  });
+
+  it("badges the lane being reviewed when it is not the default", async () => {
+    mockWithConflicts([], "review");
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    expect(await screen.findByTestId("diff-lane")).toHaveTextContent("review");
+  });
+
+  it("does not badge the main lane, which is every single-lane session", async () => {
+    mockWithConflicts([], "main");
+    renderWithQuery(<DiffView runId="run_1" />);
+
+    await screen.findByTestId("diff-summary");
+    expect(screen.queryByTestId("diff-lane")).not.toBeInTheDocument();
   });
 });

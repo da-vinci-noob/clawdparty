@@ -11,7 +11,7 @@ const GET_STARTED: { label: string; href: string }[] = [
   { label: "create a session", href: "#join" },
 ];
 
-const BADGES = ["Rails 8", "ActionCable", "Fastify sidecar", "React 19"];
+const BADGES = ["Rails 8", "ActionCable", "Fastify harness", "React 19"];
 
 export const LandingFooter: FC = () => (
   <footer style={{ maxWidth: 1120, margin: "0 auto", padding: "52px 40px 60px" }}>

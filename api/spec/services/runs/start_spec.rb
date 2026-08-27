@@ -11,18 +11,19 @@ RSpec.describe(Runs::Start) do
     instance_double(
       Git::WorktreeManager,
       ensure_worktree!: "/repo/.clawdparty/worktrees/session-#{session.id}",
-      dirty?: false
+      dirty?: false,
+      base_sha: '0' * 40
     )
   end
 
-  # A fake sidecar client that records the start_run payload and returns 202.
+  # A fake harness client that records the start_run payload and returns 202.
   let(:posted) { [] }
   let(:client) do
     p = posted
     Class.new do
       define_method(:start_run) do |payload|
         p << payload
-        Sidecar::Client::Result.new(status: 202, body: { 'run_id' => payload[:run_id], 'status' => 'running' })
+        Harness::Client::Result.new(status: 202, body: { 'run_id' => payload[:run_id], 'status' => 'running' })
       end
     end.new
   end
@@ -38,14 +39,21 @@ RSpec.describe(Runs::Start) do
 
     expect(run.status).to(eq('queued'))
     expect(run.requested_by).to(eq(owner))
-    # Rails does NOT emit run_started — the sidecar does (no run_started event here).
+    # Rails does NOT emit run_started — the harness does (no run_started event here).
     expect(Event.where(ai_run_id: run.id, event_type: 'run_started').count).to(eq(0))
 
     payload = posted.last
     expect(payload[:requested_by]).to(eq(owner.id.to_s))
     expect(payload[:repo_path]).to(eq("/repo/.clawdparty/worktrees/session-#{session.id}"))
-    expect(payload[:permission_mode]).to(eq('acceptEdits'))
-    expect(payload[:allowed_tools]).to(include('Bash', 'Write'))
+    expect(payload[:lane]).to(eq('main'))
+    expect(payload[:provider]).to(eq('anthropic-direct'))
+    # All three are gone from the protocol: permission_mode was an Agent SDK concept, resumption is
+    # now by harness session + lane (CHANGELOG B1/B2), and `allowed_tools` was a pre-approval list
+    # the harness accepted and never read — an allow-list only pre-approves, and the real
+    # gate is the `tool:before` extension point plus dropping a declaration outright.
+    expect(payload).not_to(have_key(:permission_mode))
+    expect(payload).not_to(have_key(:claude_session_id))
+    expect(payload).not_to(have_key(:allowed_tools))
   end
 
   describe 'capability selection (disallowed_tools / connectors / skills)' do
@@ -54,11 +62,13 @@ RSpec.describe(Runs::Start) do
                            model: 'claude-opus-4-8', client: client, worktree: worktree, **caps)
     end
 
-    it 'pre-approves all 8 advertised built-in tools by default' do
-      expect(described_class::DEFAULT_ALLOWED_TOOLS)
-        .to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
-      start
-      expect(posted.last[:allowed_tools]).to(eq(%w[Read Write Edit Bash Glob Grep WebSearch WebFetch]))
+    it 'knows the built-in tools by their HARNESS name, for validating a disallow list' do
+      # The names have to be the harness's registry names (`read`, not `Read`): it filters
+      # `disallowed_tools` by exact name, so the SDK-era capitalized list disabled nothing.
+      # packages/contracts BUILTIN_TOOLS is the shared list; this is the Ruby copy of it, and
+      # validating a selection is now its ONLY job.
+      expect(described_class::BUILTIN_TOOLS)
+        .to(eq(%w[read str_replace_based_edit_tool bash glob grep web_search web_fetch]))
     end
 
     it 'omits the capability keys entirely when nothing is selected (prior behavior)' do
@@ -69,10 +79,10 @@ RSpec.describe(Runs::Start) do
       expect(payload).not_to(have_key(:skills))
     end
 
-    it 'threads a selection into the sidecar payload' do
-      start_with(disallowed_tools: ['Bash'], connectors: ['github'], skills: ['deploy'])
+    it 'threads a selection into the harness payload' do
+      start_with(disallowed_tools: ['bash'], connectors: ['github'], skills: ['deploy'])
       payload = posted.last
-      expect(payload[:disallowed_tools]).to(eq(['Bash']))
+      expect(payload[:disallowed_tools]).to(eq(['bash']))
       expect(payload[:connectors]).to(eq(['github']))
       expect(payload[:skills]).to(eq(['deploy']))
     end
@@ -93,41 +103,52 @@ RSpec.describe(Runs::Start) do
     expect { start }.not_to(raise_error)
   end
 
-  describe 'reject severs claude_session_id; only revise resumes' do
-    it 'does NOT pass claude_session_id on a fresh start (e.g. after a reject)' do
-      create(:ai_run, session: session, status: 'rejected', claude_session_id: 'old-sess')
+  # The RULE is unchanged; only its carrier is. It used to ride on
+  # claude_session_id (resume that SDK session, context came with it). The harness
+  # now owns the record, so `resume_context` says whether to fold the prior surface
+  # into the first request. Deliberately still tested at the same granularity:
+  # losing this coverage during the swap is how a reject would silently start
+  # resuming reverted edits again.
+  describe 'reject severs the resumed context; only revise resumes' do
+    it 'does NOT resume on a fresh start after a reject' do
+      create(:ai_run, session: session, status: 'rejected')
       start
-      expect(posted.last).not_to(have_key(:claude_session_id))
+      expect(posted.last[:resume_context]).to(be(false))
     end
 
-    it 'passes the prior claude_session_id on revise and supersedes the prior run' do
+    it 'resumes on revise and supersedes the prior run' do
       allow(worktree).to(receive(:dirty?).and_return(true))
-      prior = create(:ai_run, session: session, status: 'awaiting_review', claude_session_id: 'resume-me')
+      prior = create(:ai_run, session: session, status: 'awaiting_review')
       start(mode: 'revise')
-      expect(posted.last[:claude_session_id]).to(eq('resume-me'))
+      expect(posted.last[:resume_context]).to(be(true))
       expect(prior.reload.status).to(eq('superseded'))
+    end
+
+    it 'resumes on revise EVEN IF the prior run was rejected (revise keeps the tree)' do
+      allow(worktree).to(receive(:dirty?).and_return(true))
+      create(:ai_run, session: session, status: 'rejected')
+      start(mode: 'revise')
+      expect(posted.last[:resume_context]).to(be(true))
     end
   end
 
-  describe 'fresh follow-ups resume the prior session (context persists across runs)' do
-    it "passes the most recent prior run's claude_session_id on a fresh follow-up" do
-      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-prev')
+  describe 'fresh follow-ups resume the prior conversation (context persists)' do
+    it 'resumes on a fresh follow-up after a clean run' do
+      create(:ai_run, session: session, status: 'completed_clean')
       start
-      expect(posted.last[:claude_session_id]).to(eq('sess-prev'))
+      expect(posted.last[:resume_context]).to(be(true))
     end
 
-    it 'resumes from the latest prior run when several exist' do
-      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-1')
-      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-2')
+    it 'does not resume when the session has no prior run at all' do
       start
-      expect(posted.last[:claude_session_id]).to(eq('sess-2'))
+      expect(posted.last[:resume_context]).to(be(false))
     end
 
-    it 'does NOT resume when the most recent run was rejected (reject still severs)' do
-      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'sess-old')
-      create(:ai_run, session: session, status: 'rejected', claude_session_id: 'sess-rejected')
+    it 'looks at the LATEST prior run, not any earlier one' do
+      create(:ai_run, session: session, status: 'completed_clean')
+      create(:ai_run, session: session, status: 'rejected')
       start
-      expect(posted.last).not_to(have_key(:claude_session_id))
+      expect(posted.last[:resume_context]).to(be(false))
     end
   end
 
@@ -149,32 +170,32 @@ RSpec.describe(Runs::Start) do
     end
   end
 
-  describe 'permission_mode (selectable Claude mode, default acceptEdits)' do
-    def start_with(permission_mode)
+  # Replaces the permission_mode block, which tested a parameter that no longer
+  # exists. The per-run knobs are now provider / lane / effort.
+  describe 'per-run provider, lane and effort' do
+    def start_with(**over)
       described_class.call(session: session, requested_by: owner, prompt: 'build it',
-                           model: 'claude-opus-4-8', permission_mode: permission_mode,
-                           client: client, worktree: worktree)
+                           model: 'claude-opus-4-8', client: client, worktree: worktree, **over)
     end
 
-    it 'defaults to acceptEdits and forwards it in the payload' do
+    it 'defaults to the anthropic-direct provider on the main lane' do
       start
-      expect(posted.last[:permission_mode]).to(eq('acceptEdits'))
+      expect(posted.last).to(include(provider: 'anthropic-direct', lane: 'main'))
     end
 
-    it 'forwards an allowlisted mode (plan)' do
-      start_with('plan')
-      expect(posted.last[:permission_mode]).to(eq('plan'))
+    it 'forwards an explicit provider and lane' do
+      start_with(provider: 'anthropic-bedrock', lane: 'review')
+      expect(posted.last).to(include(provider: 'anthropic-bedrock', lane: 'review'))
     end
 
-    it 'forwards bypassPermissions' do
-      start_with('bypassPermissions')
-      expect(posted.last[:permission_mode]).to(eq('bypassPermissions'))
+    it 'omits effort entirely when unset, rather than sending a null' do
+      start
+      expect(posted.last).not_to(have_key(:effort))
     end
 
-    it 'rejects an unsupported mode before posting (no run, nothing posted)' do
-      expect { start_with('default') }.to(raise_error(Runs::Start::UnsupportedPermissionMode))
-      expect(posted).to(be_empty)
-      expect(session.ai_runs.count).to(eq(0))
+    it 'forwards effort when set' do
+      start_with(effort: 'high')
+      expect(posted.last[:effort]).to(eq('high'))
     end
   end
 
@@ -193,44 +214,44 @@ RSpec.describe(Runs::Start) do
       expect { start }.to(raise_error(Runs::Start::ActiveRunExists))
     end
 
-    it 'resumes the prior run session id on a follow-up (chat context persists)' do
-      create(:ai_run, session: session, status: 'completed_clean', claude_session_id: 'chat-sess')
+    it 'resumes the prior conversation on a follow-up (chat context persists)' do
+      create(:ai_run, session: session, status: 'completed_clean')
       start
-      expect(posted.last[:claude_session_id]).to(eq('chat-sess'))
+      expect(posted.last[:resume_context]).to(be(true))
     end
   end
 
-  describe 'sidecar rejects the start (must not orphan a queued run)' do
+  describe 'harness rejects the start (must not orphan a queued run)' do
     let(:client) do
       Class.new do
         def start_run(_payload)
-          raise(Sidecar::Client::ActiveRunConflict, 'sidecar reports a run already active')
+          raise(Harness::Client::ActiveRunConflict, 'harness reports a run already active')
         end
       end.new
     end
 
-    it 'does not leave a queued run behind when the sidecar returns 409' do
-      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+    it 'does not leave a queued run behind when the harness returns 409' do
+      expect { start }.to(raise_error(Harness::Client::ActiveRunConflict))
       expect(session.ai_runs.where(status: 'queued')).to(be_empty)
     end
 
-    it 'frees the session so a later start can succeed once the sidecar is free' do
-      expect { start }.to(raise_error(Sidecar::Client::ActiveRunConflict))
+    it 'frees the session so a later start can succeed once the harness is free' do
+      expect { start }.to(raise_error(Harness::Client::ActiveRunConflict))
       expect(session.reload.ai_runs.active).to(be_empty)
     end
   end
 
-  context 'when the sidecar is unreachable (transport error)' do
+  context 'when the harness is unreachable (transport error)' do
     let(:client) do
       Class.new do
         def start_run(_payload)
-          raise(Sidecar::Client::TransportError, 'sidecar /runs failed: connection refused')
+          raise(Harness::Client::TransportError, 'harness /runs failed: connection refused')
         end
       end.new
     end
 
     it 'does not orphan a queued run' do
-      expect { start }.to(raise_error(Sidecar::Client::TransportError))
+      expect { start }.to(raise_error(Harness::Client::TransportError))
       expect(session.ai_runs.where(status: 'queued')).to(be_empty)
     end
   end

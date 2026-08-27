@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# bin/harness — manage the host harness process.
+#
+#   bin/harness start|stop|restart|status|logs|foreground
+#   bin/harness sessions                 — list session stores and their schema versions
+#   bin/harness reset-session <id>       — move a REFUSED store aside so the session can run
+#
+# The harness is deliberately NOT a container: it needs the host filesystem, the
+# host toolchain (mise/asdf shims), the SSH agent, and credential locations a
+# container cannot reach — on macOS, the Keychain. See docker-compose.yml's header.
+#
+# For unattended supervision (restart on crash, start on login) install the
+# launchd/systemd unit instead — docker/launchd/ and docker/systemd/. This script is
+# the interactive path and what bin/start calls.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+state_dir="${HOME}/.local/state/clawdparty"
+pid_file="${state_dir}/harness.pid"
+log_file="${state_dir}/harness.log"
+env_local="${repo_root}/.env.local"
+
+# Node 24 is the pinned runtime (CI pins it too). The host may well have something
+# newer as its default — this laptop runs 25.x — so prefer a pinned 24 when a version
+# manager can supply one, and otherwise warn rather than silently running the default.
+resolve_node() {
+  if command -v mise >/dev/null 2>&1 && mise which node >/dev/null 2>&1; then
+    mise which node
+    return
+  fi
+  if [[ -s "${HOME}/.asdf/shims/node" ]]; then
+    echo "${HOME}/.asdf/shims/node"
+    return
+  fi
+  command -v node
+}
+
+load_env() {
+  [[ -f "${env_local}" ]] || {
+    echo "No .env.local — run bin/setup first (generates HARNESS_SHARED_SECRET)." >&2
+    exit 1
+  }
+  # `set -a` exports every assignment; the subshell-free source keeps them for exec.
+  set -a
+  # shellcheck disable=SC1090
+  source "${env_local}"
+  set +a
+
+  # The harness itself refuses an empty secret, but failing here names the fix
+  # before a process starts and immediately exits.
+  if [[ -z "${HARNESS_SHARED_SECRET:-}" ]]; then
+    echo "HARNESS_SHARED_SECRET is empty in .env.local — re-run bin/setup." >&2
+    exit 1
+  fi
+
+  # is not negotiable by configuration. HARNESS_BIND_HOST exists only so a
+  # Linux developer can bind the docker bridge gateway (their bridge does not proxy
+  # loopback); it is not a way to reach the LAN.
+  if [[ "${HARNESS_BIND_HOST:-127.0.0.1}" == "0.0.0.0" || "${HARNESS_BIND_HOST:-}" == "::" ]]; then
+    echo "HARNESS_BIND_HOST=${HARNESS_BIND_HOST} binds all interfaces — refused ." >&2
+    echo "Loopback is the default. On Linux use the docker bridge gateway (e.g. 172.17.0.1)." >&2
+    exit 1
+  fi
+
+  export HARNESS_PORT="${HARNESS_PORT:-8787}"
+  export HARNESS_BIND_HOST="${HARNESS_BIND_HOST:-127.0.0.1}"
+}
+
+running_pid() {
+  [[ -f "${pid_file}" ]] || return 1
+  local pid
+  pid="$(cat "${pid_file}")"
+  # A pid file outliving its process is normal after a crash or a reboot; treat a
+  # stale one as "not running" rather than reporting a dead pid as live.
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    echo "${pid}"
+    return 0
+  fi
+  return 1
+}
+
+cmd_start() {
+  if pid="$(running_pid)"; then
+    echo "harness already running (pid ${pid})"
+    return 0
+  fi
+
+  load_env
+  mkdir -p "${state_dir}"
+  local node
+  node="$(resolve_node)"
+  local version
+  version="$("${node}" --version)"
+  [[ "${version}" == v24.* ]] || echo "warning: harness pinned to Node 24, using ${version} (${node})" >&2
+
+  # `--import tsx` and NOT the tsx CLI. The harness ships no build step (tsconfig
+  # sets noEmit), so it runs from source either way -- but `node node_modules/.bin/tsx`
+  # SPAWNS A CHILD to register the loader, so $! records the wrapper while the real
+  # server is the child. Measured: wrapper 21405, harness 21444. `stop` would then
+  # signal the wrapper and leave the harness running. `--import` registers in-process,
+  # so there is exactly one pid and it is the one in the pid file.
+  [[ -d "harness/node_modules/tsx" ]] || {
+    echo "harness deps missing -- run (cd harness && npm install)" >&2
+    return 1
+  }
+  # All three descriptors detached: an inherited stdout/stderr keeps the caller's
+  # pipe open, so a wrapping shell waits for EOF forever instead of returning.
+  (
+    cd harness
+    nohup "${node}" --import tsx src/index.ts </dev/null >>"${log_file}" 2>&1 &
+    echo $! >"${pid_file}"
+  )
+  sleep 0.4
+  if pid="$(running_pid)"; then
+    echo "harness started (pid ${pid}) on ${HARNESS_BIND_HOST}:${HARNESS_PORT} — logs: ${log_file}"
+  else
+    echo "harness failed to start; last lines of ${log_file}:" >&2
+    tail -n 20 "${log_file}" >&2 || true
+    return 1
+  fi
+}
+
+cmd_stop() {
+  if ! pid="$(running_pid)"; then
+    rm -f "${pid_file}"
+    echo "harness not running"
+    return 0
+  fi
+  # SIGTERM so the harness runs its own shutdown: drain the transport buffer, close
+  # the stores. The RECORD is already durable, so this is about the projection.
+  kill -TERM "${pid}"
+  for _ in $(seq 1 40); do
+    running_pid >/dev/null || break
+    sleep 0.1
+  done
+  if running_pid >/dev/null; then
+    echo "harness did not exit on SIGTERM; sending SIGKILL" >&2
+    kill -KILL "${pid}" 2>/dev/null || true
+  fi
+  rm -f "${pid_file}"
+  echo "harness stopped"
+}
+
+cmd_status() {
+  if ! pid="$(running_pid)"; then
+    echo "harness: STOPPED"
+    return 1
+  fi
+  load_env
+  # /healthz authenticates like every other route , so status carries the
+  # bearer. A 401 here means .env.local and the running process disagree.
+  local body
+  body="$(curl -fsS --max-time 3 \
+    -H "authorization: Bearer ${HARNESS_SHARED_SECRET}" \
+    "http://${HARNESS_BIND_HOST}:${HARNESS_PORT}/healthz" 2>/dev/null || true)"
+  if [[ -z "${body}" ]]; then
+    echo "harness: pid ${pid} alive but /healthz did not answer (check ${log_file})"
+    return 1
+  fi
+  echo "harness: OK (pid ${pid}) ${HARNESS_BIND_HOST}:${HARNESS_PORT} ${body}"
+  agent_status
+}
+
+# Which ssh agent Claude will push with, and whether it holds anything.
+#
+# Reported because the failure is otherwise invisible until a `git push` inside a tool call says
+# `Permission denied (publickey)`. Measured on this host: the harness had inherited Apple's launchd
+# agent, which holds NO identities, while the developer's real agent held four keys — and the
+# conclusion drawn at the time was that the agent "refuses to sign" and needed interactive approval.
+# It was the wrong agent answering. Read from the RUNNING process, not this shell, because those are
+# exactly the two that disagreed.
+agent_status() {
+  local sock
+  # Space-safe: the value can CONTAIN spaces (1Password's is under "Group Containers"), so the env
+  # cannot be split on them. Take everything after the key, then cut at the next `VAR=`. Splitting
+  # on spaces truncated the path and reported "NO identities" for a perfectly good agent — the exact
+  # false alarm this function exists to prevent.
+  sock="$(ps eww -p "$(cat "${pid_file}")" 2>/dev/null | tr '\n' ' ' \
+    | sed -n 's/.*SSH_AUTH_SOCK=\(.*\)/\1/p' | sed 's/ [A-Za-z_][A-Za-z_0-9]*=.*//')"
+  if [[ -z "${sock}" ]]; then
+    echo "  ssh agent: NONE — Claude cannot authenticate a push. Set SSH_AUTH_SOCK in .env.local."
+    return 0
+  fi
+  # `ssh-add -l` distinguishes the two failures in its EXIT CODE, and they need different advice:
+  # 1 = agent reachable but empty, 2 = cannot reach it at all (a stale or wrong path). Counting
+  # output lines instead reported Apple's empty agent as "1 identities", because
+  # "The agent has no identities." is a line — a false all-clear from the check meant to catch this.
+  local listing status
+  listing="$(SSH_AUTH_SOCK="${sock}" ssh-add -l 2>/dev/null)" && status=0 || status=$?
+  case "${status}" in
+    0) echo "  ssh agent: ${sock} ($(printf '%s\n' "${listing}" | grep -c .) identities)" ;;
+    1)
+      echo "  ssh agent: ${sock}"
+      echo "             reachable but holds NO identities — a push will fail. If that is not the"
+      echo "             agent you use, set SSH_AUTH_SOCK in .env.local (see .env.example)."
+      ;;
+    *)
+      echo "  ssh agent: ${sock}"
+      echo "             CANNOT BE REACHED — the path is stale or wrong. Set SSH_AUTH_SOCK in"
+      echo "             .env.local (see .env.example) and restart."
+      ;;
+  esac
+}
+
+# Session stores and their schema versions.
+#
+# Exists because a version mismatch is otherwise invisible until a run fails: the harness
+# refuses an incompatible store (invariant 11 — refusal, never migration, because misreading
+# an older layout is how a record silently lies), and before this there was no way to see
+# which stores were refusable short of opening each file in sqlite3.
+cmd_sessions() {
+  local dir="${HARNESS_STORE_DIR:-${state_dir}/sessions}"
+  local expected
+  expected="$(grep -oE 'STORE_SCHEMA_VERSION = [0-9]+' harness/src/store/types.ts | grep -oE '[0-9]+')"
+  echo "store dir: ${dir}"
+  echo "harness expects schema_version ${expected}"
+
+  if ! compgen -G "${dir}/session-*.sqlite3" >/dev/null 2>&1; then
+    echo "(no session stores)"
+    return
+  fi
+
+  local file id version note
+  for file in "${dir}"/session-*.sqlite3; do
+    id="$(basename "${file}" .sqlite3)"
+    id="${id#session-}"
+    version="$(sqlite3 "${file}" "select value from meta where key='schema_version';" 2>/dev/null || echo "?")"
+    if [[ "${version}" == "${expected}" ]]; then
+      note="ok"
+    else
+      note="REFUSED — run: bin/harness reset-session ${id}"
+    fi
+    printf 'session %-6s schema_version %-3s %s\n' "${id}" "${version:-?}" "${note}"
+  done
+}
+
+# Move a refused store aside. NOT a migration, and not a silent delete.
+#
+# The store cannot be migrated by design, so the only recovery is to discard it — but it is
+# the session's record, so it is MOVED and the move is reported. Postgres `events` keeps the
+# projection, so the feed's history survives; what is lost is the model conversation the
+# session could otherwise resume.
+cmd_reset_session() {
+  local id="${1:-}"
+  [[ -n "${id}" ]] || { echo "usage: bin/harness reset-session <session-id>" >&2; exit 64; }
+
+  local dir="${HARNESS_STORE_DIR:-${state_dir}/sessions}"
+  local file="${dir}/session-${id}.sqlite3"
+  [[ -f "${file}" ]] || { echo "no store for session ${id} at ${file}" >&2; exit 1; }
+
+  local version entries
+  version="$(sqlite3 "${file}" "select value from meta where key='schema_version';" 2>/dev/null || echo "?")"
+  entries="$(sqlite3 "${file}" "select count(*) from entries;" 2>/dev/null || echo "?")"
+
+  local stamp dest
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dest="${file}.refused-v${version}-${stamp}"
+  # The -wal/-shm siblings go too, or a reopen reads a journal belonging to a file that is
+  # no longer there.
+  mv "${file}" "${dest}"
+  for sidecar in "${file}-wal" "${file}-shm"; do
+    [[ -f "${sidecar}" ]] && mv "${sidecar}" "${dest}$(basename "${sidecar}" | sed "s|.*sqlite3||")"
+  done
+
+  echo "moved aside: ${dest}"
+  echo "discarded ${entries} harness entries at schema_version ${version}; the session will"
+  echo "start a fresh store on its next run. Postgres events keeps the projection, so the"
+  echo "feed's history survives — the session cannot resume its model conversation."
+}
+
+case "${1:-}" in
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart)
+    cmd_stop
+    cmd_start
+    ;;
+  status) cmd_status ;;
+  sessions) cmd_sessions ;;
+  reset-session)
+    shift
+    cmd_reset_session "${1:-}"
+    ;;
+  logs)
+    shift
+    exec tail "${@:--f}" "${log_file}"
+    ;;
+  foreground)
+    # No pid file, no nohup: for debugging and for the launchd/systemd units, which
+    # supervise a process that must stay in the foreground.
+    load_env
+    cd harness
+    exec "$(resolve_node)" --import tsx src/index.ts
+    ;;
+  *)
+    echo "usage: bin/harness {start|stop|restart|status|logs|foreground|sessions|reset-session <id>}" >&2
+    exit 64
+    ;;
+esac

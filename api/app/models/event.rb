@@ -10,6 +10,7 @@
 #  event_type           :string           not null
 #  payload              :jsonb            not null
 #  seq                  :bigint
+#  store_seq            :bigint
 #  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #  actor_participant_id :bigint
@@ -18,10 +19,11 @@
 #
 # Indexes
 #
-#  index_events_on_actor_participant_id  (actor_participant_id)
-#  index_events_on_ai_run_id             (ai_run_id)
-#  index_events_on_run_and_seq           (ai_run_id,seq) UNIQUE
-#  index_events_on_session_id            (session_id)
+#  index_events_on_actor_participant_id      (actor_participant_id)
+#  index_events_on_ai_run_id                 (ai_run_id)
+#  index_events_on_run_and_seq               (ai_run_id,seq) UNIQUE
+#  index_events_on_session_id                (session_id)
+#  index_events_on_session_id_and_store_seq  (session_id,store_seq)
 #
 # Foreign Keys
 #
@@ -32,19 +34,29 @@
 class Event < ApplicationRecord
   ACTOR_KINDS = %w[claude user system].freeze
 
-  # The 20 frozen type names + the `ai_raw` fallback (Contract 1 / events.md).
-  # Kept in sync with packages/contracts/src/events.ts; a spec asserts membership.
+  # The 30 frozen type names + the `ai_raw` fallback (Contract 1 / events.md).
+  # Listed here rather than read from events.ts so booting api/ needs no file
+  # outside it; event_spec.rb asserts this equals ContractVersion.event_types,
+  # which is what makes the drift a test failure instead of a silent lie. It went
+  # undetected through v1.2 and v1.3 because the old guard asserted only `size ==
+  # 20` — the list and its guard were wrong together.
   TAXONOMY = %w[
-    run_started ai_text_delta ai_text ai_thinking
+    run_started user_prompt ai_text_delta ai_text ai_thinking_delta ai_thinking
     tool_started tool_finished tool_failed terminal_output file_changed
     run_finished run_failed run_interrupted
     changeset_ready changeset_approved changeset_rejected
-    chat_message task_created task_updated participant_joined presence_changed
+    chat_message task_created task_updated participant_joined participant_removed
+    presence_changed
+    request_header context_compacted context_usage tool_refused
+    plugin_enabled plugin_disabled provider_error recovery_applied
+    skill_changed
   ].freeze
   AI_RAW = 'ai_raw'
 
-  # Broadcast-but-never-persisted types (null id, null seq).
-  EPHEMERAL_TYPES = %w[ai_text_delta ai_thinking_delta presence_changed].freeze
+  # Broadcast-but-never-persisted types (null id, null seq). A type missing here
+  # is persisted and handed a durable id, silently breaking the ephemeral rule —
+  # so this must track EPHEMERAL_EVENT_TYPES in events.ts (asserted in a spec).
+  EPHEMERAL_TYPES = %w[ai_text_delta ai_thinking_delta presence_changed context_usage].freeze
 
   belongs_to :session
   belongs_to :ai_run, optional: true

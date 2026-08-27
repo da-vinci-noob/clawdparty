@@ -1,0 +1,345 @@
+import { expect, it } from "vitest";
+import type {
+  Capabilities,
+  ProviderAdapter,
+  ProviderEvent,
+  ProviderRequest,
+} from "../../src/providers/contract.js";
+
+/**
+ * Gate 4 — the shared adapter conformance suite.
+ *
+ * ONE suite, run against EVERY adapter. An adapter is not shippable until it
+ * passes. The nine assertions come from
+ * `contracts/provider_adapter.md`; each is a numbered `it` here so a skipped one
+ * is visible in the report rather than absent from it.
+ *
+ * Usage from an adapter's own test file:
+ *
+ *   describe("anthropic-direct", () => {
+ *     runConformanceSuite({ name: "anthropic-direct", build: () => ({ adapter, scenario }) });
+ *   });
+ */
+
+/** A canary that must never appear in an outbound request or on disk. */
+export const KNOWN_TEST_SECRET = "sk-ant-CONFORMANCE-CANARY-0000000000";
+
+/** Parameters removed from the API — each returns 400 on current models (R10). */
+export const REMOVED_PARAMS = ["temperature", "top_p", "top_k", "budget_tokens"] as const;
+
+export interface CapturedRequest {
+  /** The literal body the adapter handed the vendor client. */
+  body: Record<string, unknown>;
+  /** Where it went. Absent means the harness could not observe the destination. */
+  url?: string;
+  /** Headers the adapter set, so credential transport can be checked. */
+  headers?: Record<string, string>;
+}
+
+export interface ConformanceHarness {
+  adapter: ProviderAdapter;
+  /** Events the adapter should produce for a minimal text turn. */
+  minimalTurn(): Promise<ProviderEvent[]>;
+  /** Events for a turn that ends in `tool_use`. */
+  toolUseTurn(): Promise<ProviderEvent[]>;
+  /** The verbatim blocks the vendor returned, to compare against `block_stop`. */
+  vendorBlocks(): unknown[];
+  /** Every request body the adapter emitted during this harness's lifetime. */
+  captured(): CapturedRequest[];
+  /** An adapter configured with no credential at all. */
+  withoutCredential(): ProviderAdapter;
+  /** Feed an unknown event shape through the adapter's mapping. */
+  unknownShapeTurn(): Promise<ProviderEvent[]>;
+  /** Start a turn then abort mid-stream; resolve with what was yielded. */
+  abortMidStream(): Promise<ProviderEvent[]>;
+  /** Anything the adapter wrote to disk during this harness's lifetime. */
+  diskWrites(): string[];
+  /**
+   * Hosts this adapter is permitted to reach.  is about DESTINATION as much as
+   * content: a credential travelling to the right provider is the job, and the same
+   * credential travelling anywhere else is exfiltration.
+   */
+  allowedHosts(): string[];
+}
+
+export interface ConformanceOptions {
+  name: string;
+  build: () => Promise<ConformanceHarness> | ConformanceHarness;
+  /** Models to check `capabilities()` totality against. */
+  models: string[];
+}
+
+export function runConformanceSuite(opts: ConformanceOptions): void {
+  const build = async () => await opts.build();
+
+  it("1. a minimal turn streams the lifecycle in order", async () => {
+    const h = await build();
+    const types = (await h.minimalTurn()).map((e) => e.t);
+
+    expect(types[0]).toBe("message_start");
+    expect(types).toContain("block_start");
+    expect(types).toContain("block_stop");
+    expect(types.at(-2)).toBe("message_delta");
+    expect(types.at(-1)).toBe("message_stop");
+    // block_start must precede its block_stop, and both must sit inside the message.
+    expect(types.indexOf("block_start")).toBeLessThan(types.indexOf("block_stop"));
+    expect(types.indexOf("block_stop")).toBeLessThan(types.lastIndexOf("message_delta"));
+  });
+
+  it("2. a tool-use turn stops with tool_use and yields a well-formed tool_use block", async () => {
+    const h = await build();
+    const events = await h.toolUseTurn();
+
+    const delta = events.find((e) => e.t === "message_delta");
+    expect(delta).toMatchObject({ stopReason: "tool_use" });
+
+    const stops = events.filter(
+      (e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop",
+    );
+    const toolBlock = stops
+      .map((s) => s.block)
+      .find((b) => (b as { type?: string })?.type === "tool_use");
+    expect(toolBlock, "no tool_use block in the stream").toBeDefined();
+    expect(toolBlock).toMatchObject({ type: "tool_use" });
+    expect((toolBlock as { id?: string }).id).toBeTruthy();
+    expect((toolBlock as { name?: string }).name).toBeTruthy();
+  });
+
+  it("3. block_stop blocks are byte-identical to what the vendor returned", async () => {
+    const h = await build();
+    const events = await h.toolUseTurn();
+    const emitted = events
+      .filter((e): e is Extract<ProviderEvent, { t: "block_stop" }> => e.t === "block_stop")
+      .map((e) => e.block);
+
+    // Reconstruction is the failure this catches: a rebuilt block loses
+    // compaction and thinking state that the NEXT request needs verbatim (R6).
+    expect(emitted).toEqual(h.vendorBlocks());
+    expect(JSON.stringify(emitted)).toBe(JSON.stringify(h.vendorBlocks()));
+  });
+
+  it("4. no removed parameter appears in any outbound request", async () => {
+    const h = await build();
+    await h.minimalTurn();
+    await h.toolUseTurn();
+
+    for (const request of h.captured()) {
+      const serialized = JSON.stringify(request.body);
+      for (const param of REMOVED_PARAMS) {
+        expect(
+          serialized.includes(`"${param}"`),
+          `${opts.name} sent removed parameter ${param}; current models reject it with 400`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("5. an unknown event shape yields { t: 'raw' } and does not throw", async () => {
+    const h = await build();
+    const events = await h.unknownShapeTurn();
+
+    expect(events.some((e) => e.t === "raw")).toBe(true);
+  });
+
+  it("6. probe() with no credential names the reason and an actionable remedy", async () => {
+    const adapter = (await build()).withoutCredential();
+    const result = await adapter.probe();
+
+    expect(result.available).toBe(false);
+    if (result.available) throw new Error("expected unavailable");
+    expect(result.reason).toBeTruthy();
+    // A generic failure is a contract violation, not a lazy string.
+    expect(result.remedy.length, "remedy must be actionable, not a stub").toBeGreaterThan(20);
+    expect(result.remedy).not.toMatch(/^(error|failed|unknown)\.?$/i);
+  });
+
+  it("7. capabilities() is total: every field present for every listed model", async () => {
+    const h = await build();
+    for (const model of opts.models) {
+      assertTotalCapabilities(h.adapter.capabilities(model), `${opts.name}/${model}`);
+    }
+  });
+
+  it("8. a mid-stream abort stops the stream and leaves no open blocks", async () => {
+    const h = await build();
+    const events = await h.abortMidStream();
+
+    const opened = events.filter((e) => e.t === "block_start").length;
+    const closed = events.filter((e) => e.t === "block_stop").length;
+    expect(closed, `${opened} blocks opened, ${closed} closed after abort`).toBe(opened);
+  });
+
+  it("9. stream() never puts a credential value in a request body", async () => {
+    const h = await build();
+    await h.minimalTurn();
+
+    for (const request of h.captured()) {
+      expect(JSON.stringify(request.body)).not.toContain(KNOWN_TEST_SECRET);
+    }
+  });
+
+  it("10. no credential value is written to disk", async () => {
+    const h = await build();
+    await h.minimalTurn();
+    await h.toolUseTurn();
+
+    // A credential on disk outlives the process and the session. Reading
+    // ~/.claude/.credentials.json is permitted; copying it anywhere is not.
+    for (const written of h.diskWrites()) {
+      expect(written, "an adapter wrote a credential to disk").not.toContain(KNOWN_TEST_SECRET);
+    }
+  });
+
+  it("11. a credential reaches ONLY this adapter's own provider endpoint", async () => {
+    const h = await build();
+    await h.minimalTurn();
+    await h.toolUseTurn();
+
+    const allowed = h.allowedHosts();
+    expect(allowed.length, "an adapter must declare where it may send credentials").toBeGreaterThan(
+      0,
+    );
+
+    for (const request of h.captured()) {
+      if (!request.url) continue;
+      const host = new URL(request.url).host;
+      expect(
+        allowed.some((a) => host === a || host.endsWith(`.${a}`)),
+        `${opts.name} sent a request to ${host}, which is not in its allowed set`,
+      ).toBe(true);
+    }
+  });
+
+  it("12. a credential travels in a HEADER, never in the body or a URL", async () => {
+    const h = await build();
+    await h.minimalTurn();
+
+    for (const request of h.captured()) {
+      // A credential in a URL lands in proxy logs, browser history and referrers;
+      // one in a body lands in request logs. Only the header carries it.
+      expect(request.url ?? "").not.toContain(KNOWN_TEST_SECRET);
+      expect(JSON.stringify(request.body)).not.toContain(KNOWN_TEST_SECRET);
+
+      const headerNames = Object.keys(request.headers ?? {}).map((k) => k.toLowerCase());
+      const carriers: string[] = headerNames.filter(
+        (k) => k === "authorization" || k === "x-api-key",
+      );
+      // Not an assertion that a carrier EXISTS — a faked client may set none. The
+      // assertion is that if the credential appears at all, it appears only there.
+      const elsewhere = Object.entries(request.headers ?? {})
+        .filter(([k]) => !carriers.includes(k.toLowerCase()))
+        .filter(([, v]) => String(v).includes(KNOWN_TEST_SECRET))
+        .map(([k]) => k);
+      expect(elsewhere, `credential leaked into ${elsewhere.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("13. probe() reports a credential SOURCE, never a value", async () => {
+    const h = await build();
+    const result = await h.adapter.probe();
+
+    // The distinction the whole design rests on: "which login did this run use?"
+    // must be answerable from the record without a credential ever entering it.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(KNOWN_TEST_SECRET);
+    if (result.available) {
+      expect(result.credentialSource).toMatch(/^(env|file|profile|keychain|none)/);
+    }
+  });
+
+  it("14. declares an entitlement posture, with a reason a human can act on", async () => {
+    const h = await build();
+    const { entitlement } = h.adapter;
+
+    // Recorded with the adapter, never assumed. `docs/contracts/harness_protocol.md` §6 restates
+    // these for sign-off, and a posture that could go missing would make that table a guess.
+    expect(entitlement.credentialKind).toMatch(
+      /^(api_key|cloud_marketplace|subscription|enterprise_sso)$/,
+    );
+    // `owner_decision_required` is a REAL value and must stay distinguishable from "no" — the
+    // subscription path is one  explicitly asks for, and flattening it to a refusal would
+    // remove it.
+    expect(["yes", "no", "owner_decision_required"]).toContain(
+      entitlement.thirdPartyClientPermitted,
+    );
+    // The note is what a human reads when deciding. An empty one makes the posture unauditable.
+    expect(entitlement.note.length).toBeGreaterThan(20);
+  });
+}
+
+/**
+ * Every field must be PRESENT. A partial capability object is indistinguishable
+ * from "unsupported", so a missing field silently disables a feature (or, worse,
+ * enables one the provider rejects).
+ */
+export function assertTotalCapabilities(caps: Capabilities, label: string): void {
+  const required: Array<keyof Capabilities> = [
+    "streaming",
+    "toolUse",
+    "toolUseWhileStreaming",
+    "contextWindow",
+    "maxOutputTokens",
+    "adaptiveThinking",
+    "thinkingDisplaySummarized",
+    "effortLevels",
+    "promptCaching",
+    "minCacheablePrefixTokens",
+    "serverSideCompaction",
+    "contextEditing",
+    "serverSideTools",
+    "liveModelDiscovery",
+    "serverSideRefusalFallback",
+    "midConversationSystemMessages",
+    "midConversationToolChanges",
+  ];
+
+  for (const field of required) {
+    expect(field in caps, `${label} missing capability field: ${field}`).toBe(true);
+    expect(caps[field], `${label}.${field} is undefined`).not.toBeUndefined();
+  }
+
+  // minCacheablePrefixTokens is the one legitimately nullable field — null means
+  // "no minimum applies", which is different from "unknown".
+  expect(caps.contextWindow, `${label} contextWindow must be a real budget`).toBeGreaterThan(0);
+  expect(caps.maxOutputTokens).toBeGreaterThan(0);
+  expect(Array.isArray(caps.effortLevels)).toBe(true);
+
+  // EXPLICIT booleans, never inferred. An omitted `toolUseWhileStreaming` reads as "supports
+  // both together", the one reading that is wrong for 8 of the 18 non-Anthropic Bedrock models
+  // that were measured; an omitted `toolUse` reads as "can act", which for a model that cannot is
+  // how you get an agent narrating edits it never made.
+  for (const field of ["toolUse", "toolUseWhileStreaming"] as const) {
+    expect(typeof caps[field], `${label}.${field} must be an explicit boolean`).toBe("boolean");
+  }
+
+  // Not a contradiction to catch, but a NONSENSE combination: tools-while-streaming can only be
+  // true of a model that uses tools at all, and a table that says otherwise has a stale row.
+  if (!caps.toolUse) {
+    expect(
+      caps.toolUseWhileStreaming,
+      `${label} claims tools while streaming but no tool use at all`,
+    ).toBe(false);
+  }
+
+  for (const tool of ["webSearch", "webFetch", "codeExecution"] as const) {
+    expect(
+      typeof caps.serverSideTools[tool],
+      `${label}.serverSideTools.${tool} must be an explicit boolean`,
+    ).toBe("boolean");
+  }
+}
+
+/** A minimal frozen request, for adapters that need one to drive `stream()`. */
+export function conformanceRequest(over: Partial<ProviderRequest> = {}): ProviderRequest {
+  return Object.freeze({
+    model: "claude-opus-5",
+    maxTokens: 1024,
+    system: [{ type: "text" as const, text: "You are a test." }],
+    messages: [{ role: "user" as const, content: [{ type: "text", text: "hello" }] }],
+    tools: [],
+    thinking: { type: "adaptive" as const, display: "summarized" as const },
+    cacheBreakpoints: [],
+    signal: new AbortController().signal,
+    ...over,
+  });
+}

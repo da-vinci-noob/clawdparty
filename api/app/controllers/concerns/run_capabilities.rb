@@ -8,13 +8,13 @@
 # stays focused on the core run lifecycle (mirrors RunPermissionModes).
 #
 # Fail-open by design (design D6): if connector/skill discovery is unavailable
-# (source unavailable, empty, or the sidecar is unreachable), the selection is
-# passed through unvalidated — the sidecar resolves defensively and is the
+# (source unavailable, empty, or the harness is unreachable), the selection is
+# passed through unvalidated — the harness resolves defensively and is the
 # backstop. Only a value outside a *known, non-empty* set is a 422.
 module RunCapabilities
   extend ActiveSupport::Concern
 
-  include SidecarDiscovery
+  include HarnessDiscovery
 
   class InvalidCapability < StandardError; end
 
@@ -38,7 +38,7 @@ module RunCapabilities
 
   def validated_disallowed_tools!
     values = array_param(:disallowed_tools)
-    reject_unknown!('tool', values, Runs::Start::DEFAULT_ALLOWED_TOOLS)
+    reject_unknown!('tool', values, Runs::Start::BUILTIN_TOOLS)
     values
   end
 
@@ -63,14 +63,14 @@ module RunCapabilities
   end
 
   # The discovered names for a session, or nil when discovery is unavailable
-  # (source unavailable / empty / sidecar unreachable) — nil signals fail-open.
+  # (source unavailable / empty / harness unreachable) — nil signals fail-open.
   def discovered_names(kind, session)
     body = kind == :connectors ? discover_connectors(session) : discover_skills(session)
     entries = Array(body[kind.to_s])
     return nil if body['source'] == 'unavailable' || entries.empty?
 
     entries.filter_map { |entry| entry['name'] }
-  rescue Sidecar::Client::TransportError
+  rescue Harness::Client::TransportError
     nil
   end
 

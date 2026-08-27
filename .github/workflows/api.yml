@@ -50,8 +50,15 @@ jobs:
       - name: Prepare databases (primary + queue + cable)
         run: bin/rails db:prepare
 
-      - name: RuboCop
-        run: bundle exec rubocop
-
-      - name: RSpec
-        run: bundle exec rspec
+      # ONE source of truth, and the ONE group where CI and local differ by EXECUTOR:
+      # the gems live in a Docker named volume locally, so `bin/tests api` drives the
+      # stack through bin/rubocop / bin/rspec there. On CI the Ruby runner is native
+      # and the gems are already installed, so CLAWD_TESTS_NATIVE_API=1 runs
+      # `bundle exec rubocop` / `bundle exec rspec` directly — the same commands, no
+      # Docker. The projection-equivalence specs (gate 3, Rails half) run INSIDE the
+      # full rspec; folded in rather than repeated so the command lives in one place.
+      - name: Checks (bin/tests api)
+        working-directory: .
+        env:
+          CLAWD_TESTS_NATIVE_API: "1"
+        run: bin/tests api

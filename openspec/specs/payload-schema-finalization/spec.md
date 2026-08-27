@@ -56,7 +56,7 @@ per-run `seq` not advanced by ephemeral events, session-scoped events with null 
 `actor.kind` matching the frozen table — so the existing `fixtures/sample_run.test.ts` still passes; a new
 assertion SHALL additionally check that durable events now carry non-empty payloads (a smoke check —
 `Object.keys(payload).length > 0`, i.e. no longer the placeholder `{}`). Per-type payload field validation is
-the normalizer cross-check test's job (`sidecar-runner`), not this fixture smoke assertion.
+the normalizer cross-check test's job (`harness-runner`), not this fixture smoke assertion.
 
 #### Scenario: Existing structural fixture test still passes on the real fixture
 
@@ -67,7 +67,7 @@ the normalizer cross-check test's job (`sidecar-runner`), not this fixture smoke
 
 - **WHEN** the real fixture is inspected
 - **THEN** each durable event has `Object.keys(payload).length > 0` (no longer the placeholder `{}`) as a smoke
-  check, with per-type field validation deferred to the `sidecar-runner` normalizer cross-check
+  check, with per-type field validation deferred to the `harness-runner` normalizer cross-check
 
 ### Requirement: Payload finalization is an additive CONTRACT_VERSION minor bump
 

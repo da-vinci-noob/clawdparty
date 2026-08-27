@@ -1,9 +1,19 @@
 # clawdparty dev stack — one container per process.
 #
-# Five services, one process each: rails (Puma), jobs (Solid Queue), postgres,
-# sidecar (Fastify + Agent SDK), vite (dev SPA server). Only `rails` publishes a
-# port (3000 -> LAN); sidecar/vite are compose-network only. Run with `bin/start`
-# (after `bin/setup`). See docs/PLAN.md §2/§3 + CLAUDE.md for the invariants.
+# Four services, one process each: rails (Puma), jobs (Solid Queue), postgres, vite
+# (dev SPA server). Only `rails` publishes a port (3000 -> LAN); vite is
+# compose-network only.
+#
+# The HARNESS IS NOT HERE. It runs as a host process  so it reaches any
+# project on the filesystem with no per-project mount, resolves symlinks that leave a
+# project directory, sees the host toolchain and SSH agent, and reads credential
+# locations a container cannot — notably the macOS Keychain. `bin/start` brings up
+# this file AND the host harness; `bin/harness` manages it alone.
+#
+# Because the harness is not a compose service, no service here bind-mounts the
+# target repo at an identical host path any more: the harness edits worktrees
+# directly on the host, and Rails only needs the repo for git operations.
+# Run with `bin/start` (after `bin/setup`). See docs/PLAN.md §2/§3 + CLAUDE.md.
 
 # Pin the project name so the whole stack always comes up under `clawdparty`
 # (containers `clawdparty-<service>-1`), independent of the host directory name.
@@ -46,11 +56,20 @@ services:
       RAILS_ENV: ${RAILS_ENV:-development}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_USER: ${DATABASE_USER:-postgres}
-      SIDECAR_URL: ${SIDECAR_URL:-http://sidecar:8787}
-      # In-container repo root == the host path (identical-path mount below), so
-      # git worktree metadata (absolute gitdir paths) is valid on BOTH host and
-      # container — GitHub Desktop / host `git worktree` can open the worktrees.
+      # The harness is a HOST process, so Rails reaches it across the bridge.
+      HARNESS_URL: ${HARNESS_URL:-http://host.docker.internal:8787}
+      # Still the identical host path, now for a different reason: the harness writes
+      # worktree gitdir metadata with HOST absolute paths, so Rails must use the same
+      # string to open them. This is the one place the identical-path mount survives.
       REPO_ROOT: ${TARGET_REPO_PATH:-/repo}
+    extra_hosts:
+      # Resolves the host from inside the container. On Docker Desktop (macOS,
+      # Windows) this reaches a harness bound to 127.0.0.1, because the VM's proxy
+      # forwards to host loopback. On LINUX it maps to the bridge gateway and does
+      # NOT proxy loopback — a Linux developer must set HARNESS_BIND_HOST to the
+      # bridge gateway (commonly 172.17.0.1) so the harness is reachable while still
+      # not on the LAN.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./api:/app:delegated
       - bundle:/usr/local/bundle
@@ -58,9 +77,10 @@ services:
       # Rails.root.join("..","packages",...) resolves identically in-container
       # and on the host (fake-Claude replay reads the fixture + CONTRACT_VERSION).
       - ./packages:/packages:ro
-      # Target repo mounted at the IDENTICAL host path (not /repo) so worktree
-      # gitdir absolute paths resolve on the host too. TARGET_REPO_PATH must be
-      # an ABSOLUTE host path (the parent of your repos).
+      # Target repo at the IDENTICAL host path. Rails runs the git operations
+      # (worktree create, diff, approve-commit, reject-revert) against worktrees the
+      # host harness wrote, whose gitdir files hold absolute HOST paths.
+      # TARGET_REPO_PATH must be an ABSOLUTE host path (the parent of your repos).
       - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
     depends_on:
       postgres:
@@ -80,11 +100,19 @@ services:
       RAILS_ENV: ${RAILS_ENV:-development}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_USER: ${DATABASE_USER:-postgres}
+      HARNESS_URL: ${HARNESS_URL:-http://host.docker.internal:8787}
       REPO_ROOT: ${TARGET_REPO_PATH:-/repo}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./api:/app:delegated
       - bundle:/usr/local/bundle
       - ./packages:/packages:ro
+      # The repo mount `jobs` lacked. Harness::HealthcheckJob does not touch
+      # git today, but it shares this image with `rails` and every git-touching
+      # service needs the same path — omitting it made "works in rails, NoMethodError
+      # in jobs" a latent trap for the first job that reaches for a worktree.
+      - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,56 +120,6 @@ services:
         condition: service_started
     # No `ports:` — jobs runs no server. restart: unless-stopped doubles as the
     # restart-until-ready posture if it boots before rails has prepared the queue DB.
-
-  # --- Node sidecar (Fastify + Agent SDK) — UNPUBLISHED --------------------
-  sidecar:
-    build:
-      context: .
-      dockerfile: docker/sidecar.Dockerfile
-    # Independent lifecycle: its OWN restart policy, NOT a depends_on child of
-    # rails — a Rails restart must never kill a live Claude run.
-    restart: unless-stopped
-    env_file:
-      - path: .env.local
-        required: false
-    # List form so bare keys pass through from the host ONLY WHEN SET (the SDK's
-    # own auto-detection/precedence is preserved; nothing is forced to empty).
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - RAILS_INTERNAL_URL=${RAILS_INTERNAL_URL:-http://rails:3000}
-      # Claude / AWS auth + config (ANTHROPIC_MODEL, CLAUDE_CODE_USE_BEDROCK/VERTEX,
-      # AWS_PROFILE/AWS_REGION, or ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN /
-      # CLAUDE_CODE_OAUTH_TOKEN) live in .env.local (the env_file above) — NOT as bare
-      # host-shell passthroughs. A bare `- VAR` here OVERRIDES env_file, and when the
-      # host shell doesn't export VAR it injects an EMPTY value, which silently
-      # unset CLAUDE_CODE_USE_BEDROCK (→ "Not logged in"). The actual secrets are
-      # supplied by the read-only ~/.claude + ~/.aws mounts below; only the
-      # selectors/config live in .env.local.
-    expose:
-      - "8787"
-    volumes:
-      - ./sidecar:/app:delegated
-      - sidecar_node_modules:/app/node_modules
-      # Target repo READ-WRITE, mounted at the IDENTICAL host path (Claude edits
-      # the worktree; reject reverts it). Same absolute path as the host + rails
-      # so worktree gitdir paths resolve everywhere and the run cwd (a host path
-      # from the run-start payload) is valid in-container.
-      - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
-      # Host login. Targets the `node` user's home so `~/.claude` / `~/.aws`
-      # resolve to the mounts. `~/.claude` is READ-WRITE: the Agent SDK writes
-      # runtime dirs there (session-env/<id> per run, and the resume JSONL under
-      # projects/ — the resume design wants that persisted to the host). A
-      # read-only mount fails the run with EROFS on session-env mkdir. `~/.aws`
-      # stays READ-ONLY (the Bedrock/AWS credentials — tamper-safe; not in ~/.claude).
-      - ${HOME}/.claude:/home/node/.claude
-      - ${HOME}/.aws:/home/node/.aws:ro
-      # Claude Code stores user MCP servers in the `~/.claude.json` FILE (beside
-      # the `~/.claude/` dir, so not covered by the mount above). Expose it
-      # READ-ONLY at a side path; the entrypoint snapshots it once at startup
-      # (the app atomically rewrites this file, which would break a live
-      # single-file mount). Read-only so the host's real config is never mutated.
-      - ${HOME}/.claude.json:/home/node/.claude-host.json:ro
-    # No `ports:` key at all — reachable only on the compose network.
 
   # --- Vite dev server (dev only) — UNPUBLISHED ----------------------------
   vite:
@@ -168,5 +146,4 @@ services:
 volumes:
   pg_data:
   bundle:
-  sidecar_node_modules:
   web_node_modules:

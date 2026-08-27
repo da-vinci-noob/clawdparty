@@ -60,6 +60,14 @@ Metrics/ParameterLists:
   # one is. Count only positional/optional args against the limit.
   CountKeywordArgs: false
 
+# `Harness::Client` is a transport FACADE: one 3-line method per harness route, and it grows
+# linearly with the protocol — which is what it is for. Splitting it to satisfy a line count would
+# put one seam in two files, and this repo's whole argument for the client is that there is exactly
+# one place a harness call is made. Raised rather than excluded, so a class that grows for a
+# different reason still trips it.
+Metrics/ClassLength:
+  Max: 130
+
 # RSpec specs are naturally long/expressive; relax the defaults that fight specs.
 # config/routes.rb is a single DSL block by design — length is not a smell there.
 Metrics/BlockLength:
@@ -76,7 +84,7 @@ RSpec/MultipleMemoizedHelpers:
 # Request/integration specs legitimately describe a route string, not a class.
 RSpec/DescribeClass:
   Enabled: false
-# Stubbing the sidecar/git seams via any-instance is the cleanest way to keep
+# Stubbing the harness/git seams via any-instance is the cleanest way to keep
 # request specs server/git-free; the around-block throwaway repo uses @repo.
 RSpec/AnyInstance:
   Enabled: false

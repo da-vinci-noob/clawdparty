@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+// Scenario S3's mirror image — : a RAILS restart during a live run terminates zero runs and
+// triggers zero harness recovery cycles.
+//
+// The harness owns the run and the record, so a Rails restart should be survivable in a way a
+// harness crash is not: the harness keeps streaming into its store, the transport ring-buffers what
+// it cannot deliver, and on boot Rails reconciles against `GET /runs` — the harness wins.
+// None of that had been driven; the failure it guards against is Rails booting, seeing a run with a
+// stale heartbeat, and failing a run that was never in trouble.
+//
+// Spends real tokens and restarts the rails container. Usage:
+//   bin/verify-rails-restart <repo-path> [base-url]
+
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const REPO = process.argv[2];
+const BASE = process.argv[3] ?? "http://localhost:3000";
+const PROVIDER = process.env.PROVIDER ?? "anthropic-bedrock";
+const MODEL = process.env.MODEL;
+const STATE = join(homedir(), ".local/state/clawdparty");
+const ROOT = join(import.meta.dirname, "..");
+
+if (!REPO) {
+  console.error("usage: bin/verify-rails-restart <repo-path> [base-url]");
+  process.exit(2);
+}
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function api(path, { method = "GET", cookie, body } = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  return { status: res.status, json: text ? JSON.parse(text) : null };
+}
+
+function compose(...args) {
+  return execFileSync("docker", ["compose", ...args], { encoding: "utf8", cwd: ROOT });
+}
+
+function query(sessionId, sql) {
+  const store = join(STATE, "sessions", `session-${sessionId}.sqlite3`);
+  if (!existsSync(store)) throw new Error(`no store at ${store}`);
+  return execFileSync("sqlite3", [store, sql], { encoding: "utf8" }).trim();
+}
+
+async function events(sessionId, cookie) {
+  const { json } = await api(`/api/sessions/${sessionId}/events`, { cookie });
+  return Array.isArray(json) ? json : [];
+}
+
+async function main() {
+  console.log(`\nRails restart mid-run, against ${BASE}\n  repo: ${REPO}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "rails restart",
+      name: "Owner",
+      mode: "review",
+      repository_path: REPO,
+    }),
+  });
+  if (!created.ok) throw new Error(`session create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = (created.headers.getSetCookie?.() ?? [])
+    .find((c) => c.startsWith("clawd_uid="))
+    ?.split(";")[0];
+  if (!cookie) throw new Error("no clawd_uid cookie");
+  console.log(`  session ${sessionId}\n`);
+
+  // Long enough that the restart lands mid-run rather than after it.
+  const prompt =
+    "Do exactly this, using your tools, with no commentary: create four files one.txt, two.txt, " +
+    "three.txt and four.txt, each containing a different single sentence, then run " +
+    "`sleep 20 && ls` and report what it printed.";
+
+  const started = await api(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt, provider: PROVIDER, ...(MODEL ? { model: MODEL } : {}) },
+  });
+  check(started.status === 202, "run accepted", `${started.status} ${JSON.stringify(started.json)}`);
+  if (started.status !== 202) return;
+  const runId = String(started.json.id);
+
+  let sleeping = null;
+  for (let i = 0; i < 180 && !sleeping; i += 1) {
+    sleeping = (await events(sessionId, cookie)).find(
+      (e) =>
+        e.type === "tool_started" && String(e.payload?.input_summary ?? "").includes("sleep 20"),
+    );
+    if (!sleeping) await sleep(1000);
+  }
+  check(Boolean(sleeping), "the run is mid-tool, so the restart lands during it");
+  if (!sleeping) return;
+
+  const beforeStore = Number(query(sessionId, "select max(store_seq) from entries;"));
+  console.log(`       record at store_seq ${beforeStore}; restarting rails\n`);
+
+  compose("restart", "rails");
+  // Wait for Rails to answer again. Its boot reconciliation runs against GET /runs, and the harness
+  // is the authority — a run the harness still holds must come back `running`, not `failed`.
+  let up = false;
+  for (let i = 0; i < 90 && !up; i += 1) {
+    try {
+      up = (await api(`/api/sessions/${sessionId}/events`, { cookie })).status === 200;
+    } catch {
+      /* still booting */
+    }
+    if (!up) await sleep(1000);
+  }
+  check(up, "rails is serving again");
+
+  // THE criterion: the run was not terminated by the restart.
+  const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+  let settled = null;
+  for (let i = 0; i < 180 && !settled; i += 1) {
+    settled = (await events(sessionId, cookie)).find(
+      (e) => TERMINAL.includes(e.type) && String(e.ai_run_id) === runId,
+    );
+    if (!settled) await sleep(1000);
+  }
+  check(settled?.type === "run_finished", "the run COMPLETED across the restart", settled?.type ?? "never settled");
+
+  // Zero recovery cycles. A harness recovery here would mean Rails' restart was mistaken for the
+  // harness dying — the run would be rebuilt from its position marker rather than simply continuing.
+  const recovered = (await events(sessionId, cookie)).filter((e) => e.type === "recovery_applied");
+  check(recovered.length === 0, "zero harness recovery cycles", `${recovered.length} recovery_applied`);
+
+  // The record kept growing while Rails was down, which is what makes the projection repairable
+  // rather than the outage being data loss.
+  const afterStore = Number(query(sessionId, "select max(store_seq) from entries;"));
+  check(afterStore > beforeStore, "the record advanced during the outage", `${beforeStore} → ${afterStore}`);
+
+  // And the buffered events were delivered, so the projection is whole without a manual repair.
+  const audit = await api(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(audit.json)}\n`);
+  check(
+    audit.json?.diverged === false,
+    "the projection caught up on its own, no repair needed",
+    String(audit.json?.reason),
+  );
+
+  console.log(`\n${failures === 0 ? "all checks passed" : `${failures} FAILED`}\n`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+main().catch((error) => {
+  console.error(`\nverify aborted: ${error.message}\n`);
+  process.exitCode = 1;
+});

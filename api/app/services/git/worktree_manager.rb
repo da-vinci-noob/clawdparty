@@ -3,28 +3,64 @@
 require 'open3'
 
 module Git
-  # Rails owns worktree creation (the frozen sidecar-protocol convention): the
-  # per-session worktree lives at <repo>/.clawdparty/worktrees/session-<id> on
-  # branch clawd/session-<id>, created against the bind-mounted target repo. The
-  # sidecar only uses it as `cwd`; it never creates or relocates it.
+  # Rails owns worktree creation (the frozen harness-protocol convention): the
+  # per-session worktree lives at <repo_root>/.clawdparty/worktrees/session-<id> on
+  # branch clawd/session-<id>, created FROM the session's own repository
+  # (`repository_path`). Note the two are different directories — the checkout is
+  # centralized under the mount root so the user's repos are not littered with
+  # worktrees, which means the files are NOT under the repo they came from. The
+  # harness only uses it as `cwd`; it never creates or relocates it.
   class WorktreeManager
     class GitError < StandardError; end
 
-    # The IN-CONTAINER repo root — always /repo (the frozen convention: the host
-    # dir is bind-mounted to /repo). This is deliberately NOT `TARGET_REPO_PATH`:
-    # that env var is the HOST mount SOURCE (used only for compose substitution)
-    # and would be a path that does not exist inside the container. `REPO_ROOT`
-    # is an in-container override knob, defaulting to /repo.
+    # `REPO_ROOT` must be the SAME ABSOLUTE STRING on the host and in this container.
+    # Compose sets it from `TARGET_REPO_PATH`, which is also the mount target, so the
+    # two match by construction.
+    #
+    # Identical paths survived the harness's move to the host, for a NEW reason. They
+    # used to matter so a container-created worktree stayed openable by host git; now
+    # the host harness runs Claude in these worktrees while Rails does the git work in
+    # a container, and `git worktree` records ABSOLUTE gitdir paths in
+    # `.git/worktrees/<name>/gitdir`. If the two disagree, every worktree one side
+    # writes is unusable by the other.
+    #
+    # There is no path TRANSLATION anywhere and there must not be: a translation layer
+    # would have to be applied in every direction the path travels (run payload, diff,
+    # commit, revert, the browser) and missing one produces a path that resolves to
+    # nothing rather than an error.
     def self.repo_root
       ENV.fetch('REPO_ROOT', '/repo')
     end
 
-    def initialize(session, repo_root: self.class.repo_root)
-      @session = session
-      @repo_root = repo_root
+    # The DEFAULT lane, and the reason `main` gets no path suffix below: every session that
+    # existed before lanes was implicitly in it, so its worktree must keep the exact path and
+    # branch it already has. A suffix here would orphan every live worktree on disk.
+    DEFAULT_LANE = 'main'
+
+    # A lane name reaches a FILESYSTEM PATH and a GIT BRANCH NAME, and it originates from a client
+    # request — so it is validated here, at the point of use, rather than trusted from the caller.
+    #
+    # One path segment, lowercase alphanumeric plus internal hyphens, 1-32 chars. This rejects the
+    # things that actually matter: `..` and `/` (which would escape `.clawdparty/worktrees` and
+    # write anywhere the container can reach), a leading `-` (which git reads as a flag), and the
+    # `.lock` suffix and `@{` sequence git refuses in a ref name. Rejecting rather than sanitising
+    # is deliberate: a sanitised name silently addresses a different lane than the caller asked for.
+    LANE_NAME = /\A[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\z/
+
+    class InvalidLane < StandardError; end
+
+    def self.valid_lane?(lane)
+      LANE_NAME.match?(lane.to_s)
     end
 
-    attr_reader :session, :repo_root
+    def initialize(session, repo_root: self.class.repo_root, lane: DEFAULT_LANE)
+      @session = session
+      @repo_root = repo_root
+      @lane = lane.presence || DEFAULT_LANE
+      raise(InvalidLane, "invalid lane name: #{@lane.inspect}") unless self.class.valid_lane?(@lane)
+    end
+
+    attr_reader :session, :repo_root, :lane
 
     # The git repository the worktree is created FROM: the session's SELECTED
     # repo (repository_path) when set, else the mount root. This is distinct from
@@ -35,12 +71,29 @@ module Git
       session.repository_path.presence || repo_root
     end
 
+    # One worktree PER LANE. Two lanes cannot share one checkout: `Runs::Finalize` computes
+    # a changeset from the whole working tree, so a shared tree would put one lane's in-flight
+    # edits into the other's review — and `Runs::Reject` runs `reset --hard && clean -fd`, which
+    # would DELETE the other lane's unreviewed work.
+    #
+    # `main` is deliberately un-suffixed so pre-lane sessions keep their existing path.
     def worktree_path
-      File.join(repo_root, '.clawdparty', 'worktrees', "session-#{session.id}")
+      File.join(repo_root, '.clawdparty', 'worktrees', "session-#{session.id}#{lane_suffix}")
     end
 
+    # The SAME `-<lane>` suffix as the path, and a hyphen rather than a `/` on purpose.
+    #
+    # `clawd/session-<id>/<lane>` was the first attempt and git refuses it: a ref cannot be both a
+    # file and a directory, so `refs/heads/clawd/session-7` and `refs/heads/clawd/session-7/review`
+    # cannot coexist —
+    #
+    #   fatal: cannot lock ref 'refs/heads/clawd/session-7':
+    #          'refs/heads/clawd/session-7/review' exists
+    #
+    # Keeping `main` un-suffixed for backwards compatibility therefore rules the slash out entirely,
+    # and the failure would have arrived the first time anyone opened a second lane.
     def branch_name
-      "clawd/session-#{session.id}"
+      "clawd/session-#{session.id}#{lane_suffix}"
     end
 
     # Create the worktree (idempotent: reuse if it already exists) and return its
@@ -75,26 +128,79 @@ module Git
     # Approve path: commit everything in the worktree onto the session branch so
     # the accepted changeset is PRESERVED and the tree returns CLEAN (a fresh run
     # requires a clean tree; without this, approve left the tree dirty and blocked
-    # the next run). No-op on a clean tree. A fixed clawdparty identity so the
-    # commit never fails on missing git config; `--no-verify` skips the TARGET
-    # repo's pre-commit/commit-msg hooks — this is clawdparty's internal approval
-    # commit on an isolated session branch, and the repo's dev hooks (e.g. the
-    # pre-commit framework) are not installed in the container and would abort it.
+    # the next run). No-op on a clean tree. `--no-verify` skips the TARGET repo's
+    # pre-commit/commit-msg hooks — this is clawdparty's internal approval commit on
+    # an isolated session branch, and the repo's dev hooks (e.g. the pre-commit
+    # framework) are not installed in the container and would abort it.
     # Returns the (new) HEAD sha.
-    def commit!(message)
+    #
+    # `author` is the APPROVING participant. Identity is passed with `-c`
+    # rather than read from git config, so the commit never fails on a host with no
+    # user.name configured.
+    def commit!(message, author: nil)
       return base_sha unless dirty?
 
+      name, email = author_identity(author)
       run_git!('add', '-A', dir: worktree_path)
-      run_git!('-c', 'user.name=clawdparty', '-c', 'user.email=clawdparty@local',
+      # `commit.gpgsign=false` for the same reason as `--no-verify`: signing needs a key
+      # and agent this container does not have, and a repo (or host) with signing on
+      # would abort the commit — stranding an APPROVED changeset in a dirty worktree and
+      # blocking the next run. Found when a harness bash command's `git commit` died on
+      # the host's global commit.gpgsign with "1Password: failed to fill whole buffer".
+      run_git!('-c', "user.name=#{name}", '-c', "user.email=#{email}", '-c', 'commit.gpgsign=false',
                'commit', '--no-verify', '-m', message, dir: worktree_path)
       base_sha
+    end
+
+    # Who the commit is attributed to. Both author AND committer get this identity:
+    # a reader should not have to know git's author/committer distinction to answer
+    # "who approved this", and in this product approval is the act that matters.
+    #
+    # The address is derived from the PARTICIPANT ID, not the name: names are neither
+    # unique nor guaranteed to be valid in an address, while the id maps a commit back
+    # to exactly one participant row. `.local` marks it as internal rather than
+    # reachable. Falls back to the generic identity when the approver is unknown —
+    # nothing else in the system requires one, and failing the commit would strand an
+    # approved changeset.
+    def author_identity(participant)
+      return ['clawdparty', 'clawdparty@local'] if participant.nil?
+
+      [participant.user.name, "participant-#{participant.id}@clawdparty.local"]
     end
 
     def worktree_exists?
       File.directory?(File.join(worktree_path, '.git')) || File.exist?(File.join(worktree_path, '.git'))
     end
 
+    # Remove the session's worktree. Returns what happened, never raises on the
+    # ordinary cases — a session must be archivable whether or not its worktree is tidy.
+    #
+    # :absent          — nothing there
+    # :kept_dirty      — uncommitted work present and `force` was not given
+    # :removed         — gone, and the git metadata with it
+    # :failed          — git refused; the caller decides whether that matters
+    #
+    # DIRTY IS KEPT BY DEFAULT, and that is the whole design: an unreviewed changeset lives
+    # only in the worktree, so removing one silently destroys work nobody approved or
+    # rejected. The BRANCH is deliberately left behind either way — it is the only record of
+    # an approved changeset, and `git worktree remove` does not touch it.
+    def remove_worktree!(force: false)
+      return :absent unless worktree_exists?
+      return :kept_dirty if !force && dirty?
+
+      # `--force` because an unclean tree is exactly the case `force: true` was asked for;
+      # git refuses a dirty worktree otherwise.
+      run_git!('worktree', 'remove', '--force', worktree_path, dir: repo_dir)
+      :removed
+    rescue GitError
+      :failed
+    end
+
     private
+
+    def lane_suffix
+      @lane == DEFAULT_LANE ? '' : "-#{@lane}"
+    end
 
     def run_git!(*args, dir:)
       stdout, stderr, status = Open3.capture3('git', '-C', dir, *args)

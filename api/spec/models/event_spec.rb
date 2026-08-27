@@ -12,6 +12,7 @@ require 'rails_helper'
 #  event_type           :string           not null
 #  payload              :jsonb            not null
 #  seq                  :bigint
+#  store_seq            :bigint
 #  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #  actor_participant_id :bigint
@@ -20,10 +21,11 @@ require 'rails_helper'
 #
 # Indexes
 #
-#  index_events_on_actor_participant_id  (actor_participant_id)
-#  index_events_on_ai_run_id             (ai_run_id)
-#  index_events_on_run_and_seq           (ai_run_id,seq) UNIQUE
-#  index_events_on_session_id            (session_id)
+#  index_events_on_actor_participant_id      (actor_participant_id)
+#  index_events_on_ai_run_id                 (ai_run_id)
+#  index_events_on_run_and_seq               (ai_run_id,seq) UNIQUE
+#  index_events_on_session_id                (session_id)
+#  index_events_on_session_id_and_store_seq  (session_id,store_seq)
 #
 # Foreign Keys
 #
@@ -110,9 +112,35 @@ RSpec.describe(Event) do
     end
   end
 
+  # A count assertion is not a drift guard: TAXONOMY was missing `user_prompt`
+  # (v1.2) and `ai_thinking_delta` (v1.3) while `size == 20` stayed green,
+  # because the list and its guard were edited together and neither was compared
+  # to the contract. These compare against events.ts itself.
   describe 'taxonomy' do
-    it 'freezes exactly 20 type names' do
-      expect(described_class::TAXONOMY.size).to(eq(20))
+    it 'matches EVENT_TYPES in packages/contracts/src/events.ts exactly, in order' do
+      expect(described_class::TAXONOMY).to(eq(ContractVersion.event_types))
+    end
+
+    it 'freezes exactly 32 type names' do
+      # 30 through v1.5–v1.9; `skill_changed` makes 31 at v1.10; `participant_removed` makes 32 at
+      # v1.14. The comparison above is the real drift guard (it reads events.ts); this is the
+      # one that has to be edited deliberately.
+      expect(described_class::TAXONOMY.size).to(eq(32))
+    end
+
+    it 'matches EPHEMERAL_EVENT_TYPES in events.ts' do
+      expect(described_class::EPHEMERAL_TYPES).to(match_array(ContractVersion.ephemeral_event_types))
+    end
+
+    it 'treats every ephemeral type as a member of the taxonomy' do
+      expect(described_class::TAXONOMY).to(include(*described_class::EPHEMERAL_TYPES))
+    end
+
+    # An ephemeral type absent from EPHEMERAL_TYPES is persisted and handed a
+    # durable id, which is the failure mode that makes this worth asserting from
+    # the ingest side rather than trusting the constant.
+    it 'classifies context_usage as ephemeral' do
+      expect(described_class.ephemeral_type?('context_usage')).to(be(true))
     end
   end
 end

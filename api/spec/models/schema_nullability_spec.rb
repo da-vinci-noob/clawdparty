@@ -9,7 +9,6 @@ RSpec.describe('schema nullability posture') do
     run = create(:ai_run, session: session)
 
     expect(run.base_sha).to(be_nil)
-    expect(run.claude_session_id).to(be_nil)
     expect(run.reviewed_by_id).to(be_nil)
     expect(run.total_cost_usd).to(be_nil)
     expect(run.usage).to(be_nil)

@@ -1,0 +1,21 @@
+name: guards
+
+# No `paths` filter, deliberately. The stream workflows scope to their own
+# directory, but both guards here break from ANY direction — deleting a file,
+# renaming a service class, adding a dependency, or editing guidance.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ONE source of truth: bin/check-docs  and bin/check-room
+      # run identically in CI and locally, so `bin/tests guards`
+      # is the exact pair.
+      - name: Checks (bin/tests guards)
+        run: bin/tests guards

@@ -1,0 +1,282 @@
+#!/usr/bin/env node
+// Scenario S3, the manual spot-check — ,.
+//
+// `npm run test:crash` kills the process at every commit boundary of a SCRIPTED run. This kills
+// the real harness, with SIGKILL, while a real model's real `bash` call is executing, and then
+// asserts the thing that costs money to get wrong: the command must not run twice.
+//
+// Spends real tokens (a tool-capable model, so `anthropic-bedrock` rather than the llama the other
+// verifiers use) and hard-kills the running harness, which is why it is a script you invoke
+// deliberately and never part of a suite.
+//
+// Usage: bin/verify-crash-recovery <repo-path> [base-url]
+
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const REPO = process.argv[2];
+const BASE = process.argv[3] ?? "http://localhost:3000";
+const PROVIDER = process.env.PROVIDER ?? "anthropic-bedrock";
+const MODEL = process.env.MODEL;
+const STATE = join(homedir(), ".local/state/clawdparty");
+const ROOT = join(import.meta.dirname, "..");
+
+// A hard kill does NOT release `session.lock`; it ages out after LOCK_STALE_AFTER_MS. So the
+// restarted harness legitimately cannot open the store for up to that long, and a script that
+// did not wait would report a product failure that is really its own impatience.
+const LOCK_STALE_AFTER_MS = 15_000;
+
+if (!REPO) {
+  console.error("usage: bin/verify-crash-recovery <repo-path> [base-url]");
+  process.exit(2);
+}
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function api(path, { method = "GET", cookie, body } = {}) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  return { status: res.status, json: text ? JSON.parse(text) : null };
+}
+
+function harness(...args) {
+  return execFileSync(join(ROOT, "bin/harness"), args, { encoding: "utf8", cwd: ROOT });
+}
+
+/** The store is the RECORD, so every assertion below reads it rather than the projection. */
+function query(sessionId, sql) {
+  const store = join(STATE, "sessions", `session-${sessionId}.sqlite3`);
+  if (!existsSync(store)) throw new Error(`no store at ${store}`);
+  return execFileSync("sqlite3", [store, sql], { encoding: "utf8" }).trim();
+}
+
+async function events(sessionId, cookie) {
+  const { json } = await api(`/api/sessions/${sessionId}/events`, { cookie });
+  return Array.isArray(json) ? json : [];
+}
+
+async function main() {
+  console.log(`\nS3 crash injection — against ${BASE}\n  repo: ${REPO}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "S3 crash injection",
+      name: "Owner",
+      mode: "review",
+      repository_path: REPO,
+    }),
+  });
+  if (!created.ok) throw new Error(`session create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = (created.headers.getSetCookie?.() ?? [])
+    .find((c) => c.startsWith("clawd_uid="))
+    ?.split(";")[0];
+  if (!cookie) throw new Error("no clawd_uid cookie");
+  console.log(`  session ${sessionId}\n`);
+
+  // The scenario's prompt. `date >> …` rather than a test suite: it must be observable in the
+  // FILESYSTEM how many times it ran, which is the only way to prove "did not run twice"
+  // independently of what the record claims about itself.
+  const marker = "crash_marker.txt";
+  const prompt =
+    `Do exactly this, using your tools, with no commentary: create three files a.txt, b.txt and ` +
+    `c.txt each containing one line of text; delete b.txt; then run the shell command ` +
+    `\`sleep 12 && date >> ${marker}\` and report what it printed.`;
+
+  const started = await api(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt, provider: PROVIDER, ...(MODEL ? { model: MODEL } : {}) },
+  });
+  check(started.status === 202, "run accepted", `${started.status} ${JSON.stringify(started.json)}`);
+  if (started.status !== 202) return;
+  const runId = String(started.json.id);
+
+  // Wait for a Bash tool_started. The `sleep 12` is what makes the window wide enough to hit
+  // reliably; without it the kill lands after the command has already completed and the test
+  // silently verifies nothing.
+  let bashStart = null;
+  for (let i = 0; i < 180 && !bashStart; i += 1) {
+    bashStart = (await events(sessionId, cookie)).find(
+      (e) =>
+        e.type === "tool_started" &&
+        /bash/i.test(String(e.payload?.name)) &&
+        // The SLEEPING call specifically. Matching any bash call caught `rm b.txt`, which had
+        // already completed by the time the kill landed — so the run was killed between turns and
+        // the interesting case went untested while every assertion passed.
+        String(e.payload?.input_summary ?? "").includes("sleep"),
+    );
+    if (!bashStart) await sleep(1000);
+  }
+  check(Boolean(bashStart), "the SLEEPING bash call started, so the kill lands mid-execution");
+  if (!bashStart) return;
+  console.log(`       ${bashStart.payload.name}: ${bashStart.payload.input_summary}\n`);
+
+  const pid = Number(readFileSync(join(STATE, "harness.pid"), "utf8").trim());
+  check(Number.isInteger(pid) && pid > 0, "found the harness pid", String(pid));
+  // SIGKILL, not `bin/harness stop`: a clean stop releases the lock and settles the run, which is
+  // the opposite of the case under test.
+  process.kill(pid, "SIGKILL");
+  console.log(`       SIGKILL ${pid} while bash was running\n`);
+  await sleep(1000);
+  let alive = true;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    alive = false;
+  }
+  check(!alive, "harness is dead");
+
+  console.log(`       waiting out the ${LOCK_STALE_AFTER_MS / 1000}s lock staleness window`);
+  await sleep(LOCK_STALE_AFTER_MS + 2_000);
+  harness("start");
+  for (let i = 0; i < 30; i += 1) {
+    try {
+      if (harness("status").includes("OK")) break;
+    } catch {
+      /* not up yet */
+    }
+    await sleep(1000);
+  }
+  check(harness("status").includes("OK"), "harness restarted", harness("status").trim());
+
+  // The run must REACH a terminal state. Either recovery settles it or Rails' staleness sweep
+  // marks it failed — the criterion is that it does not sit "running" forever.
+  const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+  let terminal = null;
+  for (let i = 0; i < 90 && !terminal; i += 1) {
+    terminal = (await events(sessionId, cookie)).find((e) => TERMINAL.includes(e.type));
+    if (!terminal) await sleep(1000);
+  }
+  check(Boolean(terminal), "the run reached a terminal state", terminal?.type ?? "still running");
+
+  // ── the record's own invariants  ────────────────────────────────────────────────
+  // `tool_refused` counts as a settlement — the gate declined the call, which is an ANSWER. Leaving
+  // it out of this list reported a real refusal as an unsettled call, and the first version of this
+  // script did exactly that.
+  const pairs = query(
+    sessionId,
+    `select json_extract(payload,'$.tool_use_id'), type from entries
+       where type in ('tool_started','tool_finished','tool_failed','tool_refused')
+       order by store_seq;`,
+  );
+  const byId = new Map();
+  for (const row of pairs.split("\n").filter(Boolean)) {
+    const [id, type] = row.split("|");
+    const seen = byId.get(id) ?? { started: 0, settled: 0 };
+    if (type === "tool_started") seen.started += 1;
+    else seen.settled += 1;
+    byId.set(id, seen);
+  }
+  check(byId.size > 0, "the record has tool calls to check", `${byId.size} tool_use_ids`);
+  const unsettled = [...byId.entries()].filter(([, v]) => v.settled !== 1);
+  check(
+    unsettled.length === 0,
+    "every tool_started has exactly one finished/failed/refused",
+    unsettled.map(([id, v]) => `${id}: ${v.started}/${v.settled}`).join(", "),
+  );
+
+  // uncertainty is STATED, not guessed.
+  //
+  // In the FEED, not the store: `recovery_applied` is emitted and never logged, so a
+  // `select … from entries where type='recovery_applied'` returns nothing on a healthy recovery and
+  // reads as a failure. It is also why the event carries NO `store_seq` — borrowing the high-water
+  // mark made a healthy recovered session report `diverged: true`.
+  const recovered = (await events(sessionId, cookie)).filter((e) => e.type === "recovery_applied");
+  check(recovered.length > 0, "recovery_applied reached the room");
+  for (const event of recovered) {
+    const p = event.payload ?? {};
+    check(
+      typeof p.uncertain === "boolean" && typeof p.from_phase === "string",
+      `states its phase and uncertainty (${p.from_phase} → ${p.action}, uncertain=${p.uncertain})`,
+    );
+    check(
+      event.store_seq === undefined || event.store_seq === null,
+      "carries no store position, because the record holds no entry for it",
+      `store_seq=${event.store_seq}`,
+    );
+  }
+
+  // A healthy recovery must not look like a divergence to the audit an operator would run next.
+  const audit = await api(`/api/sessions/${sessionId}/projection/check`, { cookie });
+  console.log(`       ${JSON.stringify(audit.json)}\n`);
+  check(audit.json?.diverged === false, "the projection still matches the record", String(audit.json?.reason));
+
+  // ── the part that costs money to get wrong ──────────────────────────────────────────────
+  // The command APPENDED a line per execution, so the filesystem is the independent witness:
+  // if recovery re-ran it, there are two. The record agreeing with itself would not prove this.
+  const worktree = join(REPO, ".clawdparty/worktrees", `session-${sessionId}`);
+  const markerPath = join(worktree, marker);
+  if (existsSync(markerPath)) {
+    const lines = readFileSync(markerPath, "utf8").split("\n").filter(Boolean);
+    check(lines.length <= 1, "the bash command did not run twice", `${lines.length} line(s)`);
+  } else {
+    // Expected when the kill landed before the command's side effect: the point is that it did not
+    // run TWICE, and never-completed is the safe side of that.
+    check(true, "no marker file — the killed command never completed its effect");
+  }
+
+  // The session must still be usable  — but "usable" is not "accepts a fresh run". A crash
+  // mid-run leaves the worktree dirty, and `Runs::Start` refuses a FRESH run on a dirty tree by
+  // design: starting one would fold half-finished edits from a dead run into a new changeset with
+  // no record of which run made what. `revise` is the path, and it keeps the dirty tree.
+  const fresh = await api(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt: "Reply with the single word: ok", provider: PROVIDER, ...(MODEL ? { model: MODEL } : {}) },
+  });
+  check(
+    fresh.status === 422 && /dirty/i.test(JSON.stringify(fresh.json)),
+    "a FRESH run is refused, with the dirty tree named",
+    `${fresh.status} ${JSON.stringify(fresh.json)}`,
+  );
+  // And the crashed run cannot be reviewed away either: `Runs::Reject` requires `awaiting_review`
+  // and a crashed run is `failed`. So revise is the ONLY way forward, which is worth asserting
+  // rather than assuming — without it the session would be stuck and  would be violated.
+  const reject = await api(`/api/sessions/${sessionId}/runs/${runId}/reject`, { method: "POST", cookie });
+  check(reject.status >= 400, "and the failed run is not rejectable", String(reject.status));
+
+  const next = await api(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: {
+      prompt: "Reply with the single word: ok",
+      provider: PROVIDER,
+      mode: "revise",
+      ...(MODEL ? { model: MODEL } : {}),
+    },
+  });
+  check(next.status === 202, "a REVISE run is accepted", `${next.status} ${JSON.stringify(next.json)}`);
+  if (next.status === 202) {
+    let settled = null;
+    for (let i = 0; i < 90 && !settled; i += 1) {
+      settled = (await events(sessionId, cookie)).find(
+        (e) => TERMINAL.includes(e.type) && String(e.ai_run_id) !== runId,
+      );
+      if (!settled) await sleep(1000);
+    }
+    check(settled?.type === "run_finished", "and that run completes", settled?.type ?? "never settled");
+  }
+
+  console.log(`\n${failures === 0 ? "all checks passed" : `${failures} FAILED`}\n`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+main().catch((error) => {
+  console.error(`\nverify aborted: ${error.message}\n`);
+  process.exitCode = 1;
+});

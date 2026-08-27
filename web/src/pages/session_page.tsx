@@ -4,15 +4,15 @@ import { ActivityFeed } from "../components/activity_feed";
 import { AppShell } from "../components/app_shell";
 import { ChangeDirectory } from "../components/change_directory";
 import { ChatPanel } from "../components/chat_panel";
-import { DiffView } from "../components/diff_view";
 import { InterruptButton } from "../components/interrupt_button";
 import { InvitePanel } from "../components/invite_panel";
 import { PromptComposer } from "../components/prompt_composer";
+import { ReviewPanel } from "../components/review_panel";
+import { SessionInfo } from "../components/session/session_info";
 import { SessionSidebar } from "../components/session/session_sidebar";
 import { TerminalTitlebar } from "../components/session/terminal_titlebar";
 import { useHydrateParticipant } from "../hooks/use_hydrate_participant";
 import { useSessionEvents } from "../hooks/use_session_events";
-import { selectAwaitingReviewRunId, useEventStore } from "../stores/event_store";
 
 // The full session workspace, styled to the dark-green 3-column design: left rail
 // (mock session list + real owner controls), center terminal (titlebar · live feed ·
@@ -23,7 +23,6 @@ export const SessionPage: FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
   const status = useSessionEvents(sessionId ?? "");
   useHydrateParticipant(sessionId ?? "");
-  const reviewRunId = useEventStore(selectAwaitingReviewRunId);
 
   if (!sessionId) {
     return <p data-testid="session-placeholder">No session</p>;
@@ -52,6 +51,7 @@ export const SessionPage: FC = () => {
     <AppShell
       sidebar={
         <SessionSidebar
+          sessionInfo={<SessionInfo sessionId={sessionId} />}
           ownerControls={
             <>
               <InvitePanel sessionId={sessionId} />
@@ -71,11 +71,7 @@ export const SessionPage: FC = () => {
         </>
       }
     >
-      {reviewRunId && (
-        <div className="cp-diff-in mb-4 rounded-[13px] border border-[#1d3652] bg-[#0c0e0c] p-[18px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.7)]">
-          <DiffView runId={reviewRunId} />
-        </div>
-      )}
+      <ReviewPanel sessionId={sessionId} />
       <ActivityFeed />
     </AppShell>
   );

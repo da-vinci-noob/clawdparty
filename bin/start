@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # bin/start — the single entry point for the clawdparty dev stack.
 #
-# Builds the images then brings the whole stack up. Build-before-up so a fresh
-# machine (no images yet) does not fail the `up` step on a missing image.
+# The stack is now two things, not one: the containers (rails, jobs, postgres, vite)
+# AND the harness, which runs as a host process. This brings up both and reports the
+# health of each, naming whichever is down — a half-up stack that looks started is
+# how "Claude never responds" becomes a ten-minute mystery.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 if [[ ! -f ".env.local" ]]; then
-  echo "No .env.local found — run bin/setup first (generates SIDECAR_SHARED_SECRET)." >&2
+  echo "No .env.local found — run bin/setup first (generates HARNESS_SHARED_SECRET)." >&2
   exit 1
 fi
 
@@ -18,5 +20,54 @@ fi
 # env (via each service's `env_file: .env.local`). Without this, compose reads
 # only the default `.env` for substitution, so TARGET_REPO_PATH set in .env.local
 # is silently ignored for the mount.
-docker compose --env-file .env.local build
-exec docker compose --env-file .env.local up --remove-orphans
+compose() { docker compose --env-file .env.local "$@"; }
+
+echo "==> harness (host process)"
+# Started FIRST: Rails reconciles against the harness's GET /runs at boot ,
+# and an unreachable harness reconciles nothing, so bringing it up second would make
+# every boot skip reconciliation.
+bin/harness start
+
+echo
+echo "==> containers"
+compose build
+compose up -d --remove-orphans
+
+# --- Report both halves ----------------------------------------------------
+echo
+echo "==> health"
+
+harness_ok=true
+bin/harness status || harness_ok=false
+
+rails_ok=false
+for _ in $(seq 1 60); do
+  if curl -fsS --max-time 2 -o /dev/null "http://localhost:3000/up" 2>/dev/null; then
+    rails_ok=true
+    break
+  fi
+  sleep 1
+done
+if [[ "${rails_ok}" == true ]]; then
+  echo "rails:   OK  http://localhost:3000"
+else
+  echo "rails:   NOT ANSWERING on http://localhost:3000/up"
+fi
+
+# Report every container that is not running, by name, rather than a bare count.
+down="$(compose ps --format '{{.Service}} {{.State}}' 2>/dev/null | awk '$2 != "running" { print $1 }' | tr '\n' ' ')"
+if [[ -n "${down// /}" ]]; then
+  echo "compose: NOT RUNNING — ${down}"
+else
+  echo "compose: OK  $(compose ps --services | tr '\n' ' ')"
+fi
+
+echo
+if [[ "${harness_ok}" == true && "${rails_ok}" == true && -z "${down// /}" ]]; then
+  echo "Stack up. Open http://localhost:3000 (and share your LAN address with the room)."
+else
+  echo "Stack is PARTIALLY up — see the lines above." >&2
+  echo "  harness logs: bin/harness logs" >&2
+  echo "  container logs: docker compose --env-file .env.local logs -f" >&2
+  exit 1
+fi

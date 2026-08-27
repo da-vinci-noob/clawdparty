@@ -24,6 +24,18 @@
 #  fk_rails_...  (user_id => users.id)
 #
 class Participant < ApplicationRecord
+  # Removal is a REVOCATION: the row stays as the referent for the history it is attached to
+  # — `events.actor_participant_id` has a foreign key, so a hard delete is refused by the database —
+  # and `removed_at` is what withdraws access.
+  #
+  # `active` is the scope every participantship check must use. A check that forgets it grants a
+  # removed participant everything they had, which is the whole failure this guards.
+  scope :active, -> { where(removed_at: nil) }
+
+  def removed?
+    removed_at.present?
+  end
+
   ROLES = %w[owner editor reviewer viewer].freeze
 
   belongs_to :session

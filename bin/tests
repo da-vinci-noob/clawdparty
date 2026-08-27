@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# bin/tests — run the whole CI gate locally, in one command.
+#
+# Mirrors the five GitHub Actions jobs (contracts · harness · web · api · guards)
+# with the SAME commands, so a green `bin/tests` means a green CI. Two faithfulness
+# details that are easy to miss:
+#   - Biome is pinned to @1.9.4, exactly as CI invokes it — a newer host Biome
+#     finds lint nits CI does not, which is green-on-laptop / red-in-CI in reverse.
+#   - the harness default `vitest run` does NOT include `test:crash` (a node
+#     script, not a vitest file) or `test:perf` (own config, excluded from the
+#     default so a contended percentile does not flake). CI runs both explicitly;
+#     so does this.
+#
+# ONE source of truth: CI calls `bin/tests <group>` after its own setup, so a
+# check added here reaches CI without editing five YAMLs. The api group differs by
+# EXECUTOR only — Docker locally (`bin/rspec`/`bin/rubocop`, because the gems live
+# in a named volume), native on CI's Ruby runner. Set CLAWD_TESTS_NATIVE_API=1 for
+# the native path; the commands are otherwise identical.
+#
+# Each step STREAMS live so you see its progress (test counts, rspec dots), with
+# this project's every-run warning noise filtered out. `VERBOSE=1 bin/tests …`
+# keeps the noise too.
+#
+#   bin/tests                 # everything
+#   bin/tests harness web     # only the named groups (contracts harness web api guards)
+#   bin/tests --list          # show the group names and exit
+set -uo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# NOTE: not GROUPS — that is a reserved bash builtin (the caller's OS group ids),
+# and assigning to it silently loses.
+SUITES=(contracts harness web api guards)
+
+if [[ "${1:-}" == "--list" ]]; then
+  printf '%s\n' "${SUITES[@]}"
+  exit 0
+fi
+
+selected=("${SUITES[@]}")
+if [[ $# -gt 0 ]]; then
+  selected=("$@")
+  for g in "${selected[@]}"; do
+    if [[ ! " ${SUITES[*]} " == *" ${g} "* ]]; then
+      echo "unknown group: ${g} (known: ${SUITES[*]})" >&2
+      exit 2
+    fi
+  done
+fi
+
+BIOME="npx @biomejs/biome@1.9.4"
+declare -a results
+failures=0
+
+# Noise that is not a defect and drowns real progress. `grep --line-buffered`
+# streams each line as it arrives, so vitest's per-file `✓` and rspec's dots stay
+# LIVE — the filter only drops the matching lines, it does not batch the output.
+# Two patterns:
+#   - Node's experimental-localStorage warning + its trace-warnings hint. It fires
+#     once per vitest WORKER (a global we never use); NODE_OPTIONS/execArgv/setup
+#     hooks all failed to reach every worker, and this reliably does.
+#   - pino's per-request JSON from harness server tests — also silenced at the
+#     source (logger off under NODE_ENV=test); matched here too as a backstop.
+# pino "level":NN lines are matched structurally. VERBOSE=1 keeps everything.
+NOISE='ExperimentalWarning: localStorage|node --trace-warnings|^\s*\{"level":[0-9]+,"time":'
+
+# run "<label>" <command...> — STREAMS the step LIVE so vitest's file-by-file
+# progress and rspec's dots are visible as they happen, with NOISE filtered unless
+# VERBOSE=1. Records the outcome and never aborts; failures are listed at the end.
+# Exit code is the command's own (PIPESTATUS[0]), never grep's.
+run() {
+  local label="$1"; shift
+  printf '\n\033[1m▶ %s\033[0m\n' "${label}"
+  local rc
+  if [[ "${VERBOSE:-0}" == "1" ]]; then
+    "$@"
+    rc=$?
+  else
+    "$@" 2>&1 | grep --line-buffered -vE "${NOISE}"
+    rc=${PIPESTATUS[0]}
+  fi
+  if [[ ${rc} -eq 0 ]]; then
+    printf '  \033[32m✓ %s\033[0m\n' "${label}"
+    results+=("PASS	${label}")
+  else
+    printf '  \033[31m✗ %s\033[0m\n' "${label}"
+    results+=("FAIL	${label}")
+    failures=$((failures + 1))
+  fi
+}
+
+# `--silent` intercepts IN-TEST console output (a passing test's console.error, e.g.
+# React's cross-test "not wrapped in act(...)" warning) while keeping vitest's own
+# per-file progress, summary, and failure diffs — those do not go through console.
+# It does NOT touch process-level noise: Node's localStorage warning (grep filter
+# above) and pino's fd writes (silenced in the harness under NODE_ENV=test) each
+# need their own fix. VERBOSE drops it so everything shows.
+VITEST_FLAGS=""
+[[ "${VERBOSE:-0}" == "1" ]] || VITEST_FLAGS="--silent"
+
+# A host npm workspace: Biome (pinned) + tsc + Vitest. One subshell per step so a
+# `cd` cannot leak into the next group.
+node_group() {
+  local dir="$1"
+  run "${dir}: biome"  bash -c "cd '${dir}' && ${BIOME} check ."
+  run "${dir}: tsc"    bash -c "cd '${dir}' && npx tsc --noEmit"
+  run "${dir}: vitest" bash -c "cd '${dir}' && npx vitest run ${VITEST_FLAGS}"
+}
+
+wants() { [[ " ${selected[*]} " == *" $1 "* ]]; }
+
+if wants contracts; then
+  node_group packages/contracts
+fi
+
+if wants harness; then
+  node_group harness
+  # The two gates the default vitest run does not cover (see header).
+  run "harness: test:crash" bash -c "cd harness && npm run test:crash"
+  run "harness: test:perf"  bash -c "cd harness && npm run test:perf"
+fi
+
+if wants web; then
+  node_group web
+fi
+
+if wants api; then
+  if [[ "${CLAWD_TESTS_NATIVE_API:-0}" == "1" ]]; then
+    # CI: native Ruby, gems installed, database prepared by the workflow already.
+    run "api: rubocop" bash -c "cd api && bundle exec rubocop"
+    run "api: rspec"   bash -c "cd api && bundle exec rspec"
+  else
+    # Local: gems live in a named volume, so these wrappers drive the Docker stack
+    # and bring postgres up themselves.
+    run "api: rubocop" bin/rubocop
+    run "api: rspec"   bin/rspec
+  fi
+fi
+
+if wants guards; then
+  run "guards: check-docs" bin/check-docs
+  run "guards: check-room" bin/check-room
+fi
+
+# ── summary ─── the per-step lines above are the recap on success; here, name only
+# what failed, so a red run points straight at the group to fix.
+if (( failures > 0 )); then
+  printf '\n\033[31m── %d of %d checks failed ──\033[0m\n' "${failures}" "${#results[@]}"
+  for r in "${results[@]}"; do
+    [[ "${r%%	*}" == FAIL ]] && printf '  \033[31m✗\033[0m %s\n' "${r#*	}"
+  done
+  exit 1
+fi
+printf '\n\033[32mall %d checks passed.\033[0m\n' "${#results[@]}"

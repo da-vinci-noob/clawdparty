@@ -1,0 +1,66 @@
+;; macOS sandbox profile for model-directed `bash` — DEFENSE IN DEPTH, NOT THE BOUNDARY.
+;;
+;; OFF BY DEFAULT. Enable with HARNESS_BASH_SANDBOX=1.
+;;
+;; READ THIS BEFORE RELYING ON IT: the containment boundary in clawdparty is the
+;; `tool:before` extension point — the tool-gating extension points are the primary
+;; containment mechanism. This profile is a second, weaker layer under
+;; that gate. It is a DENY-LIST, so anything not named here is permitted, and
+;; `sandbox-exec` is formally deprecated by Apple — present and working on macOS 26,
+;; but not a thing to build a security argument on. If a command must not run, refuse
+;; it at the gate; do not rely on the sandbox to contain it.
+;;
+;; Why a deny-list rather than an allow-list: an allow-list that is actually safe also
+;; breaks `npm install`, cargo, bundler, test runners and `git push`, so it would be
+;; switched off and provide nothing. These rules were chosen to cost a normal
+;; development workflow nothing while removing the outcomes that are never legitimate
+;; for a coding agent: tampering with credentials, rewriting its own record, and
+;; installing persistence.
+;;
+;; Parameters are supplied by harness/src/tools/sandbox.ts via `-D`.
+
+(version 1)
+(allow default)
+
+;; --- Credential material: READABLE, NEVER WRITABLE ------------------------------
+;; Read stays allowed on purpose. ssh must read the private key to authenticate a
+;; push , and credential DISCOVERY reads these paths by design
+;;. What is never legitimate is an agent MODIFYING them — planting a key,
+;; rewriting a config to redirect a push, or swapping a credential file.
+(deny file-write*
+  (subpath (string-append (param "HOME") "/.ssh"))
+  (subpath (string-append (param "HOME") "/.aws"))
+  (subpath (string-append (param "HOME") "/.claude"))
+  (subpath (string-append (param "HOME") "/.codex"))
+  (subpath (string-append (param "HOME") "/.gnupg"))
+  (subpath (string-append (param "HOME") "/.config/gh"))
+  (subpath (string-append (param "HOME") "/.config/op"))
+  (literal (string-append (param "HOME") "/.claude.json"))
+  (literal (string-append (param "HOME") "/.netrc")))
+
+;; --- The harness's own record ---------------------------------------------------
+;; The store is the authority the whole recovery design rests on, and a run editing
+;; its own transcript would make the record describe something that did not happen.
+;; Nothing legitimate in a repo writes here.
+(deny file-write* (subpath (param "STORE_DIR")))
+
+;; --- Commit identity -------------------------------------------------------------
+;;  records WHO approved a change. An agent rewriting git identity would make
+;; that attribution a lie.
+(deny file-write*
+  (literal (string-append (param "HOME") "/.gitconfig"))
+  (subpath (string-append (param "HOME") "/.config/git")))
+
+;; --- Persistence -----------------------------------------------------------------
+;; A shell rc file or a LaunchAgent survives the session, the run, and the harness.
+;; A change confined to the worktree is reviewable; one of these is not — it would
+;; keep running after a reject reverted everything the reviewer saw.
+(deny file-write*
+  (subpath (string-append (param "HOME") "/Library/LaunchAgents"))
+  (subpath (string-append (param "HOME") "/.config/systemd"))
+  (literal (string-append (param "HOME") "/.zshrc"))
+  (literal (string-append (param "HOME") "/.zshenv"))
+  (literal (string-append (param "HOME") "/.zprofile"))
+  (literal (string-append (param "HOME") "/.bashrc"))
+  (literal (string-append (param "HOME") "/.bash_profile"))
+  (literal (string-append (param "HOME") "/.profile")))

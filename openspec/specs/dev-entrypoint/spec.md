@@ -19,21 +19,21 @@ TBD - created by archiving change dev-docker-compose. Update Purpose after archi
 
 ### Requirement: bin/setup generates the shared secret and prepares the env
 
-`bin/setup` SHALL generate a random `SIDECAR_SHARED_SECRET` — the bearer secret shared between Rails and the sidecar — and write it into the local env file the stack reads (`.env.local`; a committed `.env.example` documents the slots). `bin/setup` SHALL be idempotent: it SHALL generate the secret only if one is not already present and SHALL NOT overwrite an existing `SIDECAR_SHARED_SECRET`. `bin/setup` SHALL NOT attempt to create databases directly, because it runs on the host before any container exists. The local env file holding the generated secret (`.env.local`) SHALL be git-ignored AND listed in `.dockerignore`, so the secret never enters version control or an image layer (e.g. a `COPY . .` cannot bake it into an image).
+`bin/setup` SHALL generate a random `HARNESS_SHARED_SECRET` — the bearer secret shared between Rails and the harness — and write it into the local env file the stack reads (`.env.local`; a committed `.env.example` documents the slots). `bin/setup` SHALL be idempotent: it SHALL generate the secret only if one is not already present and SHALL NOT overwrite an existing `HARNESS_SHARED_SECRET`. `bin/setup` SHALL NOT attempt to create databases directly, because it runs on the host before any container exists. The local env file holding the generated secret (`.env.local`) SHALL be git-ignored AND listed in `.dockerignore`, so the secret never enters version control or an image layer (e.g. a `COPY . .` cannot bake it into an image).
 
 #### Scenario: First setup generates a secret
 
-- **WHEN** a developer runs `bin/setup` and no `SIDECAR_SHARED_SECRET` exists yet
-- **THEN** a random `SIDECAR_SHARED_SECRET` is generated and written to the env file
+- **WHEN** a developer runs `bin/setup` and no `HARNESS_SHARED_SECRET` exists yet
+- **THEN** a random `HARNESS_SHARED_SECRET` is generated and written to the env file
 
 #### Scenario: Re-running setup does not clobber the secret
 
-- **WHEN** a developer runs `bin/setup` again and a `SIDECAR_SHARED_SECRET` already exists
+- **WHEN** a developer runs `bin/setup` again and a `HARNESS_SHARED_SECRET` already exists
 - **THEN** the existing secret is preserved and not regenerated
 
 #### Scenario: The generated secret never enters VCS or an image layer
 
-- **WHEN** bin/setup writes SIDECAR_SHARED_SECRET to its env file
+- **WHEN** bin/setup writes HARNESS_SHARED_SECRET to its env file
 - **THEN** that env file is git-ignored and listed in .dockerignore so no COPY bakes it into an image
 
 #### Scenario: Database creation is not bin/setup's job
@@ -41,19 +41,19 @@ TBD - created by archiving change dev-docker-compose. Update Purpose after archi
 - **WHEN** `bin/setup` runs on the host
 - **THEN** it does not create databases directly, leaving DB creation to the rails container entrypoint
 
-### Requirement: Both rails and sidecar receive SIDECAR_SHARED_SECRET from the same .env.local
+### Requirement: Both rails and harness receive HARNESS_SHARED_SECRET from the same .env.local
 
-`bin/setup` writes `SIDECAR_SHARED_SECRET` into `.env.local`, and the compose file SHALL load `.env.local` and SHALL inject `SIDECAR_SHARED_SECRET` into **both** the `rails` and `sidecar` service environments from that single source, so both sides hold the identical value (otherwise the `/internal/events` bearer authentication between sidecar and Rails fails). Because Docker Compose does NOT auto-load `.env.local` the way it auto-loads a root `.env`, `.env.local` SHALL be referenced explicitly — via `env_file: .env.local` on the `rails` and `sidecar` services, or an equivalent mechanism — rather than relying on implicit loading.
+`bin/setup` writes `HARNESS_SHARED_SECRET` into `.env.local`, and the compose file SHALL load `.env.local` and SHALL inject `HARNESS_SHARED_SECRET` into **both** the `rails` and `harness` service environments from that single source, so both sides hold the identical value (otherwise the `/internal/events` bearer authentication between harness and Rails fails). Because Docker Compose does NOT auto-load `.env.local` the way it auto-loads a root `.env`, `.env.local` SHALL be referenced explicitly — via `env_file: .env.local` on the `rails` and `harness` services, or an equivalent mechanism — rather than relying on implicit loading.
 
-#### Scenario: Both services see the same SIDECAR_SHARED_SECRET value
+#### Scenario: Both services see the same HARNESS_SHARED_SECRET value
 
-- **WHEN** the stack is up after `bin/setup` has written `SIDECAR_SHARED_SECRET` to `.env.local`
-- **THEN** both the `rails` and `sidecar` services receive that identical `SIDECAR_SHARED_SECRET` value from the single `.env.local` source, so the `/internal/events` bearer auth succeeds
+- **WHEN** the stack is up after `bin/setup` has written `HARNESS_SHARED_SECRET` to `.env.local`
+- **THEN** both the `rails` and `harness` services receive that identical `HARNESS_SHARED_SECRET` value from the single `.env.local` source, so the `/internal/events` bearer auth succeeds
 
 #### Scenario: .env.local is loaded explicitly, not implicitly
 
 - **WHEN** the compose file is inspected
-- **THEN** `.env.local` is referenced explicitly (e.g. via `env_file: .env.local` on the `rails` and `sidecar` services) because Compose does not auto-load `.env.local` the way it auto-loads a root `.env`
+- **THEN** `.env.local` is referenced explicitly (e.g. via `env_file: .env.local` on the `rails` and `harness` services) because Compose does not auto-load `.env.local` the way it auto-loads a root `.env`
 
 ### Requirement: bin/setup ensures the host credential directories exist
 
@@ -85,16 +85,16 @@ Database creation and migration SHALL happen in the `rails` service entrypoint, 
 
 ### Requirement: Per-service Dockerfiles pin the toolchain
 
-The `docker/` directory SHALL contain a Dockerfile per image: a Ruby **4.0.5** image used by `rails` and `jobs`, a Node **24** image for the `sidecar`, and a Node **24** image for the web/`vite` service. The `postgres` service SHALL use the official **PostgreSQL 18** image. Node SHALL be pinned to 24 even though the host runs Node 25, to avoid drift between the dev/CI runtime and the host.
+The `docker/` directory SHALL contain a Dockerfile per image: a Ruby **4.0.5** image used by `rails` and `jobs`, a Node **24** image for the `harness`, and a Node **24** image for the web/`vite` service. The `postgres` service SHALL use the official **PostgreSQL 18** image. Node SHALL be pinned to 24 even though the host runs Node 25, to avoid drift between the dev/CI runtime and the host.
 
 #### Scenario: Images pin the required toolchain versions
 
 - **WHEN** the images are built
-- **THEN** the Ruby image is Ruby 4.0.5, the sidecar and web images are Node 24, and postgres is PostgreSQL 18
+- **THEN** the Ruby image is Ruby 4.0.5, the harness and web images are Node 24, and postgres is PostgreSQL 18
 
 #### Scenario: Node pinned to 24 despite host Node 25
 
-- **WHEN** the sidecar/web images are built on a host running Node 25
+- **WHEN** the harness/web images are built on a host running Node 25
 - **THEN** the images still use Node 24 so the containerized runtime is deterministic
 
 ### Requirement: Entrypoints install dependencies and wait for postgres where relevant
@@ -108,7 +108,7 @@ Each service entrypoint SHALL install its dependencies against the named-volume 
 
 #### Scenario: Node entrypoints install node_modules
 
-- **WHEN** the `sidecar` or web/`vite` container starts
+- **WHEN** the `harness` or web/`vite` container starts
 - **THEN** its entrypoint installs `node_modules` into the named volume before starting the process
 
 ### Requirement: .dockerignore excludes VCS, deps, and build artifacts

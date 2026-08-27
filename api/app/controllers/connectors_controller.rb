@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
 # Session-scoped connector discovery for the run/prompt composer. Proxies the
-# sidecar's GET /connectors (which enumerates the MCP servers the host has
+# harness's GET /connectors (which enumerates the MCP servers the host has
 # configured for the session's repo) so the web picker only ever shows real,
 # host-owned servers — never client-defined ones, never their command/url/env.
 # Gated on participantship (nested under the session); a cross-session/non-
 # participant request is 404 (anti-enumeration). Mirrors ModelsController for
-# failure: an unreachable sidecar is 502, not a fabricated empty list.
+# failure: an unreachable harness is 502, not a fabricated empty list.
 class ConnectorsController < ApplicationController
-  include SidecarDiscovery
+  include HarnessDiscovery
 
   before_action :require_user
 
-  rescue_from Sidecar::Client::TransportError do
-    render(json: { errors: [{ message: 'The Claude sidecar is unavailable; try again' }] }, status: :bad_gateway)
+  rescue_from Harness::Client::TransportError do
+    render(json: { errors: [{ message: 'The harness is unavailable; try again' }] }, status: :bad_gateway)
   end
 
   # GET /api/sessions/:session_id/connectors

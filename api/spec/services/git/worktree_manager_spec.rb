@@ -80,6 +80,78 @@ RSpec.describe(Git::WorktreeManager) do
     expect(show).to(include('approved.rb'))
   end
 
+  describe 'commit attribution' do
+    it 'attributes the commit to the approving participant' do
+      participant = create(:participant, session: session, role: 'reviewer')
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'approved.rb'), "kept = true\n")
+
+      manager.commit!('approve changeset', author: participant)
+
+      author, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%an|%ae|%cn|%ce')
+      name, email, committer_name, committer_email = author.strip.split('|')
+      expect(name).to(eq(participant.user.name))
+      # Author AND committer: a reader should not need git's author/committer
+      # distinction to answer "who approved this".
+      expect(committer_name).to(eq(participant.user.name))
+      expect(email).to(eq("participant-#{participant.id}@clawdparty.local"))
+      expect(committer_email).to(eq(email))
+    end
+
+    it 'derives the address from the participant ID, not the name' do
+      # Names are neither unique nor guaranteed valid in an address; the id maps the
+      # commit back to exactly one participant row.
+      user = create(:user, name: 'Ada Lovelace <not an email>')
+      participant = create(:participant, session: session, user: user, role: 'reviewer')
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      manager.commit!('approve', author: participant)
+
+      email, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%ae')
+      expect(email.strip).to(eq("participant-#{participant.id}@clawdparty.local"))
+    end
+
+    it 'falls back to the generic identity rather than failing when the approver is unknown' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      # Failing here would strand an APPROVED changeset in a dirty worktree, blocking
+      # the next run — worse than an unattributed commit.
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+      name, = Open3.capture3('git', '-C', path, 'log', '-1', '--format=%an')
+      expect(name.strip).to(eq('clawdparty'))
+    end
+
+    it 'commits even when the repo has commit signing enabled' do
+      # Found by accident: a `git commit` run from a harness bash command failed with
+      # "1Password: failed to fill whole buffer" because the host had
+      # commit.gpgsign=true. If that setting reaches the approve path, approve dies on a
+      # credential the container does not have and STRANDS an approved changeset in a
+      # dirty worktree, blocking the next run. Same reasoning as --no-verify: this is
+      # clawdparty's internal bookkeeping commit on an isolated session branch.
+      path = manager.ensure_worktree!
+      Open3.capture3('git', '-C', path, 'config', 'commit.gpgsign', 'true')
+      Open3.capture3('git', '-C', path, 'config', 'user.signingkey', 'DOES-NOT-EXIST')
+      Open3.capture3('git', '-C', path, 'config', 'gpg.format', 'ssh')
+      File.write(File.join(path, 'a.rb'), "1\n")
+
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+      expect(manager.dirty?).to(be(false))
+    end
+
+    it 'does not read the host git config for identity' do
+      # Passed with `-c` so a host with no user.name configured still commits. Without
+      # it, approve fails with "Please tell me who you are" on a fresh machine.
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'a.rb'), "1\n")
+      Open3.capture3('git', '-C', path, 'config', '--unset', 'user.name')
+      Open3.capture3('git', '-C', path, 'config', '--unset', 'user.email')
+
+      expect { manager.commit!('approve', author: nil) }.not_to(raise_error)
+    end
+  end
+
   it 'commit! is a no-op on a clean worktree (returns HEAD)' do
     manager.ensure_worktree!
     expect { manager.commit!('nothing') }.not_to(raise_error)
@@ -142,6 +214,136 @@ RSpec.describe(Git::WorktreeManager) do
       session.update!(repository_path: plain)
       mgr = described_class.new(session, repo_root: @mount)
       expect { mgr.ensure_worktree! }.to(raise_error(described_class::GitError))
+    end
+  end
+
+  # Nothing removed a worktree when a session ended, so the mount root accumulated
+  # checkouts indistinguishable from live ones. A live example prompted this: an orphan dated
+  # 2026-07-22 for a session that no longer existed, holding real edits to two files.
+  describe '#remove_worktree!' do
+    it 'removes a clean worktree and its git metadata' do
+      path = manager.ensure_worktree!
+
+      expect(manager.remove_worktree!).to(eq(:removed))
+      expect(Dir.exist?(path)).to(be(false))
+      # `git worktree remove` deregisters it too; a leftover registration makes `git worktree
+      # list` report a path that is gone.
+      out, = Open3.capture3('git', '-C', @repo, 'worktree', 'list')
+      expect(out).not_to(include(path))
+    end
+
+    it 'KEEPS a dirty worktree rather than destroying unreviewed work' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'README.md'), "edited but never reviewed\n")
+
+      # An unreviewed changeset lives ONLY here. This is the whole reason removal is not
+      # unconditional — and it is not hypothetical: the orphan that prompted this was dirty.
+      expect(manager.remove_worktree!).to(eq(:kept_dirty))
+      expect(Dir.exist?(path)).to(be(true))
+      expect(File.read(File.join(path, 'README.md'))).to(include('never reviewed'))
+    end
+
+    it 'removes a dirty worktree when force is asked for explicitly' do
+      path = manager.ensure_worktree!
+      File.write(File.join(path, 'README.md'), "edited\n")
+
+      expect(manager.remove_worktree!(force: true)).to(eq(:removed))
+      expect(Dir.exist?(path)).to(be(false))
+    end
+
+    it 'reports :absent when there is nothing to remove' do
+      # Archiving a session that never ran must not look like a failure.
+      expect(manager.remove_worktree!).to(eq(:absent))
+    end
+
+    it 'is idempotent — removing twice is :absent, not an error' do
+      manager.ensure_worktree!
+      manager.remove_worktree!
+
+      expect(manager.remove_worktree!).to(eq(:absent))
+    end
+
+    it 'leaves the session BRANCH behind' do
+      manager.ensure_worktree!
+      manager.remove_worktree!
+
+      # The branch is the only record of an approved changeset. `git worktree remove` does not
+      # touch it, and nothing here should either.
+      out, = Open3.capture3('git', '-C', @repo, 'branch', '--list', manager.branch_name)
+      expect(out).to(include(manager.branch_name))
+    end
+
+    it 'reports :failed rather than raising when git refuses' do
+      path = manager.ensure_worktree!
+      # A REAL failure rather than a stub on the object under test: delete the repo-side
+      # registration and git no longer recognises the directory as a worktree, so `worktree remove`
+      # refuses. This is also the shape a genuine orphan takes once its originating repo has moved.
+      FileUtils.rm_rf(File.join(@repo, '.git', 'worktrees', File.basename(path)))
+
+      # A session must be archivable whether or not its worktree is tidy.
+      expect(manager.remove_worktree!(force: true)).to(eq(:failed))
+    end
+  end
+
+  # Per-lane paths and branches.
+  describe 'lanes' do
+    it 'keeps the main lane on its existing path and branch' do
+      # Load-bearing for every session that existed before lanes: a suffix here would orphan the
+      # worktree already on disk and abandon the branch holding its approved changesets.
+      mgr = described_class.new(session, repo_root: @repo, lane: 'main')
+
+      expect(mgr.worktree_path).to(end_with("session-#{session.id}"))
+      expect(mgr.branch_name).to(eq("clawd/session-#{session.id}"))
+    end
+
+    it 'defaults to the main lane when none is given' do
+      expect(described_class.new(session, repo_root: @repo).branch_name)
+        .to(eq(described_class.new(session, repo_root: @repo, lane: 'main').branch_name))
+    end
+
+    it 'suffixes another lane with a HYPHEN, never a slash' do
+      # A slash makes the ref a directory, and git refuses to have both:
+      #   fatal: cannot lock ref 'refs/heads/clawd/session-7':
+      #          'refs/heads/clawd/session-7/review' exists
+      # Since `main` stays un-suffixed for backwards compatibility, the slash is ruled out — and
+      # this only shows up the first time a SECOND lane is opened.
+      mgr = described_class.new(session, repo_root: @repo, lane: 'review')
+
+      expect(mgr.branch_name).to(eq("clawd/session-#{session.id}-review"))
+      expect(mgr.branch_name).not_to(include("#{session.id}/"))
+    end
+
+    it 'actually creates two coexisting worktrees, which is what the slash prevented' do
+      main = described_class.new(session, repo_root: @repo, lane: 'main')
+      review = described_class.new(session, repo_root: @repo, lane: 'review')
+
+      main.ensure_worktree!
+      expect { review.ensure_worktree! }.not_to(raise_error)
+      expect(Dir.exist?(main.worktree_path)).to(be(true))
+      expect(Dir.exist?(review.worktree_path)).to(be(true))
+      expect(main.worktree_path).not_to(eq(review.worktree_path))
+    end
+
+    it 'refuses a lane name that would escape the worktree root' do
+      # `lane` reaches a filesystem path AND a ref name, and it originates from a client request.
+      ['../evil', 'a/b', '-flag', 'UPPER', 'with space', 'trail-', 'with.lock', 'x' * 33].each do |lane|
+        expect { described_class.new(session, repo_root: @repo, lane: lane) }
+          .to(raise_error(described_class::InvalidLane), "accepted #{lane.inspect}")
+      end
+    end
+
+    it 'accepts the ordinary lane shapes' do
+      %w[main review lane-2 a].each do |lane|
+        expect { described_class.new(session, repo_root: @repo, lane: lane) }.not_to(raise_error)
+      end
+    end
+
+    it 'treats a BLANK lane as unspecified, not as an invalid name' do
+      # `nil`/`""` mean "the caller named no lane", which is the default rather than an error — and
+      # it cannot escape anything, since it normalises before it reaches a path.
+      ['', nil].each do |blank|
+        expect(described_class.new(session, repo_root: @repo, lane: blank).lane).to(eq('main'))
+      end
     end
   end
 end

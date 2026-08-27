@@ -2,7 +2,7 @@
 
 module Runs
   # Drives ai_run state transitions from ingested run-lifecycle events (not by
-  # polling). Rails — not the sidecar — owns every transition; the sidecar only
+  # polling). Rails — not the harness — owns every transition; the harness only
   # emits the events. Invoked from the Events::Ingest path after a durable
   # run-lifecycle event persists.
   #
@@ -30,6 +30,15 @@ module Runs
       run = @event.ai_run
       return unless run
 
+      # Before the transition: a terminal event carries what the run SPENT, and the columns
+      # exist to hold it. Recording it first means a failed transition cannot lose the figures.
+      record_consumption(run)
+      apply_transition(run)
+    end
+
+    private
+
+    def apply_transition(run)
       case @event.event_type
       when 'run_started'
         finalize_run_started(run)
@@ -44,17 +53,32 @@ module Runs
       end
     end
 
-    private
-
-    # Transition queued → running and capture the Claude session id the sidecar
-    # reports in run_started, so a later follow-up can resume that session. Both
-    # writes are combined into one update! (payload keys are strings).
-    def finalize_run_started(run)
+    # Copy the terminal event's usage and cost onto the run.
+    #
+    # ABSENT IS PRESERVED, never coerced. `nil` on either column means the provider reported
+    # nothing, which is a different statement from `0` — zero says the turn was free, and a
+    # request that was actually made never is. The harness applies the same rule to its own
+    # ledger (no row rather than zeros), so writing `0.0` here would make Rails contradict it.
+    #
+    # A `run_failed` still spent whatever its earlier turns spent, so failure records usage too.
+    # `run_started` and `changeset_ready` carry none and must not blank what a terminal event
+    # already wrote.
+    def record_consumption(run)
+      payload = @event.payload || {}
       attrs = {}
-      attrs[:status] = 'running' if run.status == 'queued'
-      sid = @event.payload['claude_session_id'].presence
-      attrs[:claude_session_id] = sid if sid && run.claude_session_id.blank?
-      run.update!(attrs) unless attrs.empty?
+      attrs[:usage] = payload['usage'] if payload['usage'].present?
+      cost = payload['total_cost_usd']
+      attrs[:total_cost_usd] = cost unless cost.nil?
+
+      run.update!(attrs) if attrs.any?
+    end
+
+    # Transition queued → running. It used to also capture a `claude_session_id` off the
+    # payload so a follow-up could resume that SDK session; resumption is now by harness
+    # session + lane (Runs::Start#resume_context?), so the field is gone from the payload
+    # and the column with it.
+    def finalize_run_started(run)
+      run.update!(status: 'running') if run.status == 'queued'
     end
 
     # Apply a derived terminal/review status. Entering awaiting_review is special:
@@ -77,10 +101,32 @@ module Runs
           type: 'changeset_ready',
           actor: { kind: 'system' },
           ai_run_id: run.id,
+          # A seq here is SAFE, unlike the harness-less paths: this run is terminal from the
+          # harness's side, and the terminal entry and terminal position marker are written in ONE
+          # `store.commit`, so recovery can never allocate another seq for it. The uniqueness is
+          # also doing real work — it is what stops two concurrent reviewers appending twice.
           seq: (run.events.maximum(:seq) || 0) + 1,
-          payload: {}
+          payload: changeset_stats(run)
         }
       ) { run.update!(status: 'awaiting_review') }
+    end
+
+    # The contract's `{files_changed, insertions, deletions}`, from the same numstat the diff
+    # endpoint serves — so the feed can size a changeset without fetching the whole patch.
+    #
+    # Zeros only if git became uninspectable between `dirty?` (which just returned true) and here;
+    # the alternative is raising mid-ingest, which the dirty check already declines to do.
+    def changeset_stats(run)
+      files = Git::Diff.new(run).call.files
+      {
+        files_changed: files.size,
+        insertions: files.sum { |f| f.insertions.to_i },
+        deletions: files.sum { |f| f.deletions.to_i }
+      }
+    rescue Git::Diff::GitError, Git::WorktreeManager::GitError
+      # BOTH: `Git::Diff` raises its own GitError, not the worktree manager's, and naming only the
+      # latter let a diff failure escape into the ingest transaction.
+      { files_changed: 0, insertions: 0, deletions: 0 }
     end
 
     # A `chat` run has no changeset to review → always completed_clean. A `review`
@@ -99,7 +145,7 @@ module Runs
     end
 
     def worktree_dirty?(run)
-      Git::WorktreeManager.new(run.session).dirty?
+      Git::WorktreeManager.new(run.session, lane: run.lane).dirty?
     rescue Git::WorktreeManager::GitError
       # If the worktree can't be inspected (e.g. not created in a test), treat as
       # clean so finalize is deterministic rather than raising mid-ingest.

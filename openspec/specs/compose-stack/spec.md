@@ -5,12 +5,12 @@ TBD - created by archiving change dev-docker-compose. Update Purpose after archi
 ## Requirements
 ### Requirement: Five services, one process per container
 
-`docker-compose.yml` SHALL define exactly five services — `rails`, `jobs`, `postgres`, `sidecar`, and `vite` — and each service SHALL run a single process. The `rails` service SHALL run Puma, the `jobs` service SHALL run the Solid Queue supervisor (`bin/jobs`), the `postgres` service SHALL run PostgreSQL, the `sidecar` service SHALL run the Node Fastify server, and the `vite` service SHALL run the Vite dev server. No single service SHALL run more than one of these processes.
+`docker-compose.yml` SHALL define exactly five services — `rails`, `jobs`, `postgres`, `harness`, and `vite` — and each service SHALL run a single process. The `rails` service SHALL run Puma, the `jobs` service SHALL run the Solid Queue supervisor (`bin/jobs`), the `postgres` service SHALL run PostgreSQL, the `harness` service SHALL run the Node Fastify server, and the `vite` service SHALL run the Vite dev server. No single service SHALL run more than one of these processes.
 
 #### Scenario: Each architecture process maps to its own service
 
 - **WHEN** the compose stack is brought up
-- **THEN** `rails`, `jobs`, `postgres`, `sidecar`, and `vite` each run as a separate service running exactly one process
+- **THEN** `rails`, `jobs`, `postgres`, `harness`, and `vite` each run as a separate service running exactly one process
 
 #### Scenario: No combined all-in-one container
 
@@ -83,7 +83,7 @@ The `rails` and `jobs` services SHALL receive the database connection coordinate
 
 ### Requirement: Source bind-mounted delegated; dependencies in named volumes
 
-Each service SHALL bind-mount its source tree into the container with the `:delegated` consistency option so host edits are reflected live. Installed dependencies SHALL live in **named volumes** rather than host bind mounts: gems in a `bundle` named volume, `node_modules` for the sidecar and the web/vite services in named volumes, and PostgreSQL data in its named volume. The compose file SHALL NOT bind-mount `node_modules` or the gem directory from the host.
+Each service SHALL bind-mount its source tree into the container with the `:delegated` consistency option so host edits are reflected live. Installed dependencies SHALL live in **named volumes** rather than host bind mounts: gems in a `bundle` named volume, `node_modules` for the harness and the web/vite services in named volumes, and PostgreSQL data in its named volume. The compose file SHALL NOT bind-mount `node_modules` or the gem directory from the host.
 
 #### Scenario: Host source edits are visible in the container
 
@@ -106,12 +106,12 @@ The `vite` service SHALL set the file-watch polling environment variable `VITE_U
 
 ### Requirement: Dev services select the development environment explicitly
 
-The dev services SHALL set an explicit environment selector so the documented dev-vs-production serving branch (owned by `rails-dev-serving`) has something to switch on. The `rails` and `jobs` services SHALL set `RAILS_ENV=development`, and the `sidecar` and `vite` node services SHALL set `NODE_ENV=development`. Without an explicit selector, the dev-vs-prod serving branch has no env var to choose between modes.
+The dev services SHALL set an explicit environment selector so the documented dev-vs-production serving branch (owned by `rails-dev-serving`) has something to switch on. The `rails` and `jobs` services SHALL set `RAILS_ENV=development`, and the `harness` and `vite` node services SHALL set `NODE_ENV=development`. Without an explicit selector, the dev-vs-prod serving branch has no env var to choose between modes.
 
 #### Scenario: Every service declares its environment
 
 - **WHEN** the compose file is inspected
-- **THEN** `rails` and `jobs` set `RAILS_ENV=development` and the `sidecar` and `vite` services set `NODE_ENV=development`, so the dev-vs-prod serving branch has an explicit selector
+- **THEN** `rails` and `jobs` set `RAILS_ENV=development` and the `harness` and `vite` services set `NODE_ENV=development`, so the dev-vs-prod serving branch has an explicit selector
 
 ### Requirement: Minimal one-process-per-service stack
 
@@ -120,5 +120,5 @@ The compose stack SHALL follow a one-container-per-process pattern (single entry
 #### Scenario: Only clawdparty's five services are present
 
 - **WHEN** the compose file is inspected
-- **THEN** it defines only `rails`, `jobs`, `postgres`, `sidecar`, and `vite` — no extra services
+- **THEN** it defines only `rails`, `jobs`, `postgres`, `harness`, and `vite` — no extra services
 

@@ -16,21 +16,33 @@ module Runs
     def initialize(run:, reviewed_by:, worktree: nil)
       @run = run
       @reviewed_by = reviewed_by
-      @worktree = worktree || Git::WorktreeManager.new(run.session)
+      # The RUN's lane, not the session's: approve commits into the tree that lane edited, and
+      # with per-lane worktrees the wrong one would commit a different lane's work.
+      @worktree = worktree || Git::WorktreeManager.new(run.session, lane: run.lane)
     end
 
     def call
       raise(NotReviewable) unless @run.status == 'awaiting_review'
 
-      @worktree.commit!("clawdparty: approved changeset for run #{@run.id}")
+      # the commit records WHO approved it. The event stream already names the
+      # approver, but a commit outlives this database — someone reading `git log` in
+      # six months must be able to see who accepted the change without it.
+      commit_sha = @worktree.commit!("clawdparty: approved changeset for run #{@run.id}",
+                                     author: @reviewed_by)
       Events::Append.call(
         session: @run.session,
         event: {
           type: 'changeset_approved',
           actor: { kind: 'user', id: @reviewed_by.id },
           ai_run_id: @run.id,
+          # A seq here is SAFE, unlike the harness-less paths: this run is terminal from the
+          # harness's side, and the terminal entry and terminal position marker are written in ONE
+          # `store.commit`, so recovery can never allocate another seq for it. The uniqueness is
+          # also doing real work — it is what stops two concurrent reviewers appending twice.
           seq: (@run.events.maximum(:seq) || 0) + 1,
-          payload: {}
+          # The contract's `commit_sha`, which `commit!` already returns. A branch pointer moves
+          # and the database may not outlive the repo, so the approval names its own commit.
+          payload: { commit_sha: commit_sha }
         }
       ) { @run.update!(status: 'approved', reviewed_by: @reviewed_by) }
       @run

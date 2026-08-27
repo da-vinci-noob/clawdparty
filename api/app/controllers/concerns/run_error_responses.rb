@@ -1,13 +1,16 @@
 # frozen_string_literal: true
 
-# Maps the run lifecycle's service/sidecar errors to their client HTTP responses.
+# Maps the run LIFECYCLE's service/harness errors to their client HTTP responses.
+# Provider/model resolution failures live in `ProviderErrorResponses` — a different subject.
 # Kept in a concern so RunsController stays focused on the run actions themselves;
-# each raise site lives in Runs::* / Sidecar::Client and lands here as one status.
+# each raise site lives in Runs::* / Harness::Client and lands here as one status.
 module RunErrorResponses
   extend ActiveSupport::Concern
 
+  LANE_RULE = 'A lane is 1-32 chars: lowercase letters, digits and internal hyphens.'
+
   included do
-    rescue_from Runs::Start::ActiveRunExists, Sidecar::Client::ActiveRunConflict do
+    rescue_from Runs::Start::ActiveRunExists, Harness::Client::ActiveRunConflict do
       render_error('A run is already active for this session', :conflict)
     end
     rescue_from Runs::Start::DirtyWorktree do
@@ -16,15 +19,24 @@ module RunErrorResponses
     rescue_from Runs::Start::SessionArchived do
       render_error('Session is archived; cannot start a run', :conflict)
     end
-    rescue_from Sidecar::Client::UnknownRun do
+    # A caller error, and one worth refusing loudly: `lane` reaches a filesystem path and a git
+    # branch name, and the controller had been forwarding `params[:lane]` unvalidated — so a lane
+    # of `../evil` would have resolved a worktree outside `.clawdparty/worktrees`.
+    rescue_from Git::WorktreeManager::InvalidLane do |error|
+      render_error("#{error.message}. #{LANE_RULE}", :unprocessable_content)
+    end
+    rescue_from Harness::Client::UnknownRun do
       render_not_found
     end
     rescue_from Runs::Approve::NotReviewable, Runs::Reject::NotReviewable do
       render_error('Run is not awaiting review', :conflict)
     end
-    rescue_from Sidecar::Client::TransportError do
-      render_error('The Claude sidecar is unavailable; try again', :bad_gateway)
+    rescue_from Harness::Client::TransportError do
+      render_error('The harness is unavailable; try again', :bad_gateway)
     end
+    # The message carries the provider's own remedy, so a Bedrock host with an expired SSO
+    # session is told to run `aws sso login` rather than shown "invalid model id" from a
+    # provider error two steps later.
     rescue_from Git::WorktreeManager::GitError do
       render_error('Could not prepare the session worktree — is the target repo a git repository? ' \
                    '(set TARGET_REPO_PATH to a repo with a commit)', :unprocessable_content)

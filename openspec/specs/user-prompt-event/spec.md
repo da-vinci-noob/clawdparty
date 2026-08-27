@@ -25,33 +25,33 @@ envelope `actor`, never in the payload.
   describes the addition
 - **AND** a consumer requiring `major === 1` and `minor >= 1` still passes its compatibility check
 
-### Requirement: The sidecar emits `user_prompt` run-scoped before each user message reaches the SDK
+### Requirement: The harness emits `user_prompt` run-scoped before each user message reaches the SDK
 
-The sidecar SHALL emit exactly one `user_prompt` event for each human message it pushes into the SDK
+The harness SHALL emit exactly one `user_prompt` event for each human message it pushes into the SDK
 streaming-input iterable — once for the initial prompt at run start and once per follow-up — and MUST emit it
 **before** pushing the corresponding message, so the prompt's `seq` precedes any output it triggers. Each
-emitted event MUST be run-scoped (`ai_run_id` = the run id, non-null per-run monotonic `seq` from the sidecar's
+emitted event MUST be run-scoped (`ai_run_id` = the run id, non-null per-run monotonic `seq` from the harness's
 sequence), carry `actor` `{ kind: "user", id: <requested_by> }`, type `"user_prompt"`, and payload
-`{ text: <message text> }`. The sidecar SHALL NOT assign these events a global `id` (Rails assigns `id` on
+`{ text: <message text> }`. The harness SHALL NOT assign these events a global `id` (Rails assigns `id` on
 ingest, as for every run-scoped durable event).
 
 #### Scenario: Initial prompt is emitted first on a fresh run
 
 - **WHEN** a run starts with prompt text `P`
-- **THEN** the sidecar emits a `user_prompt` event with payload `{ text: P }` and `seq` 1, attributed to the
+- **THEN** the harness emits a `user_prompt` event with payload `{ text: P }` and `seq` 1, attributed to the
   requesting participant
 - **AND** the `run_started` event (from the SDK init message) follows it with `seq` 2
 
 #### Scenario: Each follow-up emits its own `user_prompt`
 
 - **WHEN** a follow-up message `F` is sent to the active run
-- **THEN** the sidecar emits exactly one `user_prompt` event with payload `{ text: F }`, run-scoped with the
+- **THEN** the harness emits exactly one `user_prompt` event with payload `{ text: F }`, run-scoped with the
   next monotonic `seq`, attributed to the participant who sent it
 - **AND** that event is emitted before `F` is pushed into the SDK input iterable
 
 #### Scenario: It is durable, not ephemeral
 
-- **WHEN** the sidecar ships a `user_prompt` event to Rails
+- **WHEN** the harness ships a `user_prompt` event to Rails
 - **THEN** it travels on the durable (batched, retried) transport path, never the ephemeral fire-and-forget
   path, and carries a non-null `seq`
 

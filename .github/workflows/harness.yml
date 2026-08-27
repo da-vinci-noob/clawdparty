@@ -1,0 +1,36 @@
+name: harness
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "harness/**"
+      - "packages/**"
+      - ".github/workflows/harness.yml"
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin Node 24 even though the host runs Node 25, to avoid runtime drift.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The contracts package is a file: dependency; install resolves the symlink.
+      - name: Install
+        working-directory: harness
+        run: npm install --no-audit --no-fund
+
+      # ONE source of truth: `bin/tests harness` runs Biome + tsc + the full Vitest
+      # suite (which already covers the extensions / security / adapters /
+      # reconstruction / plugin-adversarial subtrees), PLUS the two gates the
+      # default run excludes — test:crash (a node script, enforces its own skip
+      # budget) and test:perf (own config, so a contended p99 cannot flake it).
+      # Adding a gate in bin/tests reaches CI here with no edit to this file.
+      - name: Checks (bin/tests harness)
+        run: bin/tests harness

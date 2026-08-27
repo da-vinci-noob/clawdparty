@@ -1,0 +1,504 @@
+{
+  "provenance": {
+    "model_id": "us.amazon.nova-lite-v1:0",
+    "region": "us-west-2",
+    "captured_at": "2026-08-16T17:47:07.835Z",
+    "scenario": "nova-tool-use",
+    "note": "Captured live via ConverseStreamCommand. Text content varies per capture; the event vocabulary and ordering are what tests assert."
+  },
+  "events": [
+    {
+      "messageStart": {
+        "role": "assistant"
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "<thinking"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ">"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "The"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " User"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " has"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " asked"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " to"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " read"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " contents"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " of"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " a"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " file"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " located"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " at"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " /"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "tmp"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "/"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "notes"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "."
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "txt"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "."
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " I"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " have"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " appropriate"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " tool"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " to"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " read"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " file"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " from"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " disk"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "."
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " I"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " will"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " use"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " `"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "read"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "_"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "file"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "`"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " tool"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " with"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " path"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " specified"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " by"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " the"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": " User"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ".</"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "thinking"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ">\n"
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockStart": {
+        "start": {
+          "toolUse": {
+            "toolUseId": "tooluse_dUj3Fx1utSmSUUQvXJV6Js",
+            "name": "read_file"
+          }
+        },
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "toolUse": {
+            "input": "{\"path\":\"/tmp/notes.txt\"}"
+          }
+        },
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "messageStop": {
+        "stopReason": "tool_use"
+      }
+    },
+    {
+      "metadata": {
+        "usage": {
+          "inputTokens": 414,
+          "outputTokens": 76,
+          "totalTokens": 490
+        },
+        "metrics": {
+          "latencyMs": 622
+        }
+      }
+    }
+  ]
+}

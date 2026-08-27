@@ -1,5 +1,5 @@
 // Fetches the MCP connectors the host has configured for a session's repo from
-// GET /api/sessions/:id/connectors (proxied from the sidecar, discovered at
+// GET /api/sessions/:id/connectors (proxied from the harness, discovered at
 // runtime by scanning the session's `.mcp.json` + host-wide `~/.claude`). Only
 // `name` + `transport` are ever exposed — never the server's command/url/headers.
 //

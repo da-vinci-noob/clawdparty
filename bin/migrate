@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# bin/migrate — run pending migrations and refresh what a migration invalidates:
+# schema.rb, the annotaterb schema comments on models/factories/specs, and the
+# test database. Args pass through to db:migrate, so VERSION= etc. still work:
+#   bin/migrate
+#   bin/migrate VERSION=20260101000008
+#
+# Exists because `bin/rails db:migrate` alone leaves two things stale that reviewers
+# then see as unrelated diff noise: the annotations (a separate binary), and the
+# TEST database (a separate connection — specs load schema.rb, so a forgotten
+# db:test:prepare surfaces as "column does not exist" in RSpec long after the
+# migration looked fine in development).
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+docker compose up -d postgres >/dev/null
+
+# One container for all three steps: annotaterb reads the just-migrated schema, so
+# splitting them across invocations would re-pay container startup for no reason.
+exec docker compose run --rm rails bash -lc '
+  set -euo pipefail
+  bundle check || bundle install
+  bin/rails db:migrate "$@"
+  bundle exec annotaterb models
+  RAILS_ENV=test bin/rails db:test:prepare
+' _ "$@"

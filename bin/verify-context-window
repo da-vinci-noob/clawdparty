@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+// S8 step 4 — the context indicator's denominator is the REAL per-provider budget, and a
+// mid-session model switch re-bases it with no client-side model lookup.
+//
+// The rest of S8 is about compaction and is UNREACHABLE on a host with no first-party Anthropic
+// credential: compaction here is server-side only, and `anthropic-bedrock` declares
+// `serverSideCompaction: false` (see `harness/src/context/compaction.ts`, which says so). This part
+// does not depend on compaction at all.
+//
+// Usage: bin/verify-context-window [base-url]
+
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const WebSocket = createRequire(`${ROOT}/web/package.json`)("ws");
+
+const BASE = process.argv[2] ?? "http://localhost:3000";
+const CABLE = `${BASE.replace(/^http/, "ws")}/~cable`;
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+function cookieFrom(response) {
+  const jar = (response.headers.getSetCookie?.() ?? []).find((c) => c.startsWith("clawd_uid="));
+  if (!jar) throw new Error("no clawd_uid cookie in response");
+  return jar.split(";")[0];
+}
+
+async function api(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${method} ${path} → ${response.status}: ${text.slice(0, 300)}`);
+  return text ? JSON.parse(text) : null;
+}
+
+function watch(sessionId, cookie) {
+  const identifier = JSON.stringify({ channel: "SessionChannel", session_id: String(sessionId) });
+  const socket = new WebSocket(CABLE, ["actioncable-v1-json"], {
+    headers: { Cookie: cookie, Origin: BASE },
+  });
+  const seen = [];
+  const waiters = [];
+  socket.on("message", (raw) => {
+    const frame = JSON.parse(raw.toString());
+    if (frame.type === "welcome") {
+      socket.send(JSON.stringify({ command: "subscribe", identifier }));
+      return;
+    }
+    if (!frame.message) return;
+    seen.push(frame.message);
+    for (const w of [...waiters]) {
+      if (w.match(frame.message)) {
+        waiters.splice(waiters.indexOf(w), 1);
+        w.done(frame.message);
+      }
+    }
+  });
+  return {
+    seen,
+    until(match, ms, what) {
+      const already = seen.find(match);
+      if (already) return Promise.resolve(already);
+      return new Promise((done, fail) => {
+        const timer = setTimeout(() => fail(new Error(`timed out (${ms}ms) waiting for ${what}`)), ms);
+        waiters.push({ match, done: (e) => (clearTimeout(timer), done(e)) });
+      });
+    },
+    close: () => socket.close(),
+  };
+}
+
+const TERMINAL = ["run_finished", "run_failed", "run_interrupted"];
+
+async function main() {
+  console.log(`\nS8.4 — the context denominator is the model's real budget, against ${BASE}\n`);
+
+  // Chat mode: no worktree, no git, and the context reading has nothing to do with a changeset.
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "S8.4 context window", name: "Owner", mode: "chat" }),
+  });
+  if (!created.ok) throw new Error(`session create → ${created.status}: ${await created.text()}`);
+  const sessionId = (await created.json()).session_id;
+  const cookie = cookieFrom(created);
+  console.log(`session ${sessionId} (chat mode)`);
+
+  // What each provider DECLARES, from the same discovery the picker uses.
+  const { providers } = await api("/api/models", { cookie });
+  const usable = providers.filter((p) => p.available && (p.models ?? []).length > 0);
+  const pairs = usable.slice(0, 2).map((p) => ({
+    provider: p.id,
+    model: p.models[0].id,
+    declared: p.models[0].capabilities.contextWindow,
+  }));
+  check(pairs.length >= 2, "two usable provider/model pairs to compare", pairs.map((p) => `${p.provider}:${p.declared}`).join(" vs "));
+  if (pairs.length < 2) {
+    console.log("\nSKIP — needs two available providers on this host\n");
+    process.exit(1);
+  }
+
+  const feed = watch(sessionId, cookie);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const observed = [];
+  for (const pair of pairs) {
+    const run = await api(`/api/sessions/${sessionId}/runs`, {
+      method: "POST",
+      cookie,
+      body: { prompt: "Reply with the single word OK.", provider: pair.provider, model: pair.model },
+    });
+    const runId = String(run.id);
+    // Ephemeral and null-id, so it is only ever seen live — a reload has none of it.
+    const usage = await feed.until(
+      (e) => e.ai_run_id === runId && e.type === "context_usage",
+      300_000,
+      `context_usage for ${pair.provider}`,
+    );
+    check(usage.id === null, `${pair.provider}: the reading is ephemeral (null id)`);
+    check(
+      usage.payload.window === pair.declared,
+      `${pair.provider}: the window IS the adapter's declared budget, not a client-side guess`,
+      `event=${usage.payload.window} declared=${pair.declared}`,
+    );
+    observed.push({ ...pair, window: usage.payload.window });
+    await feed.until((e) => e.ai_run_id === runId && TERMINAL.includes(e.type), 300_000, "terminal");
+  }
+
+  // switching model mid-session re-bases the denominator. Same session, two
+  // different windows, and the client did no lookup to learn either.
+  check(
+    observed[0].window !== observed[1].window,
+    "switching model mid-session changed the denominator",
+    `${observed[0].model} → ${observed[0].window} vs ${observed[1].model} → ${observed[1].window}`,
+  );
+
+  feed.close();
+  await api(`/api/sessions/${sessionId}/archive`, { method: "POST", cookie });
+  console.log(`\n${failures === 0 ? "PASS" : `FAIL (${failures})`}\n`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}\n`);
+  process.exit(1);
+});

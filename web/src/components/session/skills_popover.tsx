@@ -3,15 +3,23 @@ import { type FC, useState } from "react";
 import { useConnectors } from "../../hooks/use_connectors";
 import { useSkills } from "../../hooks/use_skills";
 
-// A read-only panel of the capabilities available to a run — Tools, Connectors,
-// and Skills. There are NO per-item toggles: every built-in tool, every
-// host-configured MCP connector, and every installed skill is available to the
-// run (Claude uses them as needed), matching how Claude Code normally works. The
-// composer sends the enablement (all connectors + skills: "all") on run start; this
-// component only displays what the host has.
+// The capabilities panel — Tools, Connectors, Skills.
+//
+// Tools and skills have no per-item toggle: every built-in tool is available, and every installed
+// skill is INDEXED — name + description in the system prompt, with the body loaded on demand
+// through the `skill` tool. Measured on this host: 57 skills cost ~4,000 input tokens per turn to
+// index, against roughly 140,000 to inline every body, which is why the index is the unit.
+//
+// CONNECTORS DO, and they default to OFF. Enabling one is not free: the harness connects to the
+// MCP server before the first request and declares every tool it advertises, and on this host
+// that measured **77 tools and ~37,500 tokens of schema across 8 servers** — spent on every turn,
+// before the conversation starts. So a connector is a deliberate choice per run, not an ambient
+// one, and the cost is stated rather than implied.
 interface Item {
   name: string;
   desc: string;
+  /** Present only for togglable items (connectors). */
+  enabled?: boolean;
 }
 
 const TABS = ["Tools", "Connectors", "Skills"] as const;
@@ -19,13 +27,24 @@ type Tab = (typeof TABS)[number];
 
 const CAPTION: Record<Tab, string> = {
   Tools: "All built-in tools are available to every run.",
-  Connectors: "All host-configured MCP servers are available to every run.",
-  Skills: "All installed skills are available — Claude uses them as needed.",
+  Connectors: "Off by default — each one you enable adds its tools to every turn of the run.",
+  Skills:
+    "All installed skills are indexed by name + description (~4k tokens); Claude loads the full instructions of one only when it applies.",
 };
 
-export const SkillsPopover: FC<{ sessionId: string; onClose: () => void }> = ({
+interface Props {
+  sessionId: string;
+  onClose: () => void;
+  /** Connector names enabled for the NEXT run. Owned by the composer, which sends them. */
+  enabledConnectors?: readonly string[];
+  onToggleConnector?: (name: string) => void;
+}
+
+export const SkillsPopover: FC<Props> = ({
   sessionId,
   onClose,
+  enabledConnectors = [],
+  onToggleConnector,
 }) => {
   const [tab, setTab] = useState<Tab>("Tools");
   const connectors = useConnectors(sessionId);
@@ -33,9 +52,15 @@ export const SkillsPopover: FC<{ sessionId: string; onClose: () => void }> = ({
 
   const items: Item[] =
     tab === "Tools"
-      ? BUILTIN_TOOLS.map((t) => ({ name: t.id, desc: t.description }))
+      ? // `label`, not `id`: the ids are the harness's registry names, and one of them is
+        // `str_replace_based_edit_tool` — correct, and not something to show a participant.
+        BUILTIN_TOOLS.map((t) => ({ name: t.label, desc: t.description }))
       : tab === "Connectors"
-        ? connectors.map((c) => ({ name: c.name, desc: `${c.transport} connector` }))
+        ? connectors.map((c) => ({
+            name: c.name,
+            desc: `${c.transport} connector`,
+            enabled: enabledConnectors.includes(c.name),
+          }))
         : skills.map((s) => ({ name: s.name, desc: s.description }));
 
   const emptyLabel =
@@ -82,10 +107,27 @@ export const SkillsPopover: FC<{ sessionId: string; onClose: () => void }> = ({
             <div
               key={it.name}
               data-testid={`cap-item-${it.name}`}
-              className="flex min-w-0 flex-col rounded-[9px] px-[10px] py-[9px]"
+              className="flex min-w-0 items-center gap-3 rounded-[9px] px-[10px] py-[9px]"
             >
-              <span className="font-mono text-[13px] text-[#e6e8e6]">{it.name}</span>
-              <span className="truncate text-[11px] text-[#6b726b]">{it.desc}</span>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="font-mono text-[13px] text-[#e6e8e6]">{it.name}</span>
+                <span className="truncate text-[11px] text-[#6b726b]">{it.desc}</span>
+              </div>
+              {it.enabled !== undefined && (
+                <button
+                  type="button"
+                  data-testid={`cap-toggle-${it.name}`}
+                  aria-pressed={it.enabled}
+                  onClick={() => onToggleConnector?.(it.name)}
+                  className={`shrink-0 rounded-[7px] border px-[9px] py-[5px] font-mono text-[11px] ${
+                    it.enabled
+                      ? "border-[#2c5580] bg-[#0a1826] text-[#3b9dff]"
+                      : "border-[#17231b] bg-[#0e140f] text-[#7c847c] hover:border-[#2c5580]"
+                  }`}
+                >
+                  {it.enabled ? "on" : "off"}
+                </button>
+              )}
             </div>
           ))
         )}

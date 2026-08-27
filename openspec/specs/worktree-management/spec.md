@@ -6,10 +6,10 @@ TBD - created by archiving change run-orchestration. Update Purpose after archiv
 ### Requirement: Rails creates the session worktree at the frozen path and branch
 
 `Git::WorktreeManager` SHALL create the per-session git worktree at `<repo>/.clawdparty/worktrees/session-<id>`
-on branch `clawd/session-<id>`, per the frozen `sidecar-protocol` worktree convention, operating on the target
-repository bind-mounted at `/repo`. Rails SHALL own worktree creation; the sidecar SHALL only use the worktree
+on branch `clawd/session-<id>`, per the frozen `harness-protocol` worktree convention, operating on the target
+repository bind-mounted at `/repo`. Rails SHALL own worktree creation; the harness SHALL only use the worktree
 as its `cwd` and SHALL NOT create or relocate it. The worktree SHALL be created such that its recorded absolute
-gitdir resolves inside the sidecar container (which mounts the same repo at the identical `/repo` path).
+gitdir resolves inside the harness container (which mounts the same repo at the identical `/repo` path).
 
 #### Scenario: Worktree created at the convention path
 
@@ -17,9 +17,9 @@ gitdir resolves inside the sidecar container (which mounts the same repo at the 
 - **THEN** `Git::WorktreeManager` creates the worktree at `<repo>/.clawdparty/worktrees/session-<id>` on branch
   `clawd/session-<id>`
 
-#### Scenario: A Rails-created worktree resolves when git runs in it as the sidecar user
+#### Scenario: A Rails-created worktree resolves when git runs in it as the harness user
 
-- **WHEN** the root-owned `rails` service creates the worktree and the non-root `node`-user `sidecar` later runs
+- **WHEN** the root-owned `rails` service creates the worktree and the non-root `node`-user `harness` later runs
   git in it as `cwd`
 - **THEN** git does not fail with "dubious ownership" (the `safe.directory` configured by `dev-docker-compose`
   covers `/repo` and the worktrees path), so the worktree is usable from both containers
@@ -27,7 +27,7 @@ gitdir resolves inside the sidecar container (which mounts the same repo at the 
 ### Requirement: base_sha is recorded at run start
 
 `Git::WorktreeManager` SHALL record the worktree's `base_sha` (the HEAD commit at the moment the run starts) onto
-the `ai_run`, per the frozen `sidecar-protocol`, so later diff/changeset computation has a stable base.
+the `ai_run`, per the frozen `harness-protocol`, so later diff/changeset computation has a stable base.
 
 #### Scenario: base_sha captured at start
 

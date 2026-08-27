@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# bin/stop — the counterpart to bin/start: bring down BOTH halves of the stack.
+#
+#   bin/stop            stop the containers and the host harness
+#   bin/stop --volumes  also delete the named volumes (postgres data, gem/node caches)
+#
+# `bin/start` launches the harness DETACHED, so `docker compose down` alone leaves it
+# running: a stray host process still holding session locks and heartbeating at a Rails
+# that is gone. This stops it too.
+#
+# Does NOT touch the harness STORE (~/.local/state/clawdparty/sessions). That is the
+# record every recovery depends on — stopping the stack must never be the thing that
+# discards it. `--volumes` is scoped to container volumes only, for the same reason.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+with_volumes=false
+case "${1:-}" in
+  "") ;;
+  --volumes | -v) with_volumes=true ;;
+  *)
+    echo "usage: bin/stop [--volumes]" >&2
+    exit 64
+    ;;
+esac
+
+compose() { docker compose --env-file .env.local "$@"; }
+
+# The harness FIRST. It heartbeats into Rails and holds a store lock per session; a
+# clean SIGTERM lets it drain the transport buffer and RELEASE those locks, which is
+# what lets the next `bin/start` reopen its own stores immediately instead of waiting
+# out the staleness window.
+echo "==> harness (host process)"
+bin/harness stop
+
+echo
+echo "==> containers"
+if [[ -f ".env.local" ]]; then
+  if [[ "${with_volumes}" == true ]]; then
+    echo "    (also removing named volumes — postgres data will be lost)"
+    compose down --remove-orphans --volumes
+  else
+    compose down --remove-orphans
+  fi
+else
+  # Without .env.local, ${TARGET_REPO_PATH} does not interpolate and compose warns on
+  # every service. `down` still works, so this degrades rather than refusing.
+  echo "    no .env.local; running docker compose down without it"
+  docker compose down --remove-orphans
+fi
+
+# --- Report ----------------------------------------------------------------
+echo
+echo "==> status"
+
+if bin/harness status >/dev/null 2>&1; then
+  echo "harness: STILL RUNNING — check bin/harness logs" >&2
+  exit 1
+fi
+echo "harness: stopped"
+
+running="$(docker compose ps --status running --services 2>/dev/null | tr '\n' ' ')"
+if [[ -n "${running// /}" ]]; then
+  echo "compose: STILL RUNNING — ${running}" >&2
+  exit 1
+fi
+echo "compose: stopped"
+
+echo
+echo "Stack down. Session records kept in ${HARNESS_STORE_DIR:-${HOME}/.local/state/clawdparty/sessions}."

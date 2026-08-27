@@ -1,0 +1,1149 @@
+{
+  "provenance": {
+    "model_id": "us.deepseek.r1-v1:0",
+    "region": "us-west-2",
+    "captured_at": "2026-08-16T20:39:37.794Z",
+    "scenario": "deepseek-reasoning",
+    "note": "Captured live via ConverseStreamCommand. Text content varies per capture; the event vocabulary and ordering are what tests assert."
+  },
+  "events": [
+    {
+      "messageStart": {
+        "role": "assistant"
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "Okay"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", let"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "'s see. I"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " need to calculate"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 17 multiplied by"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 3. H"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "mm, how"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " do I approach"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " this? Well"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", multiplication is essentially"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " repeated addition, right"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "? So 17"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " times 3 is"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " the same as adding"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 17 three times"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Let me try"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " that.\n\nFirst"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", 17 plus"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 17. Let"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "'s add"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " the"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " tens and"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " then"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " the units"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". 10"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " plus 10"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " is 20,"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " and 7 plus"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 7 is "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "14. Then"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " adding those together,"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 20 plus "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "14 is 34"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". So "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "17 plus 17"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " is"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 34. Now"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " I need to add"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " another"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 17 to that"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " result. So "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "34 plus 17"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Breaking"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " that"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " down:"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 30 plus "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "10 is 40"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", and 4"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " plus 7 is"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 11. Adding"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " those gives"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 40 plus "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "11, which is"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 51. So"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 34"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " plus 17 equals"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 51. Therefore"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", 17 multiplied"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " by 3 should"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " be 51.\n\n"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "Wait, let me"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " check another way to"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " make sure I didn"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "'t make a mistake"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Maybe using the"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " standard multiplication method."
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "17 times 3"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Multiply the"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " units"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " place"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " first: 7"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " times 3 is"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 21. Write"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " down 1 and"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " carry over 2"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Then multiply"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " the tens place:"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 1 times "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "3 is 3"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", plus the carried"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " over 2 makes"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 5. So"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " putting it together,"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " it's 51"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Y"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "ep, that matches"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " my"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " previous result. Okay"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", so both"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " methods give me "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "51. I think"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " that's correct."
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " Just"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " to be absolutely"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " sure, maybe I"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " can count by"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 17s"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " three times. "
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "17, 34"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ", 51."
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " Yep, that"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "'s three steps"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". So definitely"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " 51"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": ". Al"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": "right, confident"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " with"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "reasoningContent": {
+            "text": " that answer.\n"
+          }
+        },
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 0
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": "\n\n51"
+        },
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "contentBlockDelta": {
+        "delta": {
+          "text": ""
+        },
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "contentBlockStop": {
+        "contentBlockIndex": 1
+      }
+    },
+    {
+      "messageStop": {
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "metadata": {
+        "usage": {
+          "inputTokens": 19,
+          "outputTokens": 364,
+          "totalTokens": 383
+        },
+        "metrics": {
+          "latencyMs": 1966
+        }
+      }
+    }
+  ]
+}

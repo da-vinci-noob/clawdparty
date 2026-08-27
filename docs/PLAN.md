@@ -12,12 +12,15 @@
 
 We're building a real-time collaborative coding session server: **any number of developers** join a browser session and watch/guide Claude Code working live on a repository on Shah Rukh's Mac. Shared chat (per-session sidebar), live Claude activity stream, file/diff viewers, and a human approval flow for Claude's changes. (The task board and a dedicated terminal tab are modeled in the schema/events but cut from the MVP UI per §12 — terminal output and tool events render in the activity feed.) Timeline: **3 weeks**, built by 2 people (Shah Rukh + Snehal) — but sessions are not limited to 2 participants.
 
-**Key usage model:** Shah Rukh's Mac is only the *host machine* (Rails + sidecar + repo live there). **Shah Rukh participates exactly like everyone else — through the browser**: he joins the session, prompts Claude, chats, and reviews diffs from the web UI (with the `owner` role, so he's also the one who approves/rejects). Nobody drives Claude from a terminal; the web session IS the interface.
+**Key usage model:** Shah Rukh's Mac is only the *host machine* (Rails + harness + repo live there). **Shah Rukh participates exactly like everyone else — through the browser**: he joins the session, prompts Claude, chats, and reviews diffs from the web UI (with the `owner` role, so he's also the one who approves/rejects). Nobody drives Claude from a terminal; the web session IS the interface.
 
 **Key decisions:**
 - Frontend: **React 19 + Vite + TypeScript SPA**
-- Claude integration: **Node.js sidecar wrapping `@anthropic-ai/claude-agent-sdk`** (streaming events, streaming input for mid-run follow-ups, clean `interrupt()`)
-- Approval UX: **changeset review** — Claude finishes → everyone reviews the git diff → host approves (commit) or rejects (revert). NOT per-tool-call gating (the `canUseTool` seam is designed in but not built).
+- Claude integration: **Node.js harness that OWNS the agent loop** on the Messages API — its own
+  durable per-session record, tool dispatch, recovery, context management, and extension points.
+  Vendor SDKs are interchangeable **adapters behind one contract** (`providers/contract.ts`), not
+  the engine.
+- Approval UX: **changeset review** — Claude finishes → everyone reviews the git diff → host approves (commit) or rejects (revert). Per-tool-call gating is the `tool:before` extension point, which **fails closed**.
 - Networking: **same-LAN only for MVP** — teammates connect to Shah Rukh's Mac directly over the local network (`http://<shah-mac>.local:3000`). Tailscale / remote hosting is a future phase.
 
 **Out of MVP scope:** multiplayer editing, CRDT/Yjs, cursors, Monaco, **remote access (Tailscale / Cloudflare Tunnel / cloud hosting — future phase)**, per-tool live approval, merging session branches to main (manual host git op).
@@ -27,17 +30,17 @@ We're building a real-time collaborative coding session server: **any number of 
 | Decision | Choice | Why (one line) |
 |---|---|---|
 | Database | **PostgreSQL** | Anticipating future cloud deployment; Solid Queue/Cable both support it; local dev via Postgres.app or Docker |
-| Jobs / Cable | **Solid Queue + Solid Cable** | No Redis to babysit; long-running work lives in the sidecar process, not jobs |
+| Jobs / Cable | **Solid Queue + Solid Cable** | No Redis to babysit; long-running work lives in the harness process, not jobs |
 | Local dev runtime | **Docker Compose — one container per process**, `bin/start` builds + `docker compose up`; source bind-mounted (`:delegated`), deps in named volumes | Single entry command; reproducible toolchain (Ruby/Node/PG pinned in images); decoupled-lifecycle invariants map cleanly onto per-service containers |
-| Sidecar topology | **One long-lived HTTP service as its own container** (`sidecar` service, restart policy, NOT a child of Rails); reachable from Rails at `http://sidecar:8787` over the compose network; port **not published** to the host/LAN | Decoupled lifecycles: Rails restarts don't kill Claude runs; curl-debuggable from inside the compose network |
-| Rails↔sidecar auth | Shared bearer secret (`SIDECAR_SHARED_SECRET` from `bin/setup`) + sidecar reachable only on the private compose network (no published port) | Adequate for same-host IPC; container isolation replaces loopback binding |
-| Claude auth (sidecar → Anthropic) | **Auth-method-agnostic passthrough of the host's existing Claude login.** The sidecar container read-only bind-mounts `~/.claude` + `~/.aws` and inherits the host's Claude/AWS auth env (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`CLAUDE_CODE_USE_VERTEX`, `AWS_PROFILE`/`AWS_REGION`, `ANTHROPIC_MODEL`). No code picks a method — direct API key, Claude subscription/enterprise OAuth, and Amazon Bedrock all "just work". | Developers run whatever login they already have; the SDK auto-detects in its own precedence order. **Two caveats:** (1) macOS subscription/enterprise OAuth lives in the **Keychain, not a file** — invisible to a Linux container — so for that mode the dev runs `claude setup-token` once and we pass `CLAUDE_CODE_OAUTH_TOKEN`; (2) Bedrock-over-AWS-SSO tokens expire — the host must stay `aws sso login`-fresh (the live mount reflects it; the container can't refresh on its own). |
+| Harness topology | **One long-lived HTTP service as its own container** (`harness` service, restart policy, NOT a child of Rails); reachable from Rails at `http://harness:8787` over the compose network; port **not published** to the host/LAN | Decoupled lifecycles: Rails restarts don't kill Claude runs; curl-debuggable from inside the compose network |
+| Rails↔harness auth | Shared bearer secret (`HARNESS_SHARED_SECRET` from `bin/setup`) + harness reachable only on the private compose network (no published port) | Adequate for same-host IPC; container isolation replaces loopback binding |
+| Claude auth (harness → Anthropic) | **Auth-method-agnostic passthrough of the host's existing Claude login.** The harness container read-only bind-mounts `~/.claude` + `~/.aws` and inherits the host's Claude/AWS auth env (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`CLAUDE_CODE_USE_VERTEX`, `AWS_PROFILE`/`AWS_REGION`, `ANTHROPIC_MODEL`). No code picks a method — direct API key, Claude subscription/enterprise OAuth, and Amazon Bedrock all "just work". | Developers run whatever login they already have; the SDK auto-detects in its own precedence order. **Two caveats:** (1) macOS subscription/enterprise OAuth lives in the **Keychain, not a file** — invisible to a Linux container — so for that mode the dev runs `claude setup-token` once and we pass `CLAUDE_CODE_OAUTH_TOKEN`; (2) Bedrock-over-AWS-SSO tokens expire — the host must stay `aws sso login`-fresh (the live mount reflects it; the container can't refresh on its own). |
 | Git isolation | **One worktree per session** (`.clawdparty/worktrees/session-<id>`, branch `clawd/session-<id>`) | Shah Rukh's main checkout stays untouched; reject is scoped to worktree |
 | Auth | **Role-scoped, reusable invite links** (SHA-256 token digests, optional expiry/revoke) → display name → **signed httpOnly cookie**; no passwords | N developers join from one shared link per role; the trusted LAN is the perimeter and tokens gate everything; cookie also authenticates ActionCable |
 | Frontend state | **Zustand** (event streams) + **TanStack Query** (fetched resources) | Selector granularity survives delta floods; Redux is boilerplate at this scope |
 | Key libs | `react-diff-view`, `react-arborist` (tree), `shiki` (highlight), `@dnd-kit` (board), `anser` (ANSI) | Output-only terminal pane: no xterm.js needed |
-| Network (MVP) | Only the `rails` service **publishes a port** (`3000:3000`, reachable on the LAN); join URLs use `http://<shah-mac>.local:3000` (Bonjour/mDNS, survives DHCP changes); sidecar + Vite are **unpublished** (compose-network only) | Same trusted office/home network; invite tokens + signed cookies gate every request; not publishing a service's port is the Docker equivalent of loopback-only; Tailscale is a drop-in future phase (publish/forward + origins, no app changes) |
-| Lint/format | **Biome** for web + sidecar (single tool, no ESLint/Prettier split); **RuboCop** with a standard baseline (line length 120, frozen string literals, required parens) via rubocop-rails/rubocop-rspec | One linter per stack; near-zero config debate |
+| Network (MVP) | Only the `rails` service **publishes a port** (`3000:3000`, reachable on the LAN); join URLs use `http://<shah-mac>.local:3000` (Bonjour/mDNS, survives DHCP changes); harness + Vite are **unpublished** (compose-network only) | Same trusted office/home network; invite tokens + signed cookies gate every request; not publishing a service's port is the Docker equivalent of loopback-only; Tailscale is a drop-in future phase (publish/forward + origins, no app changes) |
+| Lint/format | **Biome** for web + harness (single tool, no ESLint/Prettier split); **RuboCop** with a standard baseline (line length 120, frozen string literals, required parens) via rubocop-rails/rubocop-rspec | One linter per stack; near-zero config debate |
 
 ## 3. System topology
 
@@ -48,11 +51,11 @@ We're building a real-time collaborative coding session server: **any number of 
 │    Puma :3000  ── the ONLY published port (→ LAN)     │
 │    serves built SPA                                    │
 │  [container: jobs]   Solid Queue supervisor (bin/jobs)│
-│  [container: sidecar] Node Fastify :8787 (unpublished)│
-│    └── @anthropic-ai/claude-agent-sdk query()         │
-│    reachable from rails as http://sidecar:8787         │
-│    binds host ~/.claude + ~/.aws (ro); target repo (rw)│
-│    inherits host Claude/AWS auth env (any login mode)  │
+│  [container: harness] Node Fastify :8787 (unpublished)│
+│    └── owns the loop: Messages API + provider adapters │
+│    reachable from rails as http://harness:8787         │
+│    discovers the host login; records the SOURCE only   │
+│    per-session SQLite record is the authority          │
 │  [container: postgres] PostgreSQL 18 (named volume)    │
 │  [dev only, container: vite] Vite :5173 (unpublished)  │
 │  Git worktrees (bind-mounted): <repo>/.clawdparty/…    │
@@ -74,16 +77,16 @@ All humans — including Shah Rukh — interact through the browser session. The
 
 ```text
 clawdparty/
-├── docs/contracts/        # frozen interface contracts (events.md, sidecar_protocol.md, http_api.md, CHANGELOG.md)
+├── docs/contracts/        # frozen interface contracts (events.md, harness_protocol.md, http_api.md, CHANGELOG.md)
 ├── packages/contracts/    # shared TS types + fixtures/sample_run.jsonl (the executable contract)
 ├── api/                   # Rails 8 API + ActionCable + PostgreSQL
-├── sidecar/               # Node + Agent SDK
+├── harness/               # Node; owns the loop, the record, and recovery
 ├── web/                   # React 19 + Vite + TS + Tailwind
-├── docker/                # Dockerfiles + entrypoints per service (rails, sidecar, web)
-├── docker-compose.yml     # rails · sidecar · jobs · postgres (+ vite in dev); named volumes
+├── docker/                # Dockerfiles + entrypoints per service (rails, harness, web)
+├── docker-compose.yml     # rails · harness · jobs · postgres (+ vite in dev); named volumes
 ├── .dockerignore
 ├── bin/start              # single entry point: docker compose build + up
-└── bin/setup              # generates SIDECAR_SHARED_SECRET + prepares env (DB creation runs in the rails container entrypoint, gated on postgres health)
+└── bin/setup              # generates HARNESS_SHARED_SECRET + prepares env (DB creation runs in the rails container entrypoint, gated on postgres health)
 ```
 
 ## 5. Data model (api/)
@@ -94,38 +97,68 @@ clawdparty/
 
 **Two load-bearing constraints:**
 - `add_index :ai_runs, :session_id, unique: true, where: "status IN ('queued', 'running', 'awaiting_review')"` — **one active run per session, enforced at the DB**. (`status` is a native PG enum / string column, so the predicate compares string literals — never integer-backed.)
-- `add_index :events, [:ai_run_id, :seq], unique: true` — sidecar assigns per-run monotonic `seq`; ingestion silently skips dupes → retries/replays are safe. Global `events.id` is the client cursor.
+- `add_index :events, [:ai_run_id, :seq], unique: true` — harness assigns per-run monotonic `seq`; ingestion silently skips dupes → retries/replays are safe. Global `events.id` is the client cursor.
 
 Every mutation to mutable tables appends a corresponding event in the same transaction (`Events::Append`), so the event stream alone reconstructs the UI.
 
 ## 6. Event pipeline
 
 ```text
-SDK message → sidecar/src/normalizer.ts → batched POST /internal/events
+SDK message → harness/src/normalizer.ts → batched POST /internal/events
   → Events::Ingest (persist unless ephemeral; dedupe by [run_id, seq])
   → SessionChannel.broadcast_to(session)  → web/src/lib/cable.ts → Zustand stores
 ```
 
 **Workspace layout (per session):** left sidebar = participants + presence; center tabs = Activity | Files | Diff (terminal output and tool events render inside Activity; the dedicated Terminal and Tasks tabs are cut per §12); **right sidebar = the session's chat** (always visible, not buried in a tab — chat is the coordination backbone). Messages and all events are scoped to the session.
 
-**Taxonomy (20 types + the `ai_raw` fallback):** `run_started`, `ai_text_delta` (ephemeral — broadcast, never persisted; coalesced ~150ms in sidecar), `ai_text` (durable, on block stop), `ai_thinking`, `tool_started/tool_finished/tool_failed` (summarized inputs — path/command/500 chars, never full Edit payloads), `terminal_output` (from Bash Pre/PostToolUse hooks, 64KB chunks), `file_changed`, `run_finished/run_failed/run_interrupted`, `changeset_ready/changeset_approved/changeset_rejected`, `chat_message`, `task_created/task_updated`, `participant_joined`, `presence_changed` (ephemeral). Any SDK message the normalizer can't map becomes `ai_raw` (never dropped, never a crash).
+**Taxonomy (20 types + the `ai_raw` fallback):** `run_started`, `ai_text_delta` (ephemeral — broadcast, never persisted; coalesced ~150ms in harness), `ai_text` (durable, on block stop), `ai_thinking`, `tool_started/tool_finished/tool_failed` (summarized inputs — path/command/500 chars, never full Edit payloads), `terminal_output` (from Bash Pre/PostToolUse hooks, 64KB chunks), `file_changed`, `run_finished/run_failed/run_interrupted`, `changeset_ready/changeset_approved/changeset_rejected`, `chat_message`, `task_created/task_updated`, `participant_joined`, `presence_changed` (ephemeral). Any SDK message the normalizer can't map becomes `ai_raw` (never dropped, never a crash).
 
 **Late-joiner catch-up (gap-free):** subscribe to cable FIRST → buffer live events → REST backfill `GET /api/sessions/:id/events?after=<cursor>` → drain buffer applying only `id > maxBackfilledId` → live. Stores dedupe **durable** events by `event.id`; **ephemeral events (`ai_text_delta`, `presence_changed`) have a null `id`, bypass backfill entirely, and are not deduped by id** (deltas accumulate by `(ai_run_id, block)`, presence is last-writer-wins). Lives in one file: `web/src/lib/cable.ts`.
 
-## 7. Rails ↔ sidecar protocol
+## 7. Rails ↔ harness protocol
 
-- **Rails → sidecar (`http://sidecar:8787` over the compose network):** `POST /runs` {run_id, session_id, repo_path(worktree), prompt, requested_by (participant id → stamped as `run_started.actor.id`), claude_session_id?, model, max_turns, permission_mode: acceptEdits, allowed_tools} (409 if run active); `POST /runs/:id/messages` (pushed into the live streaming-input iterable — no respawn); `POST /runs/:id/interrupt`; `GET /healthz` → {active_run_ids}. The sidecar host is configurable (`SIDECAR_URL`) so the app never hard-codes a transport assumption.
-- **Sidecar → Rails:** `POST /internal/events` (batched, idempotent); `POST /internal/sidecar/heartbeat` every 5s with active_run_ids.
-- **Crash recovery:** sidecar dies → its container's restart policy reboots it; `Sidecar::HealthcheckJob` marks runs stale >15s as failed; Claude session JSONL persists in the bind-mounted host `~/.claude/projects/` (survives container restarts) so the host can resume via `claude_session_id`; partial worktree edits get reviewed/rejected like any changeset. Rails restarts → sidecar ring-buffers events + retries with backoff (idempotent ingest); boot reconciliation marks orphans failed.
+**`docs/contracts/harness_protocol.md` is the authority for this section**; what follows is the
+summary. Every field below is bearer-authenticated  — placement is not the boundary.
 
-**Sidecar files:** `index.ts` (Fastify + heartbeat), `runner.ts` (RunManager: query handle, pushable input iterable, lifecycle), `normalizer.ts` (**the ONLY file that sees raw SDK shapes**; unknown types → `ai_raw`, never a crash), `transport.ts` (batch/retry), `hooks.ts` (Bash→terminal_output, Edit/Write→file_changed), `permissions.ts` (canUseTool allow-all for MVP — **the seam** for later Bash gating).
+- **Rails → harness (`http://host.docker.internal:8787`, configurable via `HARNESS_URL`):**
+  `POST /runs` {run_id, session_id, lane, repo_path, prompt, requested_by (participant id → stamped
+  as `run_started.actor.id`), provider, model, resume_context, + optional `effort` /
+  `disallowed_tools` / `connectors` / `skills` / `aws_profile`} (409 if the lane has an active run);
+  `POST /runs/:id/messages` (queued in the loop's inbox and appended to the RECORD at the next turn
+  boundary — no respawn); `POST /runs/:id/interrupt`; `GET /runs`;
+  `POST /verify` (a real 1-token request per provider); `GET /models` · `/connectors` · `/skills` ·
+  `/aws-profiles` (read-only discovery); `POST /skills` · `POST /skills/remove` (the only routes that
+  mutate host files); `GET /healthz` → {active_run_ids}.
+  **Gone with the SDK:** `permission_mode` (replaced by the `tool:before` gate plus the per-run tool
+  set), `claude_session_id` (resumption is harness session + lane, carried by `resume_context`),
+  `max_turns`, and `allowed_tools` — the last one accepted-and-never-read until it was retired.
+  The harness is a HOST process on loopback, not a compose service .
+- **Harness → Rails:** `POST /internal/events` (batched, idempotent, `store_seq` per durable event);
+  `POST /internal/harness/heartbeat` every 5s with `active_run_ids` + `store_seq_high_water`.
+- **Crash recovery:** harness dies → the supervision unit restarts it **if one is installed**. Otherwise `bin/harness start` restarts it by hand.  Either way, `Harness::HealthcheckJob` marks
+  runs stale >15s as failed; recovery reads the **total position marker** from the session's own
+  SQLite store and switches on its phase — it never replays the log, which is what keeps recovery
+  O(1) in session length. The harness owns the record now, so there is no SDK session file to resume
+  from. Partial worktree edits get reviewed/rejected like any changeset. Rails restarts → harness
+  ring-buffers events + retries with backoff (idempotent ingest); boot reconciliation marks orphans
+  failed.
+
+**Harness files:** `index.ts` (Fastify + heartbeat), `supervisor.ts` (live runs; ONE store per session, shared by lanes), `transport.ts` (batched/idempotent POST + `store_seq`), `loop/` (`run_loop` · `request_builder` · `checkpoint` · `stop_reasons` · `normalize` — and **`normalize.ts` is the only file that maps a `ProviderEvent` to Contract-1**; an unknown shape becomes `ai_raw`, never a crash), `store/` (the SQLite/WAL record + the total position marker), `providers/` (**each adapter is the only code that may import its vendor SDK**), `tools/`, `extensions/` (the four points; `tool:before` is the command gate), plus `context/`, `mcp/`, `skills.ts`/`skills_admin.ts`, `capabilities.ts`, `pricing.ts`, `redaction.ts`, `auth.ts`, `config.ts`, `frontmatter.ts`.
+
+<!-- doc-truth:ignore -->
+Three SDK-era files are **gone** and are named here only to say so: `runner.ts` (its job is now
+`supervisor.ts` plus `loop/run_loop.ts`), `normalizer.ts` (now `loop/normalize.ts`), and
+`permissions.ts` — the last deliberately, because a seam that cannot intercept must not exist; the
+`tool:before` extension point replaced it. `hooks.ts` is gone too: Bash→`terminal_output` and
+Edit/Write→`file_changed` are emitted by the tools and the loop directly.
+<!-- doc-truth:end -->
 
 ## 8. Git isolation & approval flow
 
 1. Session create: `Git::WorktreeManager` → `git worktree add … -b clawd/session-<id> <base_branch>`.
 2. Run start (`Runs::Start`): requires no active run (DB index) + clean worktree (except revise); records `base_sha`.
 3. Run end (`Runs::Finalize`): `git add --intent-to-add -A && git diff HEAD --numstat` (untracked files covered) → dirty → `awaiting_review` + `changeset_ready`; clean → `completed_clean`. Interrupted + dirty → also `awaiting_review`.
-4. Diff over **REST, never cable**: `GET /api/runs/:id/diff` (`Git::DiffBuilder`).
+4. Diff over **REST, never cable**: `GET /api/runs/:id/diff` (`Git::Diff`).
 5. **Approve** (owner only): commit on session branch, author `Claude (clawdparty)`, trailers `Approved-by` + `Clawdparty-Run`.
 6. **Reject** (owner only): `git reset --hard HEAD && git clean -fd` scoped to worktree. **Hard rule: reject severs `claude_session_id` chaining** (Claude's context believes reverted edits exist).
 7. **Revise**: old run → `superseded`; new run resumes same Claude session, dirty tree kept; cumulative diff reviewed as one changeset.
@@ -133,11 +166,14 @@ SDK message → sidecar/src/normalizer.ts → batched POST /internal/events
 
 ## 9. Security
 
-- **Perimeter (MVP):** the trusted local network. Only the `rails` container publishes a port (`3000`); `config.hosts` allows `<shah-mac>.local` + LAN IP; sidecar/Vite are unpublished (compose-network only — the Docker equivalent of loopback-only); signed cookies without `Secure` flag (plain HTTP on LAN). Accepted risk: anyone on the same network can reach the login page — but every endpoint requires a valid invite-token-derived cookie, and only colleagues are on the network. Future phase: Tailscale (publish/forward the rails service + add origins; no app-level changes — this is why nothing in the app assumes a fixed host).
+- **Perimeter (MVP):** the trusted local network. Only the `rails` container publishes a port (`3000`); `config.hosts` allows `<shah-mac>.local` + LAN IP; harness/Vite are unpublished (compose-network only — the Docker equivalent of loopback-only); signed cookies without `Secure` flag (plain HTTP on LAN). Accepted risk: anyone on the same network can reach the login page — but every endpoint requires a valid invite-token-derived cookie, and only colleagues are on the network. Future phase: Tailscale (publish/forward the rails service + add origins; no app-level changes — this is why nothing in the app assumes a fixed host).
 - **Roles** enforced server-side in `api/app/policies/session_policy.rb` (PORO, every controller action) — owner: everything incl. approve/reject; editor: runs/follow-ups/interrupt/tasks/chat; reviewer: tasks/chat/view; viewer: view/chat. Cable subscriptions independently verify participantship. Client hides buttons; server enforces. (The `tasks/*` permissions are **dormant while the task board UI is cut** per §12 — the role grants and the `tasks` table + `task_*` events are modeled now so restoring the board needs no schema or policy change.)
 - **File API** (`RepoBrowser`): tree from `git ls-files --cached --others --exclude-standard`; content with realpath-containment (defeats `../` and symlinks), denylist (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `*secret*`, `.git/`…), 1MB cap, null-byte binary detection. **Terminal pane is read-only replay of Claude's Bash events — no input path to a shell anywhere.**
-- Claude blast radius: allowedTools whitelist, cwd pinned to worktree, everything lands uncommitted behind human review. (SDK doesn't hard-jail Bash to cwd — accepted MVP risk, documented.)
-- **Claude credentials:** the sidecar never stores its own Anthropic key. It uses the host developer's existing login, mounted read-only (`~/.claude`, `~/.aws`) plus inherited auth env. Accepted MVP risk: those credentials are the host's, so a run bills/acts as the host — fine for same-host, single-developer-credential MVP. The mounts are **read-only** so a run cannot tamper with the host's login state.
+- Claude blast radius: the `tool:before` gate (deny rules run before every tool call) plus the per-run
+  tool set, `cwd` pinned to the worktree, everything lands uncommitted behind human review. There is
+  no allow-list — it only ever pre-approved, and the field that carried one was retired unread.
+  (Bash is not hard-jailed to `cwd` — accepted MVP risk, documented.)
+- **Claude credentials:** the harness never stores its own Anthropic key. It uses the host developer's existing login, mounted read-only (`~/.claude`, `~/.aws`) plus inherited auth env. Accepted MVP risk: those credentials are the host's, so a run bills/acts as the host — fine for same-host, single-developer-credential MVP. The mounts are **read-only** so a run cannot tamper with the host's login state.
 
 ## 10. 3-week execution plan
 
@@ -146,10 +182,10 @@ SDK message → sidecar/src/normalizer.ts → batched POST /internal/events
 - **Days 3–13: Building phase.** Starts Wed W1 with the contract freeze; ends Wed W3.
 - **Last 2 days (W3 Thu–Fri): Complete project review phase.** Cross-stream code review, security review, docs walkthrough, final end-to-end verification. No new features.
 
-Work by week (each week's scope is one coherent slice; contracts make handoffs cheap): **Week 1** = contracts freeze + the full skeleton (Docker Compose scaffold, Rails + sidecar foundations, frontend scaffold) so the live-Claude work has a working base; **Week 2** = live Claude end-to-end (sidecar run loop, run orchestration, the cable client + activity feed, prompt/interrupt/chat, file + diff APIs); **Week 3** = the full loop + hardening (changeset approve/reject, diff viewer + approval UI, LAN serving + supervision, security hardening, README/runbook). Streams integrate continuously — never batched to week-end; each week has a concrete working milestone (below) as its acceptance gate.
+Work by week (each week's scope is one coherent slice; contracts make handoffs cheap): **Week 1** = contracts freeze + the full skeleton (Docker Compose scaffold, Rails + harness foundations, frontend scaffold) so the live-Claude work has a working base; **Week 2** = live Claude end-to-end (harness run loop, run orchestration, the cable client + activity feed, prompt/interrupt/chat, file + diff APIs); **Week 3** = the full loop + hardening (changeset approve/reject, diff viewer + approval UI, LAN serving + supervision, security hardening, README/runbook). Streams integrate continuously — never batched to week-end; each week has a concrete working milestone (below) as its acceptance gate.
 
 ### Week 1 — Review phase (Mon–Tue), then contracts + skeletons
-**Milestone: Rails + sidecar can replay the fixture end-to-end; frontend scaffold exists (routes/shell only, zero features) to build features on top of in W2.**
+**Milestone: Rails + harness can replay the fixture end-to-end; frontend scaffold exists (routes/shell only, zero features) to build features on top of in W2.**
 
 **Mon–Tue — Architecture review:**
 - Mon: walk through this plan section by section — challenge stack choices, data model, event taxonomy draft, protocol, git/approval flow, security model; agree repo layout; assign streams; draft the three contracts.
@@ -157,58 +193,58 @@ Work by week (each week's scope is one coherent slice; contracts make handoffs c
 - Tue EOD: spike findings written up. **Wed: contract freeze** (only after the spike — schemas invented before seeing real SDK output are fiction).
 
 **Wed–Fri — Build starts (the full skeleton):**
-- **Docker Compose scaffold + `bin/start`** (rails · sidecar · jobs · postgres · vite services, bind-mounted source, named volumes for gems/node_modules, sidecar binds host `~/.claude` + the target repo) so every stream develops in containers from day one; **Rails foundation** — scaffold + PostgreSQL + RuboCop + CI, models/migrations incl. events + constraints, invite-link auth + cookie, `SessionChannel` + `POST /internal/events` ingest→persist→broadcast, and the **fake-Claude rake task** replaying `sample_run.jsonl` through real ingest; **sidecar skeleton** — HTTP server, normalizer v1, event POST to Rails; `packages/contracts` TS types + `fixtures/sample_run.jsonl` from real spike output; **minimal frontend scaffold** — Vite + React + Biome + routes + app shell component (zero features), CI green. Goal: a working skeleton so W2 can immediately build features against it. (Branches: `freeze-interface-contracts` → `dev-docker-compose` → `rails-foundation` → `sidecar-foundation` → `web-scaffold`.)
+- **Docker Compose scaffold + `bin/start`** (rails · harness · jobs · postgres · vite services, bind-mounted source, named volumes for gems/node_modules, harness binds host `~/.claude` + the target repo) so every stream develops in containers from day one; **Rails foundation** — scaffold + PostgreSQL + RuboCop + CI, models/migrations incl. events + constraints, invite-link auth + cookie, `SessionChannel` + `POST /internal/events` ingest→persist→broadcast, and the **fake-Claude rake task** replaying `sample_run.jsonl` through real ingest; **harness skeleton** — HTTP server, normalizer v1, event POST to Rails; `packages/contracts` TS types + `fixtures/sample_run.jsonl` from real spike output; **minimal frontend scaffold** — Vite + React + Biome + routes + app shell component (zero features), CI green. Goal: a working skeleton so W2 can immediately build features against it. (Branches: `freeze-interface-contracts` → `dev-docker-compose` → `rails-foundation` → `harness-foundation` → `web-scaffold`.)
 
 ### Week 2 — Live Claude end-to-end
 **Milestone: Claude runs live and is watchable from multiple browsers; owner can prompt and interrupt; a mid-run joiner catches up correctly; verified cross-machine over the LAN from a second laptop.**
-- **Sidecar run loop:** run lifecycle/state machine in sidecar; worktree creation + base_sha recording; normalizer full coverage: deltas/tools/terminal/result; interrupt + streaming follow-ups + heartbeat.
-- **Rails orchestration + read APIs:** run orchestration `POST /sessions/:id/runs` → sidecar, status from events, role checks; event store hardening: pagination, payload caps; **file tree + content API with traversal request specs**; **diff API** with intent-to-add.
+- **Harness run loop:** run lifecycle/state machine in harness; worktree creation + base_sha recording; normalizer full coverage: deltas/tools/terminal/result; interrupt + streaming follow-ups + heartbeat.
+- **Rails orchestration + read APIs:** run orchestration `POST /sessions/:id/runs` → harness, status from events, role checks; event store hardening: pagination, payload caps; **file tree + content API with traversal request specs**; **diff API** with intent-to-add.
 - **Frontend features:** **cable.ts wrapper + event reducer with backfill/buffer/drain**; activity feed real rendering: streamed text, collapsible tool chips, run banners; prompt composer + follow-up + interrupt button, role-gated, chat panel + presence stub.
 
 ### Week 3 — Full loop + hardening + final review (build freezes Wed EOD)
 **Milestone: full loop works — prompt → watch live → review diff → approve commits / reject reverts, roles enforced; clawdparty used on itself over the LAN; final verification run from a second laptop using only the README.**
 
 **Mon–Wed — final build:**
-- **Infrastructure + hardening:** sidecar supervision (container restart policy, SIGTERM/graceful shutdown, restart recovery via resume); LAN serving config (Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs); security hardening (token expiry/revocation, secret review, confirm sidecar/Vite ports stay unpublished); runbook + README incl. LAN join instructions.
+- **Infrastructure + hardening:** harness supervision ; LAN serving config (Puma `0.0.0.0` binding inside the `rails` container + only that port published, `config.hosts`, cable allowed origins for `.local`/LAN-IP, mDNS join-URL docs); security hardening (token expiry/revocation, secret review, confirm harness/Vite ports stay unpublished); runbook + README incl. LAN join instructions.
 - **Review loop:** **changeset service: approve=commit / reject=revert + unit tests** (untracked, gitignored, empty diff, dirty-at-start, reject-leaves-clean); **diff viewer** (react-diff-view, per-file list, stats) + **approval UI** (review screen, approve/reject/revise, owner-gated); role-enforcement pass + request-spec matrix; mid-run join/reconnect resync + UI polish: loading/empty/error states; test backstop: auth/role/traversal specs, git edge specs, **one happy-path system test via fixture replay**.
-- The changeset service over real worktrees (the A↔B↔git seam) is the cross-stream piece — built with both backend and sidecar in view.
+- The changeset service over real worktrees (the A↔B↔git seam) is the cross-stream piece — built with both backend and harness in view.
 
 **Thu–Fri — Complete project review (no new features, fixes only):**
 - Thu AM: **cross-stream code review** — each stream is reviewed by someone who didn't build it; findings triaged into fix-now vs backlog.
-- Thu PM: **security review checklist** — path traversal + denylist on file API, role-enforcement matrix endpoint by endpoint, invite token lifecycle, cable subscription auth, sidecar unpublished-port/secret, git reject leaves clean worktree.
+- Thu PM: **security review checklist** — path traversal + denylist on file API, role-enforcement matrix endpoint by endpoint, invite token lifecycle, cable subscription auth, harness unpublished-port/secret, git reject leaves clean worktree.
 - Fri AM: fix-now items; README/runbook walkthrough executed cold by a non-author; dogfood: use clawdparty on itself, capture any final issues.
 - Fri PM: **final end-to-end verification run from a second laptop, using only the README** (proves owner-independence + docs); future-phase backlog written up (Tailscale, per-tool Bash gating, Monaco, cloud).
 
 ## 11. Contracts — freeze Wednesday of Week 1 (only after the spike findings are in, never before)
 
 1. **Event taxonomy + envelope** (`docs/contracts/events.md` + `packages/contracts/src/events.ts`) — `{id, session_id, ai_run_id, seq, type, actor, ts, payload}`.
-2. **Rails↔sidecar protocol** (`docs/contracts/sidecar_protocol.md`) — incl. the worktree convention (who creates it, path layout, base_sha rule). This is the A↔B seam.
+2. **Rails↔harness protocol** (`docs/contracts/harness_protocol.md`) — incl. the worktree convention (who creates it, path layout, base_sha rule). This is the A↔B seam.
 3. **REST + cable API** (`docs/contracts/http_api.md`) — endpoints, role matrix, rule: *everything live arrives as a Contract-1 event*, no bespoke cable messages.
 
-`fixtures/sample_run.jsonl` (from real spike output) is the **executable contract**: the web renders it, the Rails seed replays it, the sidecar normalizer tests assert producing it. Post-freeze changes require sign-off from both contributors + a CHANGELOG entry; additive types cheap, envelope changes are emergencies.
+`fixtures/sample_run.jsonl` (from real spike output) is the **executable contract**: the web renders it, the Rails seed replays it, the harness normalizer tests assert producing it. Post-freeze changes require sign-off from both contributors + a CHANGELOG entry; additive types cheap, envelope changes are emergencies.
 
-**Stub strategy (nobody waits for anybody):** frontend builds against fixtures; Rails is exercised end-to-end via the fake-Claude replay; sidecar logs to stdout before ingest exists; diff viewer builds against a checked-in sample diff JSON.
+**Stub strategy (nobody waits for anybody):** frontend builds against fixtures; Rails is exercised end-to-end via the fake-Claude replay; harness logs to stdout before ingest exists; diff viewer builds against a checked-in sample diff JSON.
 
 ## 12. Scope-cut ladder (execute mechanically if a weekly milestone slips >1 day)
 
 **Already cut in the 3-week timeline:** task board, terminal tab (both terminal output + tool events already visible in the activity feed — these would be nice-to-have polish).
 
-**If still behind, cut top-down:** 1) file tree/viewer (diff viewer covers review; skip browsing unrelated files) → 2) presence indicators (participant list without online/offline status is enough) → 3) mid-run follow-ups (queue follow-ups until run end instead of streaming input) → 4) collapse roles to owner-vs-everyone (skip editor/reviewer/viewer distinction) → 5) sidecar-restart session resume (restart = new run is acceptable for MVP).
+**If still behind, cut top-down:** 1) file tree/viewer (diff viewer covers review; skip browsing unrelated files) → 2) presence indicators (participant list without online/offline status is enough) → 3) mid-run follow-ups (queue follow-ups until run end instead of streaming input) → 4) collapse roles to owner-vs-everyone (skip editor/reviewer/viewer distinction) → 5) harness-restart session resume (restart = new run is acceptable for MVP).
 
 **Never cut:** session create/join, chat, live activity stream, interrupt, diff review + approve/reject. These five pieces ARE the product. If ahead (unlikely at 3 weeks): re-add task board or terminal tab, surplus goes to hardening, never new features.
 
 ## 13. Testing strategy
 
-Tests where bugs are catastrophic/invisible: request specs for join auth + role matrix + **path traversal** + ingest secret; normalizer unit tests (raw fixtures in → contract events out — doubles as contract verification); changeset git edge-case units; one happy-path system test (fixture replay → events → changeset → approve → commit exists). Skipped deliberately: exhaustive frontend tests (strict TS + shared types carry the weight; 2-3 vitest cases for the reducer), cable units, browser E2E, load tests. CI: GitHub Actions, three dumb jobs (api: rubocop+rspec / sidecar: biome+tsc+vitest / web: biome+tsc+vitest). Frontend tests follow the team's established conventions: **Vitest + React Testing Library, `.test.tsx` co-located with components, MSW** (`setupServer`) for REST mocking.
+Tests where bugs are catastrophic/invisible: request specs for join auth + role matrix + **path traversal** + ingest secret; normalizer unit tests (raw fixtures in → contract events out — doubles as contract verification); changeset git edge-case units; one happy-path system test (fixture replay → events → changeset → approve → commit exists). Skipped deliberately: exhaustive frontend tests (strict TS + shared types carry the weight; 2-3 vitest cases for the reducer), cable units, browser E2E, load tests. CI: GitHub Actions, three dumb jobs (api: rubocop+rspec / harness: biome+tsc+vitest / web: biome+tsc+vitest). Frontend tests follow the team's established conventions: **Vitest + React Testing Library, `.test.tsx` co-located with components, MSW** (`setupServer`) for REST mocking.
 
 ## 14. Top risks
 
 | Risk | Mitigation | Early warning |
 |---|---|---|
 | SDK event-shape surprises (least-known dep; schema derives from it) | W1 spike before freeze; fixtures checked in; normalizer = only SDK-aware file; pin SDK version | Spike can't map messages to draft taxonomy by Wed W1 → delay freeze 2 days |
-| Run-lifecycle bugs (orphans, double-active, stuck review) | State machine in one place; **DB partial unique index**; heartbeat + boot reconciliation built W2 | Runs stuck "running" after sidecar restart |
+| Run-lifecycle bugs (orphans, double-active, stuck review) | State machine in one place; **DB partial unique index**; heartbeat + boot reconciliation built W2 | Runs stuck "running" after harness restart |
 | Streaming UX jank (delta floods) | Ephemeral vs durable two-tier; 150ms coalescing; Zustand selectors; capped feed | Feed jank during W2 live runs; >10-20k events per modest run |
-| Git edge cases (untracked files, reject residue) | intent-to-add; W3 unit tests + backend/sidecar pairing; no-submodule-repos scoping | W3 dogfood diff missing a new file |
+| Git edge cases (untracked files, reject residue) | intent-to-add; W3 unit tests + backend/harness pairing; no-submodule-repos scoping | W3 dogfood diff missing a new file |
 | Reject/resume context divergence | Hard rule in `Runs::Start`: reject severs claude_session_id; only revise resumes | — (correctness rule, encoded) |
 | ActionCable auth/origin cross-machine (works on localhost, 403s/silently drops from other laptops) | Cookie-auth cable + explicit allowed origins for `.local`/LAN-IP; **cross-machine smoke end of W2, not deferred to the final week**; mDNS hostname in join URLs so DHCP changes don't break links | W2 Fri: REST works from a second machine, cable won't subscribe |
 | Aggressive 3-week pace (was 4 weeks) | Pre-agreed scope ladder; task board + terminal tab already cut; fixtures decouple streams; weekly milestones = pace checkpoints | Any milestone missed by >1 day → execute next ladder cut |
@@ -217,7 +253,7 @@ Tests where bugs are catastrophic/invisible: request specs for join auth + role 
 ## 15. Verification
 
 - **Two review gates bookend the build:** days 1–2 architecture review (plan challenged + SDK spike validates the riskiest assumption before any contract freezes) and W3 Thu–Fri complete project review (cross-stream code review, security checklist, cold docs walkthrough).
-- **Weekly milestones** are the acceptance gates (W1 Rails+sidecar replay the fixture end-to-end + frontend scaffold exists → W2 live Claude + LAN cross-machine smoke + chat/presence/activity feed → W3 full approve/reject loop + README-driven cold start from a second laptop).
+- **Weekly milestones** are the acceptance gates (W1 Rails+harness replay the fixture end-to-end + frontend scaffold exists → W2 live Claude + LAN cross-machine smoke + chat/presence/activity feed → W3 full approve/reject loop + README-driven cold start from a second laptop).
 - **Dogfood = highest-leverage QA**: from W3 onward, using clawdparty to build clawdparty with everyone on their own laptop over the LAN — exercises streaming, diff review, approval, and cross-machine networking simultaneously.
 - Automated: CI green on the three jobs; system test proves prompt→events→changeset→approve→commit.
 
@@ -249,7 +285,7 @@ Conventions for this repo — chosen to keep a small MVP simple and consistent. 
 ## 17. Future phases (post-MVP backlog)
 
 - **Remote access:** Tailscale (preferred) or Cloudflare Tunnel — rebind interface + allowed origins; no app-level changes expected.
-- **Per-tool Bash gating:** activate the `canUseTool` seam in `sidecar/src/permissions.ts` for live approval of risky commands.
+- **Per-tool Bash gating:** `tool:before` in `harness/src/extensions/points.ts` refuses or transforms a call, fails closed on timeout, and surfaces refusals as `tool_refused`.
 - **Monaco editor / collaborative editing** (CRDT/Yjs), multiplayer cursors.
 - **Cloud-hosted sessions** with repo cloning and PR creation; local-agent mode for other developers' machines.
 - **Codex worker support** as a second AI participant.

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Frozen clawdparty interface contracts: event envelope, type taxonomy, and the sample_run.jsonl executable fixture. Imported by sidecar/ and web/.",
+  "description": "Frozen clawdparty interface contracts: event envelope, type taxonomy, and the sample_run.jsonl executable fixture. Imported by harness/ and web/.",
   "exports": {
     ".": {
       "types": "./src/events.ts",
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "@types/node": "^24.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

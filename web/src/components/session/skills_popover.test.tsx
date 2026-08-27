@@ -16,8 +16,13 @@ function discovery(connectors: unknown[], skills: unknown[]): void {
   );
 }
 
-function renderPopover(): void {
-  renderWithQuery(<SkillsPopover sessionId="s" onClose={() => {}} />);
+function renderPopover(
+  over: {
+    enabledConnectors?: string[];
+    onToggleConnector?: (name: string) => void;
+  } = {},
+): void {
+  renderWithQuery(<SkillsPopover sessionId="s" onClose={() => {}} {...over} />);
 }
 
 describe("SkillsPopover (read-only capability display)", () => {
@@ -32,13 +37,30 @@ describe("SkillsPopover (read-only capability display)", () => {
     expect(screen.queryByTestId("cap-toggle-Bash")).not.toBeInTheDocument();
   });
 
-  it("lists discovered connectors (name + transport only, read-only)", async () => {
+  it("lists discovered connectors with name + transport, and a toggle", async () => {
+    // Connectors are the ONE togglable capability: enabling one connects to that MCP
+    // server and declares all of its tools, measured at ~37,500 tokens of schema for this host's
+    // 8 servers, so it is chosen per run rather than inherited. Still name + transport only —
+    // never the server's command/url/headers.
     discovery([{ name: "github", transport: "stdio" }], []);
     renderPopover();
     fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
     const row = await screen.findByTestId("cap-item-github");
     expect(row).toHaveTextContent("stdio connector");
-    expect(screen.queryByTestId("cap-toggle-github")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cap-toggle-github")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows an enabled connector as ON and reports a toggle", async () => {
+    const toggled: string[] = [];
+    discovery([{ name: "github", transport: "stdio" }], []);
+    renderPopover({ enabledConnectors: ["github"], onToggleConnector: (n) => toggled.push(n) });
+    fireEvent.click(screen.getByRole("button", { name: "Connectors" }));
+
+    const toggle = await screen.findByTestId("cap-toggle-github");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+    // The popover OWNS no state: the composer does, because it is what sends the run.
+    expect(toggled).toEqual(["github"]);
   });
 
   it("lists discovered skills (name + description, read-only)", async () => {

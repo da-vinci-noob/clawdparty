@@ -1,0 +1,31 @@
+name: contracts
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    paths:
+      - "packages/**"
+      - ".github/workflows/contracts.yml"
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install
+        working-directory: packages/contracts
+        run: npm install --no-audit --no-fund
+
+      # ONE source of truth: the commands live in bin/tests, CI calls it. Biome +
+      # tsc + Vitest for this group are identical in CI and locally (no Docker),
+      # and tsc covers fixtures/ — the exhaustive Record<EnvelopeType, …> guard is
+      # only a guard when type-checked.
+      - name: Checks (bin/tests contracts)
+        run: bin/tests contracts

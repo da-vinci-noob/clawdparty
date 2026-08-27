@@ -1,0 +1,97 @@
+{
+  "measured_at": "2026-08-16T21:37:42.900Z",
+  "region": "us-west-2",
+  "note": "Each row is Bedrock's own refusal of an over-limit maxTokens; the ceiling is quoted in its message. One request per model, none of them billed.",
+  "rows": [
+    {
+      "profile_id": "us.meta.llama3-1-8b-instruct-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.meta.llama3-1-70b-instruct-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.meta.llama3-3-70b-instruct-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.deepseek.r1-v1:0",
+      "max_output_tokens": 32768,
+      "message": "The maximum tokens you requested exceeds the model limit of 32768. Try again with a maximum tokens value that is lower than 32768."
+    },
+    {
+      "profile_id": "us.mistral.pixtral-large-2502-v1:0",
+      "max_output_tokens": 131072,
+      "message": "The maximum tokens you requested exceeds the model limit of 131072. Try again with a maximum tokens value that is lower than 131072."
+    },
+    {
+      "profile_id": "us.writer.palmyra-x4-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.writer.palmyra-x5-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.amazon.nova-premier-v1:0",
+      "max_output_tokens": 32000,
+      "message": "The maximum tokens you requested exceeds the model limit of 32000. Try again with a maximum tokens value that is lower than 32000."
+    },
+    {
+      "profile_id": "us.twelvelabs.pegasus-1-2-v1:0",
+      "max_output_tokens": null,
+      "message": "This action doesn't support the model that you provided. Try again with a supported text or chat model."
+    },
+    {
+      "profile_id": "global.amazon.nova-2-lite-v1:0",
+      "max_output_tokens": 65535,
+      "message": "The maximum tokens you requested exceeds the model limit of 65535. Try again with a maximum tokens value that is lower than 65535."
+    },
+    {
+      "profile_id": "us.amazon.nova-micro-v1:0",
+      "max_output_tokens": 10000,
+      "message": "The maximum tokens you requested exceeds the model limit of 10000. Try again with a maximum tokens value that is lower than 10000."
+    },
+    {
+      "profile_id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.meta.llama4-scout-17b-instruct-v1:0",
+      "max_output_tokens": 8192,
+      "message": "The maximum tokens you requested exceeds the model limit of 8192. Try again with a maximum tokens value that is lower than 8192."
+    },
+    {
+      "profile_id": "us.amazon.nova-lite-v1:0",
+      "max_output_tokens": 10000,
+      "message": "The maximum tokens you requested exceeds the model limit of 10000. Try again with a maximum tokens value that is lower than 10000."
+    },
+    {
+      "profile_id": "us.amazon.nova-pro-v1:0",
+      "max_output_tokens": 10000,
+      "message": "The maximum tokens you requested exceeds the model limit of 10000. Try again with a maximum tokens value that is lower than 10000."
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-sol",
+      "max_output_tokens": 131072,
+      "message": "The maximum tokens you requested exceeds the model limit of 131072. Try again with a maximum tokens value that is lower than 131072."
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-terra",
+      "max_output_tokens": 131072,
+      "message": "The maximum tokens you requested exceeds the model limit of 131072. Try again with a maximum tokens value that is lower than 131072."
+    },
+    {
+      "profile_id": "us.openai.gpt-5.6-luna",
+      "max_output_tokens": 131072,
+      "message": "The maximum tokens you requested exceeds the model limit of 131072. Try again with a maximum tokens value that is lower than 131072."
+    }
+  ]
+}

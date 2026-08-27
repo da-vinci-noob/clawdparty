@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# bin/check-docs — the doc-truth gate.
+#
+# Project guidance must describe only components that exist. This feature exists
+# partly because guidance drifted from the tree and nothing noticed; a gate that
+# runs on every PR is what stops that recurring.
+#
+# Three checks:
+#   1. Every repo-anchored path named in guidance exists.
+#   2. Every app-level Ruby constant named in guidance resolves to a file.
+#   3. Every exported interception point has at least one real importer — a seam
+#      that cannot intercept must not remain in the tree presented as one
+#.
+#   4. The LIVING spec (openspec/specs) names no identifier this feature removed.
+#      Found the hard way: the living spec still specified `permission_mode`,
+#      `claude_session_id` and the Agent SDK long after all three were deleted,
+#      across ten capabilities, and nothing checked it because checks 1-3 only read
+#      the three guidance files. A capability spec that describes a removed field is
+#      the same defect as guidance naming an absent component.
+#
+# EXPECTED TO FAIL until the harness migration closes it out. The failures are a
+# worklist, not noise: a release gate verifies this script green.
+set -uo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+# README.md is IN here as of the supervisor decision: it had drifted for months — claiming the
+# harness mounts `~/.claude` and that a container cannot read the Keychain — precisely because it was
+# the one participant-facing document nothing checked.
+GUIDANCE=(README.md CLAUDE.md docs/PLAN.md)
+
+# Constants whose home is a gem, not this tree.
+FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|Rails|RSpec|SolidQueue|SolidCable|Faraday|Net|JSON|Time|Struct|StandardError)::'
+
+# Files presented as interception points. Every exported symbol in one of these
+# must be imported somewhere outside itself and outside tests. Add a row when a
+# new extension point ships; never remove a row to make this pass.
+#
+# `harness/src/permissions.ts` was the original row and is deliberately gone: the
+# file was DELETED, not excused. Its `canUseTool` had no importer and could
+# never intercept, and its role is now `tool:before` in the file below — which does
+# have importers, so this row passes on merit rather than by omission.
+INTERCEPTION_POINTS=(
+  harness/src/extensions/points.ts
+)
+
+# Identifiers this feature REMOVED. The living spec may still discuss them — it must do so in the
+# past tense, so a line is only flagged when it makes a POSITIVE claim (no negation marker on it).
+# Archived changes and the contracts CHANGELOG are exempt by scope: both are history, and a
+# changelog that could not name what it removed would be useless.
+RETIRED_IDENTIFIERS=(
+  permission_mode
+  permissionMode
+  claude_session_id
+  allowed_tools
+  SIDECAR_URL
+  'Sidecar::'
+  claude-agent-sdk
+  canUseTool
+)
+# `-w` is load-bearing above: `allowed_tools` is a substring of the CURRENT `disallowed_tools`, and a
+# fixed-string search reported four false positives on the requirement that replaced it.
+# A spec that EXPLAINS a removal wraps that passage in the same `doc-truth:ignore` markers checks
+# 1-3 use. No keyword heuristic: the first version of this check allowed any line near words like
+# "no longer", and promptly excused `409 if the run is no longer active` — a live route description
+# for a route that no longer exists. This file's own header makes that argument; I had to make the
+# mistake to believe it.
+
+failures=0
+unterminated_log="$(mktemp)"
+trap 'rm -f "${unterminated_log}"' EXIT
+note() { printf '  %s\n' "$1"; }
+fail() { printf '\033[31mFAIL\033[0m %s\n' "$1"; failures=$((failures + 1)); }
+
+# A documented path is checkable only if it is anchored at the repo root. This
+# is what separates a real path claim from prose that merely contains a slash
+# ("app/services", "run_finished/run_failed", a path relative to some package).
+anchored() {
+  local first="${1%%/*}"
+  [[ -e "$first" ]]
+}
+
+# Guidance sometimes NAMES a component in order to say it does not exist — a
+# document's own "companion documents that are now stale" list is exactly
+# that. Read literally, those names look like claims, and the gate cannot tell a
+# claim from a quotation. Requiring them to resolve would mean deleting a
+# document's explanation of the drift it is describing, which is the opposite of
+# what this gate is for.
+#
+# So a region may opt out explicitly:
+#
+#     <!-- doc-truth:ignore --> … <!-- doc-truth:end -->
+#
+# Explicit and narrow, deliberately: an inferred exemption ("skip anything near
+# the words 'does not exist'") would silently excuse real drift.
+# An UNTERMINATED ignore block is an error, not a wider exemption. Without this
+# check the filter fails OPEN: a single stray marker — including one written in
+# prose while merely DISCUSSING the mechanism — silently suppresses the rest of the
+# file. That happened once, muting 357 of one document's 434 lines and turning
+# the gate green for the wrong reason.
+#
+# Matched on the anchored, indentation-free form so a marker quoted mid-sentence
+# does not arm it.
+readable() {
+  awk -v file="$1" '
+    /^[[:space:]]*<!-- doc-truth:ignore -->[[:space:]]*$/ { skip = 1; next }
+    /^[[:space:]]*<!-- doc-truth:end -->[[:space:]]*$/    { skip = 0; next }
+    !skip
+    END {
+      if (skip) {
+        printf "UNTERMINATED_IGNORE %s\n", file > "/dev/stderr"
+        exit 3
+      }
+    }
+  ' "$1" 2>>"${unterminated_log}"
+}
+
+# `readable`, but keeping each surviving line's ORIGINAL number so a finding can be pointed at.
+readable_numbered() {
+  awk -v file="$1" '
+    /^[[:space:]]*<!-- doc-truth:ignore -->[[:space:]]*$/ { skip = 1; next }
+    /^[[:space:]]*<!-- doc-truth:end -->[[:space:]]*$/    { skip = 0; next }
+    !skip { printf "%d:%s\n", NR, $0 }
+    END {
+      if (skip) {
+        printf "UNTERMINATED_IGNORE %s\n", file > "/dev/stderr"
+        exit 3
+      }
+    }
+  ' "$1" 2>>"${unterminated_log}"
+}
+
+echo "== 1. Paths named in guidance exist =============================="
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || { fail "guidance file itself is missing: $doc"; continue; }
+  while read -r path; do
+    [[ -n "$path" ]] || continue
+    case "$path" in http*|*'*'*|~*|*'`'*) continue ;; esac
+    path="${path%/}"
+    anchored "$path" || continue
+    [[ -e "$path" ]] || fail "$doc names a path that does not exist: $path"
+  done < <(readable "$doc" | grep -oE '`[A-Za-z0-9_.][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+`' | tr -d '`' | sort -u)
+done
+
+# The same claim, made WITHOUT a directory. The check above requires a slash, so a bare
+# `permissions.ts` was invisible to it — and that is exactly how docs/PLAN.md kept naming four
+# source files the SDK removal deleted, while this gate reported OK. A whole category of stale
+# claim walked through the hole in the gate written to catch it.
+#
+# Resolved by BASENAME against the tracked tree, which is what makes an unanchored name checkable:
+# a bare filename does not say which directory, so "does any file with this name exist?" is the
+# strongest honest question. It still catches the case that matters — a file that was DELETED has
+# no basename anywhere. Only source-like extensions, because prose mentions `package.json` and
+# `.env.local` generically and those are not component claims.
+basenames="$(mktemp)"
+git ls-files | xargs -n1 basename 2>/dev/null | sort -u >"$basenames"
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || continue
+  while read -r name; do
+    [[ -n "$name" ]] || continue
+    grep -qxF "$name" "$basenames" || fail "$doc names a file that exists nowhere in the tree: $name"
+  done < <(readable "$doc" |
+    grep -oE '`[A-Za-z0-9_][A-Za-z0-9_.-]*\.(ts|tsx|rb|mjs|sql)`' | tr -d '`' | sort -u)
+done
+rm -f "$basenames"
+
+echo "== 2. Ruby constants named in guidance resolve =================="
+for doc in "${GUIDANCE[@]}"; do
+  [[ -f "$doc" ]] || continue
+  while read -r const; do
+    [[ -n "$const" ]] || continue
+    [[ "$const" =~ $FRAMEWORK_NAMESPACES ]] && continue
+    # Foo::BarBaz -> foo/bar_baz.rb
+    rel="$(printf '%s' "$const" \
+      | sed 's/::/\//g; s/\([a-z0-9]\)\([A-Z]\)/\1_\2/g' \
+      | tr '[:upper:]' '[:lower:]')"
+    if ! find api -type f -path "*/${rel}.rb" 2>/dev/null | grep -q .; then
+      fail "$doc names ${const}, but no */${rel}.rb exists under api/"
+      # Point at the likely real name rather than only saying "absent".
+      base="${rel##*/}"; dir="${rel%/*}"
+      neighbours="$(find api -type d -path "*/${dir}" 2>/dev/null -exec ls -1 {} \; | sort -u | tr '\n' ' ')"
+      [[ -n "$neighbours" ]] && note "api/**/${dir}/ contains: ${neighbours}(looked for ${base}.rb)"
+    fi
+  done < <(readable "$doc" | grep -oE '`[A-Z][A-Za-z0-9]*(::[A-Z][A-Za-z0-9]*)+`' | tr -d '`' | sort -u)
+done
+
+echo "== 3. Interception points can actually intercept ================="
+for point in "${INTERCEPTION_POINTS[@]}"; do
+  if [[ ! -f "$point" ]]; then
+    fail "declared interception point is missing from the tree: $point"
+    continue
+  fi
+  module="$(basename "$point" .ts)"
+  # Anything importing this module by path, outside the file itself and outside tests.
+  importers="$(grep -rl --include='*.ts' --include='*.tsx' \
+    -E "from \"[^\"]*/${module}(\.js)?\"|from \"\./${module}(\.js)?\"" . 2>/dev/null \
+    | grep -v node_modules | grep -v -E '(\.test\.|/test/)' | grep -v "^\./${point}$" || true)"
+  if [[ -z "$importers" ]]; then
+    fail "$point exports an interception point with NO importer — it cannot intercept "
+    while read -r sym; do
+      [[ -n "$sym" ]] && note "unreachable export: ${sym}"
+    done < <(grep -oE '^export (function|const|class) [A-Za-z0-9_]+' "$point" | awk '{print $3}')
+    note "resolve by wiring it into the loop, or delete it — do not leave it presented as a seam"
+  fi
+done
+
+echo
+echo "== 4. The living spec names nothing that was removed ==============="
+for ident in "${RETIRED_IDENTIFIERS[@]}"; do
+  while IFS= read -r spec; do
+    while IFS=: read -r line text; do
+      [[ -z "${line:-}" ]] && continue
+      fail "${spec}:${line} states \`${ident}\` as current, but it was removed by this feature"
+      note "$(cut -c1-110 <<<"${text#"${text%%[![:space:]]*}"}")"
+    done < <(readable_numbered "$spec" | grep -w -F -- "$ident" || true)
+  done < <(find openspec/specs -name spec.md | sort)
+done
+
+# Report a stray marker as a failure of its own: a suppressed region is worse than a
+# reported discrepancy, because it looks like success.
+while read -r _tag doc; do
+  [[ -n "${doc:-}" ]] && fail "$doc has an unterminated <!-- doc-truth:ignore --> block; the rest of the file was NOT checked"
+done < <(sort -u "${unterminated_log}" 2>/dev/null)
+
+echo
+if (( failures > 0 )); then
+  printf '\033[31m%d doc-truth failure(s).\033[0m Guidance must describe only what exists .\n' "$failures"
+  echo "Each line above is a worklist item, not a lint nit: either the tree is wrong or the doc is."
+  exit 1
+fi
+
+printf '\033[32mdoc-truth OK\033[0m — guidance matches the tree, every interception point has an importer, the living spec names nothing removed.\n'

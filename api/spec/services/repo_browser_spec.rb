@@ -79,6 +79,43 @@ RSpec.describe(RepoBrowser) do
     it 'refuses anything under .git/' do
       expect { browser.content('.git/config') }.to(raise_error(RepoBrowser::NotFound))
     end
+
+    # The denylist ran against the REQUESTED path while containment ran against the RESOLVED one, so
+    # an innocuously-named symlink that stays INSIDE the worktree passed both: containment saw a path
+    # within the tree, and the denylist saw the link's own basename. Every existing symlink case here
+    # escapes OUTWARD, which is the direction that was covered.
+    #
+    # Reachable without any privilege: Claude edits the worktree, so a prompt can create the link, and
+    # a repo may already contain one. Then any participant — a VIEWER included — reads it through the
+    # file viewer.
+    it 'refuses a symlink INSIDE the worktree that points at a denylisted file' do
+      File.write(wt('.env'), "SAMPLE_TOKEN=not-a-real-value\n")
+      File.symlink(wt('.env'), wt('notes.txt'))
+
+      expect { browser.content('notes.txt') }.to(raise_error(RepoBrowser::NotFound))
+    end
+
+    it 'refuses a symlink that points into .git/' do
+      # `.git/config` carries remote URLs, which in some setups embed a token.
+      File.symlink(wt('.git/config'), wt('harmless.txt'))
+
+      expect { browser.content('harmless.txt') }.to(raise_error(RepoBrowser::NotFound))
+    end
+
+    it 'refuses a RELATIVE symlink to a denylisted file, not only an absolute one' do
+      File.write(wt('id_rsa'), "SAMPLE-KEY-not-real\n")
+      File.symlink('id_rsa', wt('readme_extra.txt'))
+
+      expect { browser.content('readme_extra.txt') }.to(raise_error(RepoBrowser::NotFound))
+    end
+
+    it 'still serves an ordinary symlink to a file that is NOT denylisted' do
+      # The fix must not make every symlink unreadable: a repo linking `docs/index.md` is normal.
+      File.write(wt('real.md'), "content\n")
+      File.symlink('real.md', wt('alias.md'))
+
+      expect(browser.content('alias.md')).to(eq("content\n"))
+    end
   end
 
   describe '#content size + binary' do

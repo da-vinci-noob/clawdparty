@@ -37,9 +37,13 @@ module Internal
       attrs
     end
 
+    # `:store_seq` is load-bearing and was MISSING here, which is not a degradation but a blinding:
+    # `ProjectionCheck` filters `.where.not(store_seq: nil)`, so with it stripped Rails looks empty and
+    # every session reports diverged — a real divergence then looks exactly like a healthy one.
+    # `Events::Ingest#build_event` was already reading it.
     def permit_event(event)
       event.permit(:id, :session_id, :ai_run_id, :seq, :type, :event_type, :actor_kind, :ts,
-                   actor: %i[kind id], payload: {}).to_h
+                   :store_seq, actor: %i[kind id], payload: {}).to_h
     end
 
     def malformed?(event)

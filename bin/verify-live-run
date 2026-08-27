@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+// S0 steps 4-7 — the core loop against the running stack: start a run, watch it stream,
+// review the changeset, approve it, confirm the commit landed.
+//
+// Every other automated check stubs the model. This one spends real tokens on the host's own
+// provider, which is why it is a script you invoke rather than part of any suite.
+//
+// Usage: bin/verify-live-run <absolute-repo-path> [base-url]
+
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const WebSocket = createRequire(`${ROOT}/web/package.json`)("ws");
+
+const REPO = process.argv[2];
+const BASE = process.argv[3] ?? "http://localhost:3000";
+const CABLE = `${BASE.replace(/^http/, "ws")}/~cable`;
+const PROMPT =
+  "Add a one-line docstring to the greet function in hello.py. Change nothing else.";
+// The session default is `anthropic-direct`; on a host without an API key the run is refused with
+// an actionable 422 rather than started. Override to whichever path this host can actually serve.
+const PROVIDER = process.env.PROVIDER ?? "anthropic-bedrock";
+const MODEL = process.env.MODEL;
+
+if (!REPO) {
+  console.error("usage: bin/verify-live-run <absolute-repo-path> [base-url]");
+  process.exit(2);
+}
+
+let failures = 0;
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${label}${detail ? ` — ${detail}` : ""}`);
+  if (!ok) failures += 1;
+}
+
+function cookieFrom(response) {
+  const jar = (response.headers.getSetCookie?.() ?? []).find((c) => c.startsWith("clawd_uid="));
+  if (!jar) throw new Error("no clawd_uid cookie in response");
+  return jar.split(";")[0];
+}
+
+async function api(path, { method = "GET", cookie, body } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${method} ${path} → ${response.status}: ${text.slice(0, 400)}`);
+  return text ? JSON.parse(text) : null;
+}
+
+function watch(sessionId, cookie) {
+  const identifier = JSON.stringify({ channel: "SessionChannel", session_id: String(sessionId) });
+  const socket = new WebSocket(CABLE, ["actioncable-v1-json"], {
+    headers: { Cookie: cookie, Origin: BASE },
+  });
+  const seen = [];
+  const waiters = [];
+
+  socket.on("message", (raw) => {
+    const frame = JSON.parse(raw.toString());
+    if (frame.type === "welcome") return socket.send(JSON.stringify({ command: "subscribe", identifier }));
+    if (!frame.message) return;
+    seen.push(frame.message);
+    for (const w of [...waiters]) {
+      if (w.match(frame.message)) {
+        waiters.splice(waiters.indexOf(w), 1);
+        w.done(frame.message);
+      }
+    }
+  });
+
+  return {
+    seen,
+    /** Resolve when an event matching `match` arrives (or has already arrived). */
+    until(match, ms, what) {
+      const already = seen.find(match);
+      if (already) return Promise.resolve(already);
+      return new Promise((done, fail) => {
+        const timer = setTimeout(
+          () => fail(new Error(`timed out after ${ms}ms waiting for ${what}`)),
+          ms,
+        );
+        waiters.push({ match, done: (e) => (clearTimeout(timer), done(e)) });
+      });
+    },
+    close: () => socket.close(),
+  };
+}
+
+const types = (events) => events.map((e) => e.type);
+
+async function main() {
+  console.log(`\nS0.4-S0.7 — the core loop, live, against ${BASE}\n  repo: ${REPO}\n`);
+
+  const created = await fetch(`${BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // `repository_path`, not `working_directory`: the param is the persisted column's name, and
+    // an unknown key would silently default the session to the repo ROOT, which is not a git
+    // repository and fails at run start instead of here.
+    body: JSON.stringify({
+      title: "live run",
+      name: "Owner",
+      mode: "review",
+      repository_path: REPO,
+    }),
+  });
+  if (!created.ok) throw new Error(`session create → ${created.status}: ${await created.text()}`);
+  const session = await created.json();
+  const cookie = cookieFrom(created);
+  const sessionId = session.session_id;
+  console.log(`session ${sessionId} (review mode)\n`);
+
+  const feed = watch(sessionId, cookie);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const run = await api(`/api/sessions/${sessionId}/runs`, {
+    method: "POST",
+    cookie,
+    body: { prompt: PROMPT, provider: PROVIDER, ...(MODEL ? { model: MODEL } : {}) },
+  });
+  check(Boolean(run.id), "run accepted", `run ${run.id}`);
+
+  const started = await feed.until((e) => e.type === "run_started", 60_000, "run_started");
+  check(
+    typeof started.payload?.model === "string" && typeof started.payload?.cwd === "string",
+    "run_started arrived on the cable",
+    `${started.payload?.model} in ${started.payload?.cwd}`,
+  );
+  check(
+    started.payload.cwd.includes(`session-${sessionId}`),
+    "cwd is pinned to the session worktree, not the repo itself",
+  );
+
+  // Two tiers: deltas are ephemeral (null id) and must NOT be persisted; ai_text is durable.
+  const terminal = await feed.until(
+    (e) => ["run_finished", "run_failed", "run_interrupted"].includes(e.type),
+    600_000,
+    "a terminal run event",
+  );
+  check(terminal.type === "run_finished", `run reached ${terminal.type}`);
+
+  const deltas = feed.seen.filter((e) => e.type === "ai_text_delta");
+  check(deltas.length > 0, "text streamed as ephemeral deltas", `${deltas.length} deltas`);
+  check(
+    deltas.every((e) => e.id === null),
+    "every delta carried a null id (ephemeral, never persisted)",
+  );
+  check(
+    feed.seen.some((e) => e.type === "ai_text" && e.id !== null),
+    "the durable ai_text record arrived too",
+  );
+  const tools = feed.seen.filter((e) => e.type === "tool_started");
+  check(tools.length > 0, "tool activity was visible", types(tools).length + " tool_started");
+
+  const ready = await feed.until((e) => e.type === "changeset_ready", 30_000, "changeset_ready");
+  check(
+    ready.payload?.files_changed >= 1,
+    "changeset_ready announced with a real count",
+    `${ready.payload?.files_changed} file(s), +${ready.payload?.insertions}/-${ready.payload?.deletions}`,
+  );
+
+  const diff = await api(`/api/runs/${run.id}/diff`, { cookie });
+  check(
+    Array.isArray(diff.files) && diff.files.length > 0,
+    "the diff came over REST, not cable",
+    (diff.files ?? []).map((f) => f.path).join(", "),
+  );
+  // `base_sha` lives on the RUN and is served with the diff — it is not part of the
+  // `run_started` payload, which carries model/cwd/capabilities.
+  check(
+    typeof diff.base_sha === "string" && diff.base_sha.length > 0,
+    "the diff is anchored to the run's recorded base_sha",
+    diff.base_sha?.slice(0, 8),
+  );
+  check(Array.isArray(diff.conflicts), "conflicts is always present, empty for one lane");
+
+  await api(`/api/runs/${run.id}/approve`, { method: "POST", cookie });
+  const approved = await feed.until((e) => e.type === "changeset_approved", 30_000, "changeset_approved");
+  check(
+    typeof approved.payload?.commit_sha === "string" && approved.payload.commit_sha.length > 0,
+    "approve committed and announced the commit",
+    approved.payload?.commit_sha?.slice(0, 8),
+  );
+
+  // Backfill proves the whole thing is reconstructible for anyone who arrives later.
+  const backfill = await api(`/api/sessions/${sessionId}/events?after=0`, { cookie });
+  const persisted = types(backfill.events ?? backfill);
+  check(!persisted.includes("ai_text_delta"), "no delta was persisted (two-tier rule held)");
+  for (const required of ["run_started", "ai_text", "changeset_ready", "changeset_approved", "run_finished"]) {
+    check(persisted.includes(required), `the record contains ${required}`);
+  }
+
+  feed.close();
+  console.log(
+    `\n${failures === 0 ? "PASS" : `FAIL (${failures})`} — ${feed.seen.length} live events, ${persisted.length} persisted\n`,
+  );
+  console.log(`session ${sessionId}; worktree branch clawd/session-${sessionId}`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}\n`);
+  process.exit(1);
+});

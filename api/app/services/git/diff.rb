@@ -16,17 +16,27 @@ module Git
   class Diff
     class GitError < StandardError; end
 
-    Result = Struct.new(:base_sha, :files, :patch, keyword_init: true)
+    # `conflicts` is  : files another lane has also changed. Empty for a
+    # single-lane session, which is every session until a second lane is opened.
+    Result = Struct.new(:base_sha, :files, :patch, :conflicts, keyword_init: true)
     FileStat = Struct.new(:path, :insertions, :deletions, :binary, keyword_init: true)
 
     def initialize(run, worktree: nil)
       @run = run
-      @worktree = worktree || Git::WorktreeManager.new(run.session)
+      @worktree = worktree || Git::WorktreeManager.new(run.session, lane: run.lane)
     end
 
     def call
       with_temp_index do |index_file|
-        Result.new(base_sha: @run.base_sha, files: numstat(index_file), patch: patch(index_file))
+        files = numstat(index_file)
+        Result.new(
+          base_sha: @run.base_sha,
+          files: files,
+          patch: patch(index_file),
+          # Computed from the file list just produced, so the reviewer sees the overlap for the
+          # exact changeset in front of them.
+          conflicts: LaneConflicts.call(run: @run, paths: files.map(&:path))
+        )
       end
     end
 

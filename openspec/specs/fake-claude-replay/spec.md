@@ -5,7 +5,7 @@ TBD - created by archiving change rails-foundation. Update Purpose after archive
 ## Requirements
 ### Requirement: fake-Claude rake task replays the fixture via direct ingest
 
-A rake task SHALL replay `packages/contracts/fixtures/sample_run.jsonl` by calling `Events::Ingest` directly in-process for each fixture event, NOT by POSTing to `/internal/events`. Because it calls the service directly, the task SHALL run without a running Puma server and without a `SIDECAR_SHARED_SECRET`. The task SHALL target (creating if needed) a session, a `Participant` for that session, and an `ai_run` so the replayed events attach to a real run and a real participant. The created (or targeted) `ai_run`'s structural `requested_by` SHALL be set to that participant, and its structural `prompt` and `model` SHALL be set to a placeholder value each, so the run satisfies all of its `NOT NULL` structural columns (`status`, `requested_by`, `prompt`, `model`).
+A rake task SHALL replay `packages/contracts/fixtures/sample_run.jsonl` by calling `Events::Ingest` directly in-process for each fixture event, NOT by POSTing to `/internal/events`. Because it calls the service directly, the task SHALL run without a running Puma server and without a `HARNESS_SHARED_SECRET`. The task SHALL target (creating if needed) a session, a `Participant` for that session, and an `ai_run` so the replayed events attach to a real run and a real participant. The created (or targeted) `ai_run`'s structural `requested_by` SHALL be set to that participant, and its structural `prompt` and `model` SHALL be set to a placeholder value each, so the run satisfies all of its `NOT NULL` structural columns (`status`, `requested_by`, `prompt`, `model`).
 
 The task SHALL **remap** three ids on each fixture event so that no event references a row that does not exist in the fresh DB and so that repeated replays do not collide on the `(ai_run_id, seq)` unique index or the partial-unique active-run index: (1) each fixture event's `ai_run_id` to the freshly-created (or targeted) `ai_run` id, (2) each fixture event's `session_id` to the targeted session id, and (3) for user-kind events, each fixture event's actor participant id (`actor.id` → the persisted `actor_participant_id`) to the freshly-created (or targeted) participant id, rather than preserving the fixture's original ids. Each fixture event's `seq` SHALL be preserved as-is and paired with the remapped `ai_run_id`.
 
@@ -14,7 +14,7 @@ At the end of a replay the created (or targeted) `ai_run` SHALL be moved to a te
 #### Scenario: Replay runs without a server or shared secret
 
 - **WHEN** the fake-Claude rake task is invoked
-- **THEN** it reads `sample_run.jsonl` and calls `Events::Ingest` per line in-process, succeeding with no Puma running and no `SIDECAR_SHARED_SECRET` set
+- **THEN** it reads `sample_run.jsonl` and calls `Events::Ingest` per line in-process, succeeding with no Puma running and no `HARNESS_SHARED_SECRET` set
 
 #### Scenario: Replay attaches events to a real session, participant, and run
 

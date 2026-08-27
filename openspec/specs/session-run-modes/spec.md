@@ -26,7 +26,7 @@ lifetime and chosen at create time. `review` mode SHALL behave exactly as today 
 A `chat` session's working directory SHALL be realpath-resolved and confirmed to be within the bind-mounted
 repo root before use (defeating `../` and symlink escape, the same containment rule the file API uses). A
 directory that resolves outside the repo root SHALL be refused at create with a client error; it SHALL NOT be
-persisted or handed to the sidecar. When no working directory is given, the mounted repo root SHALL be used.
+persisted or handed to the harness. When no working directory is given, the mounted repo root SHALL be used.
 
 #### Scenario: An escaping working directory is refused
 
@@ -42,14 +42,14 @@ persisted or handed to the sidecar. When no working directory is given, the moun
 ### Requirement: A chat run starts without a worktree or base_sha and runs in the working directory
 
 For a `chat`-mode session, `Runs::Start` SHALL NOT create a git worktree, SHALL NOT require a clean/dirty check,
-and SHALL NOT record `base_sha`; it SHALL pin the sidecar `cwd` to the session's working directory and otherwise
-start the run through the existing path (one active run per session still enforced; the sidecar protocol
+and SHALL NOT record `base_sha`; it SHALL pin the harness `cwd` to the session's working directory and otherwise
+start the run through the existing path (one active run per session still enforced; the harness protocol
 unchanged). For a `review`-mode session, `Runs::Start` SHALL be unchanged (worktree + `base_sha`).
 
 #### Scenario: Chat run skips the worktree
 
 - **WHEN** a run is started on a `chat` session
-- **THEN** no git worktree is created, `base_sha` is not recorded, and the sidecar is invoked with `cwd` set to
+- **THEN** no git worktree is created, `base_sha` is not recorded, and the harness is invoked with `cwd` set to
   the session's working directory
 
 #### Scenario: Chat run works when the directory is not a git repository
@@ -97,4 +97,57 @@ for a `chat` session.
 - **WHEN** a participant views a `chat` session
 - **THEN** the diff/approve/reject affordances are not shown (there is no changeset), while read-only viewing
   remains available
+
+### Requirement: A session DISCLOSES its mode and working directory to every role
+
+Omission is not disclosure. "The web SHALL omit the diff/approval affordances for a `chat` session" is
+satisfiable — and was satisfied — by an implementation that leaves a participant unable to tell a chat session
+from a review session that has produced no changes yet, which is the failure that got reported.
+
+The session view SHALL therefore disclose, to **every** role and not only the owner:
+
+- the session's `mode`, named;
+- what that mode IMPLIES for review — a `chat` session SHALL state that approve/reject does not apply to it,
+  rather than merely lacking the buttons;
+- the working directory the runs operate in.
+
+Mode and working directory are facts about what the session IS, not owner settings, so they are readable by
+`viewer` and `reviewer` as well. This requirement exists so a later refactor cannot remove the disclosure and
+still pass: hiding a control and explaining its absence are different obligations.
+
+#### Scenario: A chat session is distinguishable from a review session with no changes
+
+- **WHEN** any participant views a `chat` session
+- **THEN** the view names the mode `chat` and states that there is no git review, so the absence of
+  approve/reject is explained rather than merely observed
+
+#### Scenario: The working directory is visible to every role
+
+- **WHEN** a `viewer` opens a session
+- **THEN** the directory its runs operate in is shown, because it determines what the run can read and change
+
+### Requirement: Mode is immutable, and that is intentional
+
+A session's `mode` SHALL remain fixed for its lifetime, and the product SHALL NOT offer a way to change it. A
+participant who chose the wrong mode creates a new session; this is recorded as a deliberate decision rather
+than an unexamined gap.
+
+The reason is correctness, not effort. Switching `chat` → `review` would have to create a worktree from a
+repository whose files earlier chat runs may already have modified in place, so the first changeset would
+present edits that no run in that session's history accounts for — a diff the room cannot review honestly.
+Switching `review` → `chat` would abandon a worktree that may hold an unreviewed changeset.
+
+The working directory, by contrast, SHALL remain changeable by the owner. That covers the mistake actually
+worth covering: picking the wrong directory is common and harmless to correct, while picking the wrong mode is
+rare and unsafe to correct.
+
+#### Scenario: A mode change is not offered
+
+- **WHEN** an owner edits a session
+- **THEN** `mode` is not among the editable attributes, and a request that tries to change it does not change it
+
+#### Scenario: The working directory remains editable
+
+- **WHEN** an owner changes the session's working directory
+- **THEN** it applies to that session's subsequent runs, in either mode
 

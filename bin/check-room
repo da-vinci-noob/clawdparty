@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# bin/check-room — the shared-room guard.
+#
+# The premise: clawdparty turns one Claude session into a shared room. Everyone sees
+# the same live stream, in the same order, and everything a participant can do they
+# can do from a browser. –d is the one requirement group that ranks
+# above all others, and it is the kind of thing a refactor erodes one small,
+# reasonable-looking change at a time.
+#
+# Two checks:
+#   1. NO participant-facing capability requires a terminal.
+#   2. NO live payload reaches a client outside the Contract-1 envelope.
+#
+# Both are SOURCE checks. Behavioural tests prove today's features are fine; these
+# prove nothing was ADDED that breaks the premise, which is the change worth
+# catching. Runs on every PR alongside bin/check-docs.
+set -uo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+failures=0
+note() { printf '  %s\n' "$1"; }
+fail() { printf '\033[31mFAIL\033[0m %s\n' "$1"; failures=$((failures + 1)); }
+
+# The ONLY files permitted to broadcast, and there are legitimately two: Ingest is
+# the harness-event path, Append is the Rails-originated path (chat, participants,
+# changesets). Both must serialize through Event#to_envelope rather than assembling a
+# hash — the check below asserts that, because "how many broadcasters" matters less
+# than "do they all apply the envelope".
+BROADCASTERS=(
+  api/app/services/events/ingest.rb
+  api/app/services/events/append.rb
+)
+
+echo "== 1. No participant-facing capability requires a terminal  ==="
+
+# A terminal-requiring capability shows up as a dependency, not as prose — nobody
+# writes "this needs a terminal". These are the packages that would appear.
+TERMINAL_DEPS='xterm|node-pty|@xterm/|ssh2|term.js|hterm'
+
+for manifest in web/package.json harness/package.json packages/contracts/package.json; do
+  [[ -f "$manifest" ]] || continue
+  if grep -qE "\"($TERMINAL_DEPS)" "$manifest"; then
+    fail "$manifest depends on a terminal emulator or PTY"
+    note "the terminal pane is a READ-ONLY replay of tool events; there is no shell to attach to"
+  fi
+done
+
+# An interactive terminal needs a bidirectional transport to the shell. A route or
+# channel named for one is the first sign.
+if grep -rnE 'app\.(get|post|ws)[^(]*\(\s*"[^"]*(pty|tty|attach|shell|exec)' \
+     harness/src --include='*.ts' 2>/dev/null | grep -v node_modules; then
+  fail "harness exposes a route that reads as an interactive shell attach"
+fi
+
+# `stream_from` with a raw string bypasses the per-session stream entirely.
+if grep -rn 'stream_from' api/app --include='*.rb' 2>/dev/null | grep -v 'session_channel.rb' | grep -q .; then
+  fail "a cable stream exists outside SessionChannel — every live payload rides the session stream"
+fi
+
+echo "== 2. Live payloads use the Contract-1 envelope  ==="
+
+# Every broadcast_to call must live in the single broadcaster. A second one is how a
+# bespoke cable message gets introduced: it looks local and harmless at its call site.
+expected="$(printf '%s\n' "${BROADCASTERS[@]}" | sort)"
+actual="$(grep -rln 'broadcast_to' api/app --include='*.rb' 2>/dev/null | sort)"
+
+if [[ "$actual" != "$expected" ]]; then
+  fail "the set of broadcasters changed"
+  note "expected: $(printf '%s ' "${BROADCASTERS[@]}")"
+  note "found:    $(echo "$actual" | tr '\n' ' ')"
+  note "a new broadcaster is how a bespoke cable message gets in — it looks local and harmless"
+fi
+
+# Each broadcaster must hand over a serialized envelope, not a literal hash. This is
+# the assertion that actually protects ; the count above only protects it by
+# proxy.
+for file in "${BROADCASTERS[@]}"; do
+  [[ -f "$file" ]] || { fail "declared broadcaster is missing: $file"; continue; }
+  if ! grep -qE 'broadcast\((to_envelope|ephemeral_envelope)|broadcast_to\([^)]*(to_envelope|envelope)' "$file"; then
+    fail "$file broadcasts something other than an envelope"
+    note "clients switch on the eight envelope fields; a bespoke payload is silently mis-handled"
+  fi
+done
+
+# The envelope's eight fields, as Event#to_envelope emits them. Scoped to that method
+# rather than the whole file: every field name also appears in the schema annotation,
+# so a file-wide grep would pass even if to_envelope stopped emitting one.
+envelope_body="$(awk '/def to_envelope/,/^    end$/' api/app/models/event.rb)"
+for field in id session_id ai_run_id seq type actor ts payload; do
+  grep -q "${field}:" <<<"$envelope_body" || {
+    fail "Event#to_envelope no longer emits '$field'"
+    note "the envelope's scalar shape is FROZEN (a major bump); a missing field is breaking"
+  }
+done
+
+# The web must consume the shared stream, not a private channel.
+# Checked per FILE, not per line: `subscriptions.create(` and the channel name sit on
+# different lines, so a line-scoped grep reports every correct call as a violation.
+# The first version of this check did exactly that.
+while read -r file; do
+  [[ -n "$file" ]] || continue
+  if ! grep -q 'channel: "SessionChannel"' "$file"; then
+    fail "$file subscribes to a channel other than SessionChannel"
+    note "a second channel means two orderings that cannot be reconciled for a late joiner"
+  fi
+done < <(grep -rl 'subscriptions.create' web/src --include='*.ts' --include='*.tsx' 2>/dev/null | grep -v node_modules)
+
+# Chat is the canonical case: it MUST ride the event stream, not a side channel.
+if [[ -f api/app/controllers/messages_controller.rb ]]; then
+  grep -q 'Events::Append' api/app/controllers/messages_controller.rb || {
+    fail "chat no longer appends to the event stream"
+    note "chat and run activity share one ordered stream, so a late joiner replays both"
+  }
+fi
+
+echo
+if (( failures > 0 )); then
+  printf '\033[31m%d shared-room failure(s).\033[0m\n' "$failures"
+  echo "is the requirement group that ranks above all others: many people,"
+  echo "one live session, at once, from a browser. Erode it and the product is a queue."
+  exit 1
+fi
+
+printf '\033[32mroom OK\033[0m — browser-only, one ordered stream, one envelope.\n'

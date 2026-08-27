@@ -52,5 +52,78 @@ RSpec.describe(FakeClaude::Replay) do
       expect(ContractVersion.current).to(include(major: 1))
       expect { described_class.call }.not_to(raise_error)
     end
+
+    it 'refuses to replay against a contract older than the fixture needs' do
+      allow(ContractVersion).to(receive(:current).and_return({ major: 1, minor: 4 }))
+
+      expect { described_class.call }.to(raise_error(described_class::IncompatibleContract))
+    end
+  end
+
+  # The design record names the Rails replay path as one of four artifacts that
+  # MUST pass against sample_run.jsonl. "Passes" has to mean the new types
+  # actually flow through ingest — not merely that nothing raised.
+  describe 'the v1.5 harness taxonomy' do
+    let!(:result) { described_class.call }
+
+    def persisted_types
+      Event.where(session_id: result[:session_id]).pluck(:event_type)
+    end
+
+    it 'persists every durable harness type' do
+      expect(persisted_types).to(include(
+                                   'request_header', 'context_compacted', 'tool_refused',
+                                   'provider_error', 'recovery_applied', 'user_prompt'
+                                 ))
+    end
+
+    it 'never persists context_usage — it is ephemeral' do
+      expect(persisted_types).not_to(include('context_usage'))
+    end
+
+    it 'broadcasts context_usage even though it is not persisted' do
+      expect(result[:broadcast]).to(be_positive)
+    end
+
+    it 'persists the plugin toggles as session-scoped (null ai_run_id and seq)' do
+      toggles = Event.where(session_id: result[:session_id],
+                            event_type: %w[plugin_enabled plugin_disabled])
+
+      expect(toggles.count).to(eq(2))
+      expect(toggles.pluck(:ai_run_id).uniq).to(eq([nil]))
+      expect(toggles.pluck(:seq).uniq).to(eq([nil]))
+    end
+
+    it 'attributes harness decisions to the system, not to Claude or a user' do
+      system_scoped = Event.where(session_id: result[:session_id],
+                                  event_type: %w[request_header context_compacted tool_refused
+                                                 provider_error recovery_applied])
+
+      expect(system_scoped.pluck(:actor_kind).uniq).to(eq(['system']))
+      expect(system_scoped.pluck(:actor_participant_id).uniq).to(eq([nil]))
+    end
+
+    it 'records a credential SOURCE on request_header and never a value' do
+      header = Event.find_by(session_id: result[:session_id], event_type: 'request_header')
+
+      expect(header.payload['credential_source']).to(eq('file:~/.claude/.credentials.json'))
+      expect(header.payload.to_json).not_to(match(/sk-ant-|access_token|AKIA/))
+    end
+
+    it 'keeps recovery_applied uncertainty as an explicit boolean' do
+      recovery = Event.find_by(session_id: result[:session_id], event_type: 'recovery_applied')
+
+      # TRUE on purpose. The fixture now captures a real recovery from `request_pending`,
+      # which is the load-bearing case (events.md: "never default it to `false` to simplify
+      # a display"). Pinning `false` — as this did while the fixture happened to carry it —
+      # would pass even if ingest coerced the flag to false, which is the exact bug the
+      # assertion exists to catch.
+      expect(recovery.payload).to(include('uncertain'))
+      expect(recovery.payload['uncertain']).to(be(true))
+    end
+
+    it 'rejects no event in the fixture' do
+      expect(result[:accepted] + result[:broadcast]).to(eq(result[:total]))
+    end
   end
 end

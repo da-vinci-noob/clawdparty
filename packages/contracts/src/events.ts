@@ -1,17 +1,18 @@
 /**
  * clawdparty event contract — the machine-checked source of truth for the
- * event envelope and the frozen 22-name type taxonomy.
+ * event envelope and the frozen 30-name type taxonomy.
  *
  * Prose, rationale, and the per-type payload tables live in
- * `docs/contracts/events.md`; this file is the typed shape that `sidecar/` and
+ * `docs/contracts/events.md`; this file is the typed shape that `harness/` and
  * `web/` import. When the two disagree: this file is authoritative for SHAPE,
  * the doc is authoritative for INTENT — keep them in sync and record every
  * change in `docs/contracts/CHANGELOG.md`.
  *
- * FREEZE STATE: the envelope fields, their scalar types, the 22 type names, and
- * the `Actor` union are FROZEN (since v1.0). Per-type `payload` interfaces were
- * FINALIZED from the real SDK spike at v1.1 (`sdk-message-spike`); they are no
- * longer `pending-spike`. See `docs/contracts/sdk_mapping.md` for the derivation.
+ * FREEZE STATE: the envelope fields, their scalar types, and the `Actor` union
+ * are FROZEN (since v1.0). Per-type `payload` interfaces were FINALIZED from the
+ * real SDK spike at v1.1 (`sdk-message-spike`). The taxonomy has grown additively
+ * — 20 at v1.0, 21 at v1.2, 22 at v1.3, 30 at v1.5 (the harness types), 31 at
+ * v1.10 (`skill_changed`) — and each growth is a CHANGELOG entry with a `minor` bump.
  */
 
 /**
@@ -21,10 +22,10 @@
  * compatibility by requiring an EXACT `major` and a `minor` >= what it needs, so
  * a breaking `major` bump fails the check rather than passing a loose `>=`.
  */
-export const CONTRACT_VERSION = { major: 1, minor: 4 } as const;
+export const CONTRACT_VERSION = { major: 1, minor: 16 } as const;
 
 /**
- * The 22 frozen event type names. Adding or removing a name is a CONTRACT
+ * The 31 frozen event type names. Adding or removing a name is a CONTRACT
  * CHANGE (see `docs/contracts/CHANGELOG.md`). Order is for readability only;
  * clients order events by `id`/`seq`, never by position here.
  */
@@ -50,21 +51,81 @@ export const EVENT_TYPES = [
   "task_created",
   "task_updated",
   "participant_joined",
+  "participant_removed",
   "presence_changed",
+  // --- Harness types, added at v1.5 (001-sidecar-harness-architecture) --------
+  "request_header",
+  "context_compacted",
+  "context_usage",
+  "tool_refused",
+  "plugin_enabled",
+  "plugin_disabled",
+  "provider_error",
+  "recovery_applied",
+  // --- Added at v1.10: a host capability changed, outside any run ----------------
+  "skill_changed",
 ] as const;
 
-/** One of the 22 frozen taxonomy names. */
+/** One of the 31 frozen taxonomy names. */
 export type EventType = (typeof EVENT_TYPES)[number];
 
 /**
- * The `ai_raw` fallback: any SDK message the normalizer cannot map to a known
- * type is emitted as `ai_raw` rather than dropped or crashing. It is NOT a
- * member of the 22-name taxonomy.
+ * The `ai_raw` fallback: any provider message the normalizer cannot map to a
+ * known type is emitted as `ai_raw` rather than dropped or crashing. It is NOT a
+ * member of the 30-name taxonomy.
  */
 export const AI_RAW = "ai_raw" as const;
 
-/** Any value the `type` field may hold: the 22 names plus the `ai_raw` fallback. */
+/** Any value the `type` field may hold: the 31 names plus the `ai_raw` fallback. */
 export type EnvelopeType = EventType | typeof AI_RAW;
+
+/**
+ * The EPHEMERAL types: broadcast to subscribers but NEVER persisted. They carry
+ * a null `id` (the marker of ephemerality) and a null `seq` — they never consume
+ * a per-run sequence number.
+ *
+ * Exported as data because three streams need the same answer and each had been
+ * deriving it separately: the harness decides what not to send `store_seq` for,
+ * Rails' `Event::EPHEMERAL_TYPES` decides what not to persist, and the web store
+ * decides what not to dedupe by `id`. A type missing from one of those three
+ * lists is a silent bug — `context_usage` absent from the Rails list would be
+ * persisted and handed a durable `id`.
+ */
+export const EPHEMERAL_EVENT_TYPES = [
+  "ai_text_delta",
+  "ai_thinking_delta",
+  "presence_changed",
+  "context_usage",
+] as const;
+
+export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
+
+/**
+ * Types the harness SYNTHESIZES — they map from no provider message at all. The
+ * harness's own decisions (what it sent, refused, recovered, compacted) plus the
+ * human's prompt, which the harness records because it owns the per-run `seq`
+ * space.
+ *
+ * Load-bearing for the normalizer cross-check: that test asserts the ordered
+ * type sequence produced by replaying a captured provider transcript equals the
+ * fixture's durable run-scoped sequence. Synthesized types appear in the fixture
+ * and can never appear in a capture, so they must be excluded EXPLICITLY. It
+ * previously worked by coincidence — "durable and run-scoped" happened to select
+ * only mapped types because the fixture contained no synthesized ones.
+ */
+export const SYNTHESIZED_EVENT_TYPES = [
+  "user_prompt",
+  "request_header",
+  "context_compacted",
+  "context_usage",
+  "tool_refused",
+  "plugin_enabled",
+  "plugin_disabled",
+  "provider_error",
+  "recovery_applied",
+] as const;
+
+export type SynthesizedEventType = (typeof SYNTHESIZED_EVENT_TYPES)[number];
 
 /**
  * Event actor — a discriminated union on `kind`. `id` is present IF AND ONLY IF
@@ -80,13 +141,13 @@ export type Actor = { kind: "claude" } | { kind: "user"; id: string } | { kind: 
  *
  * Scalar types are FROZEN (not spike-gated; only `payload` internals are):
  * - `id`         integer global cursor for DURABLE events; `null` for EPHEMERAL
- *                events (`ai_text_delta`, `presence_changed`) — broadcast,
- *                never persisted, so they carry no cursor.
+ *                events (see `EPHEMERAL_EVENT_TYPES`) — broadcast, never
+ *                persisted, so they carry no cursor.
  * - `session_id` present on every event.
  * - `ai_run_id`  present for run-scoped events; `null` for session-scoped events.
  * - `seq`        per-run monotonic integer for DURABLE run-scoped events;
  *                `null` for ephemeral and for session-scoped events.
- * - `type`       one of the 22 names, or `ai_raw`.
+ * - `type`       one of the 31 names, or `ai_raw`.
  * - `actor`      see `Actor`.
  * - `ts`         ISO-8601 UTC, millisecond precision, `Z` suffix
  *                (e.g. `2026-06-28T20:11:05.123Z`). DISPLAY-ONLY: order by `id`
@@ -102,11 +163,30 @@ export interface EventEnvelope<P = unknown> {
   actor: Actor;
   ts: string;
   payload: P;
+  /**
+   * The harness store's session-wide cursor for this event (v1.5, additive and
+   * OPTIONAL — the envelope's frozen fields are untouched).
+   *
+   * Present when the RECORD holds this event's entry; absent otherwise — on ephemeral
+   * events, which were never persisted, and on a durable event the harness emits without
+   * logging (`recovery_applied`). Absent is load-bearing: it marks a row re-derivation
+   * cannot rebuild, so `rederive(reset:)` preserves it instead of deleting it. Borrowing
+   * another entry's position here made a healthy recovered session report a divergence.
+   * It exists so Rails can
+   * re-derive the projection from `entriesFrom(store_seq)` after an outage
+   * — which is what makes a ring-buffer overflow degrade the live stream
+   * without losing the record.
+   *
+   * Clients still page on `id`. This is a projection-repair cursor, not a second
+   * client cursor, and treating it as one would reintroduce the dual-cursor
+   * confusion `id`/`seq` already resolves.
+   */
+  store_seq?: number;
 }
 
 /**
  * Per-type payload schemas, FINALIZED from the real SDK spike (`sdk-message-spike`;
- * see `docs/contracts/sdk_mapping.md` for the derivation from `raw_run.jsonl`).
+ * see `docs/contracts/provider_event_mapping.md` for the derivation from `raw_run.jsonl`).
  * SDK-produced types are derived from captured message shapes; Rails-originated
  * types (`chat_message`, `participant_joined`, `presence_changed`, `changeset_*`,
  * `task_*`) are defined from the data model (they were never SDK-gated). This
@@ -124,8 +204,6 @@ export interface TokenUsage {
 export interface RunStartedPayload {
   model: string;
   cwd: string;
-  permission_mode: string;
-  claude_session_id: string;
   /** The capabilities the run actually applied (additive since v1.4), echoed so
    *  the UI — including late joiners via backfill — reflects a run's real scope.
    *  Omitted means "today's defaults" (nothing disabled / no connectors / no
@@ -133,12 +211,38 @@ export interface RunStartedPayload {
   disallowed_tools?: string[];
   connectors?: string[];
   skills?: string[];
+  /**
+   * Connectors the run SELECTED but could not use (additive since v1.9).
+   *
+   * A run enables MCP servers by name; one can be missing from host config, refuse a connection,
+   * or hang. The run continues without it — a broken server is not a broken run — but the
+   * participant who enabled it needs to know, and `connectors` above lists only what loaded, so
+   * absence alone is not an explanation.
+   *
+   * `kind` is a CLASSIFICATION, never the transport's own error text: a message we do not control
+   * could carry a URL with a token in it, and the connector listing already withholds every
+   * server's command/url/headers for the same reason. The full message goes to the harness's
+   * stderr, which is host-side and outside the record.
+   */
+  connectors_failed?: Array<{ name: string; kind: "not_configured" | "timeout" | "failed" }>;
+  /**
+   * Which work stream this run belongs to.
+   *
+   * Echoed for the same reason `disallowed_tools` is: it is the ONLY place a client — including a
+   * late joiner arriving by backfill with no live events — can learn a run's lane. Without it the
+   * feed cannot label a row, because every other event carries only `ai_run_id`, and resolving that
+   * to a lane would take a REST call per run.
+   *
+   * Omitted means the default lane (`main`), which is every session that has never opened a second
+   * one.
+   */
+  lane?: string;
 }
 
 // --- Run capability selection (additive since v1.4) --------------------------
 // Shared shapes for the per-run tool/connector/skill surface. Tools are a FIXED
 // constant (they never vary by host/repo); connectors + skills are discovered
-// per session by the sidecar and proxied by Rails.
+// per session by the harness and proxied by Rails.
 
 export interface ToolInfo {
   id: string;
@@ -157,26 +261,39 @@ export interface SkillInfo {
   description: string;
 }
 
-/** The canonical built-in tools offered in the picker (all default-ON). The web
- *  picker and Rails validation both read this — there is no /api/tools endpoint.
- *  Turning one OFF sends it in `disallowed_tools`, which the sidecar maps to the
- *  SDK `disallowedTools` (a bare name genuinely removes the tool, even under
- *  bypassPermissions — `allowedTools` only pre-approves). */
+/**
+ * The canonical built-in tools offered in the picker (all default-ON). The web picker and Rails
+ * validation both read this — there is no /api/tools endpoint. Turning one OFF sends it in
+ * `disallowed_tools`, and the harness DROPS the declaration (an allow-list only pre-approves; a
+ * tool left declared can still be called).
+ *
+ * **`id` is the harness's registry name, verbatim** — `read`, not `Read`. At v1.8 these were the
+ * Agent SDK's names, which no longer existed anywhere: the harness registers provider-native
+ * tools, `schemasFor` filters by exact name, and so `disallowed_tools` matched nothing and
+ * disabling a tool per run did NOTHING. `harness/test/tools/builtin_vocabulary.test.ts` now
+ * asserts this list against the live registry in both directions.
+ *
+ * There is ONE editor tool, which both creates and edits, so `Write` and `Edit` collapse into it:
+ * two ids for one tool could never be honoured separately.
+ */
 export const BUILTIN_TOOLS: readonly ToolInfo[] = [
-  { id: "Read", label: "Read", description: "Read files" },
-  { id: "Write", label: "Write", description: "Create & overwrite files" },
-  { id: "Edit", label: "Edit", description: "Edit files in place" },
-  { id: "Bash", label: "Bash", description: "Run shell commands" },
-  { id: "Glob", label: "Glob", description: "Find files by pattern" },
-  { id: "Grep", label: "Grep", description: "Search file contents" },
-  { id: "WebSearch", label: "WebSearch", description: "Search the web" },
-  { id: "WebFetch", label: "WebFetch", description: "Fetch & read web pages" },
+  { id: "read", label: "Read", description: "Read files" },
+  {
+    id: "str_replace_based_edit_tool",
+    label: "Edit",
+    description: "Create, overwrite & edit files",
+  },
+  { id: "bash", label: "Bash", description: "Run shell commands" },
+  { id: "glob", label: "Glob", description: "Find files by pattern" },
+  { id: "grep", label: "Grep", description: "Search file contents" },
+  { id: "web_search", label: "Web search", description: "Search the web" },
+  { id: "web_fetch", label: "Web fetch", description: "Fetch & read web pages" },
 ] as const;
 
 /** The bare tool ids, for validating a `disallowed_tools` selection. */
 export const BUILTIN_TOOL_IDS: readonly string[] = BUILTIN_TOOLS.map((t) => t.id);
 /** The human's prompt that drives a run — the initial prompt and each follow-up.
- *  Run-scoped + durable; emitted by the sidecar (it owns the per-run seq space).
+ *  Run-scoped + durable; emitted by the harness (it owns the per-run seq space).
  *  Attribution is on the envelope `actor` ({ kind: "user", id }), not the payload. */
 export interface UserPromptPayload {
   text: string;
@@ -230,16 +347,55 @@ export interface RunFinishedPayload {
   stop_reason: string;
   num_turns: number;
   duration_ms: number;
-  total_cost_usd: number;
+  /**
+   * `null` when no price was computed — UNKNOWN, which is not the same as free.
+   *
+   * Nullable since v1.7: the harness sent a hardcoded `0`, and once Rails began copying the
+   * figure onto `ai_runs.total_cost_usd` every run would have recorded a cost of exactly zero.
+   * No provider here reports a price (Bedrock does not, and the harness computes none), so `0`
+   * was a false claim about a request that was actually made. Same rule the usage ledger
+   * already follows: no report means no row, never zeros.
+   */
+  total_cost_usd: number | null;
   usage: TokenUsage;
 }
 export interface RunFailedPayload {
   stop_reason: string;
   api_error_status: string | null;
-  total_cost_usd: number;
+  /** `null` when no price was computed — see `RunFinishedPayload.total_cost_usd`. */
+  total_cost_usd: number | null;
   usage: TokenUsage;
+  /**
+   * What the participant needs to know about the failure, or `null` when there is nothing to
+   * add beyond the stop reason.
+   *
+   * REQUIRED rather than optional so the value must be STATED. The loop had been computing
+   * these strings since M4 — "the response hit its output limit and is incomplete", "a
+   * server-side tool did not finish after 5 resumes" — and `RunLoop.fail()` took the argument
+   * as `_message` and discarded it. The room saw "run failed" and nothing else.
+   *
+   * On a provider whose `serverSideRefusalFallback` is false this is the ONLY explanation that
+   * will ever exist: a refusal there arrives as a bare stop reason with no content, so a
+   * generic message leaves the participant with a run that stopped for no stated reason.
+   */
+  explanation: string | null;
 }
-export type RunInterruptedPayload = Record<string, never>;
+export interface RunInterruptedPayload {
+  /**
+   * What the run spent before it was stopped (additive since v1.15).
+   *
+   * The payload was deliberately empty, and `RunLoop.interrupt()` took the accumulated total as
+   * `_usage` and discarded it — the same shape as `RunFailedPayload.explanation` before v1.12. An
+   * interrupt after several turns has really spent those tokens, and Rails copies `usage` off any
+   * terminal event, so an empty payload made a multi-turn run that was stopped look free.
+   *
+   * Both fields follow the same rule as the other terminal events: `null`/absent means UNKNOWN,
+   * never zero, for a request that was actually made (v1.7).
+   */
+  usage?: TokenUsage;
+  /** `null` when no price was computed — see `RunFinishedPayload.total_cost_usd`. */
+  total_cost_usd?: number | null;
+}
 export interface ChangesetReadyPayload {
   files_changed: number;
   insertions: number;
@@ -257,6 +413,23 @@ export interface TaskPayload {
   title: string;
   status: string;
 }
+/**
+ * A participant's access was revoked by an owner (additive since v1.14).
+ *
+ * **Their history is NOT removed, and that is the design.** The event stream is append-only, so
+ * every `chat_message` and `user_prompt` they sent stays in the feed, still attributed, and every
+ * changeset they approved stays approved. Removal revokes FUTURE access; it does not rewrite the
+ * past. A removal that erased their contributions would leave a record claiming work was approved by
+ * nobody.
+ *
+ * `name` is carried so the feed can say who was removed without resolving a participant row that no
+ * longer exists — the same reason `participant_joined` carries it.
+ */
+export interface ParticipantRemovedPayload {
+  participant_id: string;
+  name: string;
+}
+
 export interface ParticipantJoinedPayload {
   participant_id: string;
   name: string;
@@ -272,8 +445,149 @@ export interface AiRawPayload {
   truncated: boolean;
 }
 
+// --- Harness payloads (added v1.5) ------------------------------------------
+// The harness owns the loop, so its own decisions become visible in the same
+// stream as the model's output. Every one of these is emitted by the harness;
+// none maps to a vendor SDK message.
+
 /**
- * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 20
+ * What was actually sent to the provider, recorded BEFORE the request goes out
+ *. Digests, not contents: the system prompt and tool schemas
+ * can be large and are reconstructible from the record, so this carries a hash
+ * to prove which version was used without duplicating it into every run.
+ *
+ * `credential_source` is a source IDENTITY (`CredentialSourceId`), never a value.
+ * That distinction is the whole point of the field — it makes "which login did
+ * this run use?" answerable without a credential ever entering the record.
+ */
+export interface RequestHeaderPayload {
+  provider: string;
+  credential_source: CredentialSourceId;
+  model: string;
+  effort: EffortLevel | null;
+  system_prompt_digest: string;
+  tool_schemas_digest: string;
+  /**
+   * The messages array that went out, fingerprinted (v1.16). OPTIONAL because headers written
+   * before 1.16 have none, and a reader MUST report those as unverified rather than as matching.
+   *
+   * The other two digests guard values the record does not COPY, so a stale supplied one is
+   * refused. This one guards what the record IMPLIES, so it answers a different question: whether
+   * the log is still sufficient to rebuild the request that was sent. Without it 's manual
+   * half had no comparison side (the acceptance walkthrough's S4 step 2 named a file no tool
+   * produces).
+   *
+   * DELIBERATELY EXCLUDED from the emit-on-change fingerprint. The messages array grows every
+   * turn, so including it forces a header on every request — the thing emit-on-change exists to
+   * avoid. It therefore describes only the turn whose header carried it, and a reader comparing a
+   * LONGER prefix against it would see a false mismatch; `reconstruct` reports `not_at_boundary`
+   * for those rather than a verdict it cannot support.
+   */
+  messages_digest?: string;
+  plugins: string[];
+}
+
+/**
+ * A span of the record was replaced by a compaction block. The
+ * replaced range is named by `seq` so the projection can show what collapsed;
+ * `summary_present` is false when the provider compacted without returning a
+ * summary block, which is a real case and must not be reported as a summary.
+ */
+export interface ContextCompactedPayload {
+  replaced_from_seq: number;
+  replaced_to_seq: number;
+  tokens_before: number;
+  summary_present: boolean;
+}
+
+/**
+ * Live context pressure. EPHEMERAL — the durable per-run figure lives
+ * on `run_finished`/`run_failed`. `window` is the REAL budget for the model in
+ * use, read from the adapter's `capabilities()`, never a hardcoded constant.
+ */
+export interface ContextUsagePayload {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  window: number;
+}
+
+/**
+ * A tool call was refused before executing. `by` names what refused —
+ * a policy, a plugin id, or a participant — so a refusal is attributable rather
+ * than appearing as an unexplained gap in the run.
+ */
+export interface ToolRefusedPayload {
+  tool_use_id: string;
+  name: string;
+  by: string;
+  reason: string;
+}
+
+/** Plugin lifecycle. Session-scoped: enabling is a property of the room. */
+export interface PluginTogglePayload {
+  id: string;
+  version: string;
+  origin: "builtin" | "third_party";
+  by: string;
+}
+
+/**
+ * A provider request failed. `remedy` is REQUIRED and must be
+ * actionable — the requirement is that a broken credential names itself and the
+ * fix, so a generic message here is a contract violation, not a lazy string.
+ */
+export interface ProviderErrorPayload {
+  provider: string;
+  kind:
+    | "no_credential"
+    | "credential_expired"
+    | "not_entitled"
+    | "region_unset"
+    | "unreachable"
+    | "api_error";
+  message: string;
+  remedy: string;
+}
+
+/**
+ * Recovery ran after a crash. `uncertain: true` is the load-bearing
+ * value: when the harness died between dispatching a request and recording its
+ * outcome, the fate is genuinely unknown, and /AC4 requires the feed to SAY
+ * so rather than implying either outcome. Never default it to false to make a
+ * display simpler.
+ */
+export interface RecoveryAppliedPayload {
+  run_id: string;
+  from_phase: string;
+  action: "resumed" | "replayed" | "abandoned" | "failed";
+  uncertain: boolean;
+}
+
+/**
+ * A skill was added or removed on the host (v1.10).
+ *
+ * SESSION-scoped, not run-scoped: it happens in settings, between runs, and it changes what a
+ * FUTURE run can do. It is an event rather than a silent file write because a skill is instructions
+ * Claude will follow — closer to granting a capability than to editing a document — so who changed
+ * it, and when, belongs in the room's timeline.
+ *
+ * `scope` matters more than it looks: a `project` skill affects this repo, while a `host` one
+ * affects every session on the machine AND the developer's own terminal Claude Code. A removal
+ * reports `moved_to` because nothing is deleted — the directory is renamed, so an unwanted removal
+ * is recoverable, and the record says where it went.
+ */
+export interface SkillChangedPayload {
+  action: "added" | "removed" | "replaced";
+  name: string;
+  scope: "project" | "host";
+  /** Where a removed skill was moved to, relative to the skills root. */
+  moved_to?: string;
+}
+
+/**
+ * Maps every envelope type to its payload. Keys MUST equal the taxonomy (the 31
  * names + `ai_raw`) exactly — enforced by `PAYLOAD_MAP_COVERS_TAXONOMY` below.
  */
 export interface EventPayloadMap {
@@ -298,7 +612,17 @@ export interface EventPayloadMap {
   task_created: TaskPayload;
   task_updated: TaskPayload;
   participant_joined: ParticipantJoinedPayload;
+  participant_removed: ParticipantRemovedPayload;
   presence_changed: PresenceChangedPayload;
+  request_header: RequestHeaderPayload;
+  context_compacted: ContextCompactedPayload;
+  context_usage: ContextUsagePayload;
+  tool_refused: ToolRefusedPayload;
+  plugin_enabled: PluginTogglePayload;
+  plugin_disabled: PluginTogglePayload;
+  provider_error: ProviderErrorPayload;
+  recovery_applied: RecoveryAppliedPayload;
+  skill_changed: SkillChangedPayload;
   ai_raw: AiRawPayload;
 }
 
@@ -317,14 +641,193 @@ type Extends<A, B> = [A] extends [B] ? true : false;
 type Equal<A, B> = Extends<A, B> extends true ? (Extends<B, A> extends true ? true : false) : false;
 
 /**
- * Guard: the taxonomy holds EXACTLY 22 names. If `EVENT_TYPES` drifts from 22
+ * Guard: the taxonomy holds EXACTLY 31 names. If `EVENT_TYPES` drifts from 31
  * entries without a contract change, this assignment stops type-checking.
+ *
+ * Was 30 through v1.5–v1.9 (`harness_http.md` lists the v1.5 additions in seven table rows because
+ * `plugin_enabled` and `plugin_disabled` share one — eight names). `skill_changed` makes 31 at
+ * v1.10, and this line is deliberately the thing that has to be edited: a taxonomy that can grow
+ * without anyone noticing is a taxonomy nobody can rely on.
  */
-export const EVENT_TYPE_COUNT: 22 = EVENT_TYPES.length;
+export const EVENT_TYPE_COUNT: 32 = EVENT_TYPES.length;
 
 /**
- * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 22 names +
+ * Guard: `EventPayloadMap` covers exactly the envelope taxonomy (the 31 names +
  * `ai_raw`) — no missing key, no stray key. If they diverge, this assignment's
  * type becomes `false` and `true` no longer satisfies it.
  */
 export const PAYLOAD_MAP_COVERS_TAXONOMY: Equal<keyof EventPayloadMap, EnvelopeType> = true;
+
+/** Guard: every ephemeral name is a real taxonomy name (catches a typo'd entry). */
+export const EPHEMERAL_TYPES_ARE_TAXONOMY: Extends<EphemeralEventType, EventType> = true;
+
+/** Guard: every synthesized name is a real taxonomy name. */
+export const SYNTHESIZED_TYPES_ARE_TAXONOMY: Extends<SynthesizedEventType, EventType> = true;
+
+// --- Provider vocabulary, shared by api/ + harness/ + web/ (v1.5) ------------
+// One capability vocabulary across all three streams. `harness/src/providers/
+// contract.ts` ALIASES `ProviderCapabilities` rather than redeclaring it — two
+// definitions of "what a provider supports" is how the streams drift apart.
+
+/**
+ * Reasoning effort. Replaces the removed `thinking.budget_tokens`, which returns
+ * 400 on current models.
+ */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * Where a credential was found — an IDENTITY, never a value. Recorded per run
+ * so "which login did this use?" is answerable from the record alone.
+ *
+ * `keychain:*` is reachable only because the harness is a host process (Q6); a
+ * container cannot read the macOS Keychain under any mount configuration.
+ */
+export type CredentialSourceId =
+  | "env:ANTHROPIC_API_KEY"
+  | "env:ANTHROPIC_AUTH_TOKEN"
+  | "env:CLAUDE_CODE_OAUTH_TOKEN"
+  | "profile:ANTHROPIC_PROFILE"
+  | "profile:active"
+  | "env:workload-identity-federation"
+  | "profile:default"
+  | "file:~/.claude/.credentials.json"
+  | "keychain:anthropic-oauth"
+  | "file:~/.codex/auth.json"
+  | "env:AWS_PROFILE"
+  | "file:~/.aws"
+  | "none";
+
+/**
+ * Credential precedence, FIRST MATCH WINS. Exported as ORDERED data
+ * rather than described in prose so the implementation can be asserted against
+ * it instead of re-deriving it.
+ *
+ * The trap this exists to prevent: an EMPTY `ANTHROPIC_API_KEY=""` still wins
+ * slot 0 and authenticates with nothing. Discovery must report it as
+ * selected-and-invalid, NOT fall through to the next slot — falling through is
+ * the silent-wrong-pick this ordering is meant to make impossible.
+ */
+export const CREDENTIAL_PRECEDENCE: readonly CredentialSourceId[] = [
+  "env:ANTHROPIC_API_KEY",
+  "env:ANTHROPIC_AUTH_TOKEN",
+  "profile:ANTHROPIC_PROFILE",
+  "profile:active",
+  "env:workload-identity-federation",
+  "profile:default",
+] as const;
+
+/**
+ * What a provider supports for a GIVEN MODEL. Capabilities are declared, never
+ * inferred by the caller, and they are NOT uniform across providers — Bedrock
+ * has no web search/fetch, no code execution, no Models API, no automatic prompt
+ * caching, and no server-side refusal fallback. The loop reads this; it must
+ * never special-case a provider id.
+ *
+ * Every field is REQUIRED: a partial capability object is indistinguishable from
+ * "unsupported", and defaulting an unknown to `false` silently disables features
+ * while defaulting to `true` sends requests that 400.
+ */
+export interface ProviderCapabilities {
+  streaming: true;
+  /**
+   * Whether the model can use tools AT ALL — in any transport, with any request shape.
+   *
+   * Widened from a literal `true` at v1.8. It was a literal because every model worth serving
+   * a coding agent uses tools, and that is still true of every model this host offers except
+   * one: `deepseek.r1` on Bedrock answers `ValidationException: This model doesn't support tool
+   * use` to a `toolConfig` on both `Converse` and `ConverseStream`. A capability the contract
+   * cannot state is a capability the harness has to encode as an exclusion, which is how R1
+   * ended up simply missing from the picker with no way to learn why.
+   *
+   * `false` means the run must carry NO tool declarations. It does not mean "degrade quietly":
+   * a request that offers tools to such a model is refused with the reason, because a model
+   * that cannot act will otherwise narrate actions it never took.
+   */
+  toolUse: boolean;
+  /**
+   * Whether tools may be offered ON A STREAMING request. `streaming` stays true when this is
+   * false — the model streams, and it uses tools, just not at the same time.
+   *
+   * Added at v1.6 because the two capabilities are INDEPENDENT on Amazon Bedrock and the
+   * contract could not say so: both were literal `true` then, so every provider asserted
+   * both unconditionally. Measured against 18 text-capable
+   * non-Anthropic Bedrock models, 8 refuse a `toolConfig` on `ConverseStream` with "This
+   * model doesn't support tool use in streaming mode" while accepting it on `Converse` —
+   * every Llama, plus Mistral Pixtral and both Writer Palmyra models, two of which return a
+   * real `tool_use` stop reason on the non-streaming path. It is a transport limit, not a
+   * model limitation.
+   *
+   * Consumers should treat it as the answer to "will live text arrive on a run that has
+   * tools enabled". `false` means the host must either choose another model, run without
+   * tools, or accept a turn that only appears when it settles.
+   */
+  toolUseWhileStreaming: boolean;
+  /** The REAL budget for this model — what the live context indicator divides by. */
+  contextWindow: number;
+  maxOutputTokens: number;
+  adaptiveThinking: boolean;
+  /**
+   * Tokens to reserve for extended thinking under the OLDER `thinking: {type:"enabled",
+   * budget_tokens: N}` shape, or `null` when the model does not take it (added at v1.11).
+   *
+   * A SECOND field rather than a widening of `adaptiveThinking`, because the two are genuinely
+   * independent and measured to overlap: on Bedrock, `claude-sonnet-4-6` accepts BOTH shapes,
+   * `claude-opus-4-7` accepts only `adaptive` (`"thinking.type.enabled" is not supported for this
+   * model`), and the five older profiles — opus-4-1, opus-4-5, sonnet-4, sonnet-4-5, haiku-4-5 —
+   * accept only `enabled`, having previously run with no extended thinking at all because the
+   * request type could not express their shape.
+   *
+   * Consumers preferring `adaptive` where both are offered is a POLICY choice, not something this
+   * field encodes: it states what the model accepts. Two constraints ride with it, both measured:
+   * the value must be **≥ 1024**, and `maxOutputTokens` for the request must be **strictly
+   * greater** than it — an equal pair is a 400.
+   */
+  thinkingBudgetTokens: number | null;
+  thinkingDisplaySummarized: boolean;
+  effortLevels: readonly EffortLevel[];
+  promptCaching: boolean;
+  /** Model-dependent and NOT monotonic across models — never interpolate it. */
+  minCacheablePrefixTokens: number | null;
+  serverSideCompaction: boolean;
+  contextEditing: boolean;
+  serverSideTools: {
+    webSearch: boolean;
+    webFetch: boolean;
+    codeExecution: boolean;
+  };
+  liveModelDiscovery: boolean;
+  serverSideRefusalFallback: boolean;
+  midConversationSystemMessages: boolean;
+  /** Gates enabling a plugin mid-session (M5). */
+  midConversationToolChanges: boolean;
+}
+
+/** Why a provider cannot serve requests on this host. */
+export type ProviderUnavailableReason =
+  | "no_credential"
+  | "credential_expired"
+  | "not_entitled"
+  | "region_unset"
+  | "unreachable";
+
+/**
+ * One provider's entry in `GET /api/models`. An unavailable provider is
+ * REPORTED, never omitted  — omitting it is what produces "the model
+ * picker is just empty" with no way to learn why.
+ */
+export interface ProviderStatus {
+  id: string;
+  displayName: string;
+  available: boolean;
+  reason?: ProviderUnavailableReason;
+  /** Actionable, and required whenever `available` is false. */
+  remedy?: string;
+  credentialSource?: CredentialSourceId;
+  models: ProviderModelInfo[];
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  displayName: string;
+  capabilities: ProviderCapabilities;
+}

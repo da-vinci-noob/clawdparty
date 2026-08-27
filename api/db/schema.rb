@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_01_01_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_01_01_000013) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -21,11 +21,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000006) do
 
   create_table "ai_runs", force: :cascade do |t|
     t.string "base_sha"
-    t.string "claude_session_id"
     t.datetime "created_at", null: false
+    t.string "credential_source"
     t.jsonb "diff_stats"
+    t.bigint "harness_store_seq"
+    t.string "lane", default: "main", null: false
+    t.datetime "last_heartbeat_at"
     t.string "model", null: false
     t.text "prompt", null: false
+    t.string "provider", default: "anthropic-direct", null: false
     t.bigint "requested_by_id"
     t.bigint "reviewed_by_id"
     t.bigint "session_id", null: false
@@ -35,8 +39,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000006) do
     t.jsonb "usage"
     t.index ["requested_by_id"], name: "index_ai_runs_on_requested_by_id"
     t.index ["reviewed_by_id"], name: "index_ai_runs_on_reviewed_by_id"
+    t.index ["session_id", "lane"], name: "index_ai_runs_one_active_per_lane", unique: true, where: "(status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))"
     t.index ["session_id"], name: "index_ai_runs_on_session_id"
-    t.index ["session_id"], name: "index_ai_runs_one_active_per_session", unique: true, where: "(status = ANY (ARRAY['queued'::ai_run_status, 'running'::ai_run_status, 'awaiting_review'::ai_run_status]))"
+    t.index ["status", "last_heartbeat_at"], name: "index_ai_runs_on_status_and_last_heartbeat_at"
   end
 
   create_table "events", force: :cascade do |t|
@@ -48,10 +53,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000006) do
     t.jsonb "payload", default: {}, null: false
     t.bigint "seq"
     t.bigint "session_id", null: false
+    t.bigint "store_seq"
     t.datetime "updated_at", null: false
     t.index ["actor_participant_id"], name: "index_events_on_actor_participant_id"
     t.index ["ai_run_id", "seq"], name: "index_events_on_run_and_seq", unique: true
     t.index ["ai_run_id"], name: "index_events_on_ai_run_id"
+    t.index ["session_id", "store_seq"], name: "index_events_on_session_id_and_store_seq"
     t.index ["session_id"], name: "index_events_on_session_id"
     t.check_constraint "(actor_kind = 'user'::event_actor_kind) = (actor_participant_id IS NOT NULL)", name: "events_user_actor_has_participant"
   end
@@ -82,18 +89,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_01_01_000006) do
   create_table "participants", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_seen_at"
+    t.datetime "removed_at"
     t.string "role", null: false
     t.bigint "session_id", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index ["session_id", "user_id"], name: "index_participants_active_by_user", where: "(removed_at IS NULL)"
     t.index ["session_id"], name: "index_participants_on_session_id"
     t.index ["user_id"], name: "index_participants_on_user_id"
   end
 
   create_table "sessions", force: :cascade do |t|
+    t.string "aws_profile"
     t.string "base_branch"
     t.string "branch_name"
     t.datetime "created_at", null: false
+    t.string "default_model"
+    t.string "default_provider"
     t.bigint "host_id"
     t.datetime "last_activity_at"
     t.string "mode", default: "review", null: false

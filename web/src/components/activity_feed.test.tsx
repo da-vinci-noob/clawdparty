@@ -26,6 +26,34 @@ describe("ActivityFeed", () => {
   beforeEach(() => useEventStore.getState().reset());
   afterEach(() => useEventStore.getState().reset());
 
+  it("renders recovery_applied as its own row, NOT the generic run banner", async () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany(fixture.filter((e) => e.type === "recovery_applied")),
+    );
+
+    // A run-lifecycle banner would say "run failed" or "run finished" about a recovery, and for
+    // an UNCERTAIN one both are claims the record cannot support. RawFallback
+    // would show raw JSON, which is what happened before this row existed.
+    expect(await screen.findByTestId("feed-recovery-applied")).toBeInTheDocument();
+    expect(screen.queryByTestId("feed-run-banner")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("feed-raw-fallback")).not.toBeInTheDocument();
+  });
+
+  it("translates the fixture's from_phase into plain terms", async () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany(fixture.filter((e) => e.type === "recovery_applied")),
+    );
+
+    // The fixture now carries `request_pending`, captured from a real recovery — it used to
+    // say `awaiting_provider_response`, a phase name the harness never emits. A participant
+    // needs to know the run was waiting on the model, not which register held it.
+    const row = await screen.findByTestId("feed-recovery-applied");
+    expect(row.textContent).toContain("waiting on the model");
+    expect(row.textContent).not.toContain("request_pending");
+  });
+
   it("renders the contract fixture: text bubbles, tool chips, terminal, banners, file rows", async () => {
     renderFeed();
     // Apply the fixture through the store (the live path the feed reads from).
@@ -41,11 +69,12 @@ describe("ActivityFeed", () => {
   it("renders tool chips with the SUMMARIZED input, never the full payload", () => {
     renderFeed();
     act(() => useEventStore.getState().applyMany(fixture));
-    // The Write tool's chip shows the path (SPIKE_NOTE.md), not file content.
+    // The editor's chip shows the command and path, never `file_text`. A chip that rendered
+    // the payload would put whole files — and anything in them — into the shared feed.
     const chips = screen.getAllByTestId("feed-tool-chip");
     const text = chips.map((c) => c.textContent).join(" ");
-    expect(text).toContain("SPIKE_NOTE.md");
-    expect(text).not.toContain("hello from the spike\nmore"); // no full file body
+    expect(text).toContain("note.md");
+    expect(text).not.toContain("First line."); // the file body must not appear
   });
 
   it("renders user_prompt first, then run banner, then Claude text — a conversation", () => {
@@ -276,5 +305,182 @@ describe("ActivityFeed auto-scroll", () => {
     act(() => useEventStore.getState().apply(aiText(2, "new message")));
     // Their scroll position is left untouched.
     expect(scroller.scrollTop).toBe(0);
+  });
+});
+
+/**
+ * Consecutive thinking blocks are NOT merged into one box, and the reason is in the data.
+ *
+ * The question was whether a turn with several thinking blocks should render as one box, on the
+ * theory that N boxes read as fragmentation when the blocks are one continuous train of thought.
+ * Measured against the real record instead of judged by eye: 7 runs contain `ai_thinking`, 2
+ * contain more than one (4 and 7 blocks) — and **0 adjacent `ai_thinking` pairs exist anywhere**.
+ * Every multi-block run has the shape
+ *
+ *   ai_thinking → tool_started … tool_finished → ai_thinking → tool_started …
+ *
+ * which is INTERLEAVED thinking: Claude reasoned, acted, saw the result, and reasoned again.
+ * Merging those would splice reasoning from before and after a tool call into one box and hide
+ * that a new thought followed the result — so the current rendering is not merely defensible,
+ * it is the only faithful one, and the premise for grouping does not occur.
+ *
+ * This test exists so a later "tidy up the thinking boxes" change cannot quietly merge them.
+ */
+describe("interleaved thinking stays separate", () => {
+  // Its own reset: this describe is a SIBLING of the one that owns the shared hook, so it inherits
+  // no cleanup. Without it the store carries rows over from earlier tests — which is why the
+  // lane-label block passed in isolation and failed in the full file.
+  beforeEach(() => useEventStore.getState().reset());
+  afterEach(() => useEventStore.getState().reset());
+
+  const event = (id: number, type: string, payload: object): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: "run1",
+      seq: id,
+      type,
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:00Z",
+      payload,
+    }) as unknown as EventEnvelope;
+
+  // The measured shape, in miniature.
+  const interleaved: EventEnvelope[] = [
+    event(1, "ai_thinking", { block: "b1", text: "First I should look at the file." }),
+    event(2, "tool_started", { tool_use_id: "t1", name: "read", input: {} }),
+    event(3, "tool_finished", { tool_use_id: "t1", output: "contents" }),
+    event(4, "ai_thinking", { block: "b2", text: "Now that I have read it, the fix is clear." }),
+  ];
+
+  it("renders one box per thinking block", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    expect(screen.getAllByTestId("feed-thinking")).toHaveLength(2);
+  });
+
+  it("keeps each block's text in its OWN box, not concatenated", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    const boxes = screen.getAllByTestId("feed-thinking");
+    // Merging would put "First I should look" and "Now that I have read it" in one box, reading
+    // as a single thought that never happened.
+    expect(boxes[0]).toHaveTextContent(/First I should look at the file/);
+    expect(boxes[0]).not.toHaveTextContent(/Now that I have read it/);
+    expect(boxes[1]).toHaveTextContent(/Now that I have read it/);
+  });
+
+  it("keeps the tool call BETWEEN them, which is what makes them separate thoughts", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany(interleaved));
+
+    // Order is the evidence: thinking, then the action, then thinking about the result.
+    const rendered = screen.getByTestId("activity-feed").textContent ?? "";
+    expect(rendered.indexOf("First I should look")).toBeLessThan(rendered.indexOf("read"));
+    expect(rendered.indexOf("read")).toBeLessThan(rendered.indexOf("Now that I have read it"));
+  });
+});
+
+/**
+ * The feed labels each row by lane and stays ONE ordered stream.
+ *
+ * Chosen over a per-lane split because the shared room is the product's central claim (,
+ * enforced by `bin/check-room`), and interleaving is information: you can see two streams racing.
+ * The label is what makes two concurrent streams legible without separating them.
+ */
+describe("lane labels", () => {
+  // Its own reset: this describe is a SIBLING of the one that owns the shared hook, so it inherits
+  // no cleanup. Without it the store carries rows over from earlier tests — which is why this
+  // block passed in isolation and failed in the full file.
+  beforeEach(() => useEventStore.getState().reset());
+  afterEach(() => useEventStore.getState().reset());
+
+  const started = (id: number, runId: string, lane?: string): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: id,
+      type: "run_started",
+      actor: { kind: "user", id: "1" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { model: "m", cwd: "/r", ...(lane ? { lane } : {}) },
+    }) as unknown as EventEnvelope;
+
+  const text = (id: number, runId: string, body: string): EventEnvelope =>
+    ({
+      id,
+      session_id: "s",
+      ai_run_id: runId,
+      seq: id,
+      type: "ai_text",
+      actor: { kind: "claude" },
+      ts: "2026-08-17T00:00:00Z",
+      payload: { block: `b${id}`, text: body },
+    }) as unknown as EventEnvelope;
+
+  it("labels a row from a non-default lane", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany([started(1, "r1", "review"), text(2, "r1", "in review")]),
+    );
+
+    // Derived from `run_started`, so the label reaches a late joiner arriving by backfill too.
+    expect(screen.getAllByTestId("feed-lane").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("feed-lane")[0]).toHaveTextContent("review");
+  });
+
+  it("labels NOTHING in a single-lane session", () => {
+    renderFeed();
+    act(() => useEventStore.getState().applyMany([started(1, "r1"), text(2, "r1", "on main")]));
+
+    // `main` is omitted from the payload, so absence is the answer. Labelling every row "main" in a
+    // session that has never opened a second lane is pure noise.
+    expect(screen.queryByTestId("feed-lane")).not.toBeInTheDocument();
+  });
+
+  it("keeps ONE stream, with the two lanes interleaved in order", () => {
+    renderFeed();
+    act(() =>
+      useEventStore
+        .getState()
+        .applyMany([
+          started(1, "r1"),
+          started(2, "r2", "review"),
+          text(3, "r1", "from main"),
+          text(4, "r2", "from review"),
+        ]),
+    );
+
+    // Not two feeds: one ordered list. The order is the shared truth every participant sees.
+    const rendered = screen.getByTestId("activity-feed").textContent ?? "";
+    expect(rendered.indexOf("from main")).toBeLessThan(rendered.indexOf("from review"));
+    // And only the non-default lane's rows carry a chip.
+    expect(screen.getAllByTestId("feed-lane")).toHaveLength(2);
+  });
+
+  it("does not label an event that belongs to no run", () => {
+    renderFeed();
+    act(() =>
+      useEventStore.getState().applyMany([
+        started(1, "r1", "review"),
+        {
+          id: 5,
+          session_id: "s",
+          ai_run_id: null,
+          seq: 5,
+          type: "participant_joined",
+          actor: { kind: "user", id: "9" },
+          ts: "2026-08-17T00:00:00Z",
+          payload: { participant_id: "9", name: "Priya", role: "editor" },
+        } as unknown as EventEnvelope,
+      ]),
+    );
+
+    // A session-level occurrence belongs to no work stream; attributing it to one would be a claim
+    // the record does not make. One chip (the run_started row), not two.
+    expect(screen.getAllByTestId("feed-lane")).toHaveLength(1);
   });
 });

@@ -1,12 +1,16 @@
 import { type FC, useEffect, useState } from "react";
 
 // Server-driven folder picker for a session's working directory. Navigation is
-// internal (`current`, a repo-root-relative path; "" = repo root) and independent
-// of the selection: clicking a folder row descends into it; "Use this folder"
-// emits the current path via onChange. Every `current` change re-lists
+// internal (`current`, an ABSOLUTE host path; "" = the browse-root list) and
+// independent of the selection: clicking a folder row descends into it; "Use this
+// folder" emits the current path via onChange. Every `current` change re-lists
 // GET /api/directories?path=<current> (the frozen contract). A listing outage
 // (non-ok / network error) falls back to a plain text input so picking is never
 // blocked. Presentation only — the server realpath-contains every path.
+//
+// "Up" uses the server's `parent` and NEVER computes it. The client cannot: up from a
+// browse root is the root LIST, not the filesystem parent, and only the server knows
+// where the roots are. Slicing at the last "/" would walk out of the roots and 404.
 
 interface DirectoryEntry {
   name: string;
@@ -16,15 +20,13 @@ interface DirectoryEntry {
 
 interface DirectoryListing {
   path: string;
+  // Where "Up" goes. `null` at the root list (nothing above it), `""` at a browse
+  // root, the filesystem parent deeper in.
+  parent: string | null;
   // Whether the CURRENT directory is itself a git repo (review mode requires this).
   is_git_repo?: boolean;
   entries: DirectoryEntry[];
 }
-
-const parentOf = (path: string): string => {
-  const idx = path.lastIndexOf("/");
-  return idx === -1 ? "" : path.slice(0, idx);
-};
 
 export const DirectoryPicker: FC<{
   value: string;
@@ -36,6 +38,7 @@ export const DirectoryPicker: FC<{
 }> = ({ value, onChange, label = "Working directory", requireGit = false }) => {
   const [current, setCurrent] = useState(value);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
+  const [parent, setParent] = useState<string | null>(null);
   const [currentIsGit, setCurrentIsGit] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +60,7 @@ export const DirectoryPicker: FC<{
         if (!cancelled) {
           setError(null);
           setEntries(listing.entries);
+          setParent(listing.parent ?? null);
           setCurrentIsGit(Boolean(listing.is_git_repo));
         }
       } catch {
@@ -77,7 +81,7 @@ export const DirectoryPicker: FC<{
         <input
           aria-label={label}
           data-testid="directory-fallback"
-          placeholder="Working directory (relative to repo root)"
+          placeholder="Working directory (absolute path)"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-[10px] border border-[#232a25] bg-[#0b0e0c] px-[15px] py-[13px] font-mono text-sm text-[#e6ebe4] outline-none focus:border-[#4fe89a]"
@@ -93,13 +97,13 @@ export const DirectoryPicker: FC<{
     >
       <div className="flex items-center justify-between border-b border-[#171d19] px-[13px] py-[10px]">
         <span className="truncate font-mono text-xs text-[#79817b]" data-testid="directory-current">
-          {current === "" ? "(repo root)" : `/${current}`}
+          {current === "" ? "(all repositories)" : current}
         </span>
         <button
           type="button"
           aria-label="Up"
-          onClick={() => setCurrent(parentOf(current))}
-          disabled={current === ""}
+          onClick={() => parent !== null && setCurrent(parent)}
+          disabled={parent === null}
           className="rounded-[7px] border border-[#232a25] bg-[#141a16] px-[11px] py-[3px] font-mono text-[11px] text-[#a4aca6] disabled:opacity-40"
         >
           Up

@@ -38,7 +38,11 @@ implement this convention; it is pinned here as the single source.
 | run | start `POST /api/sessions/:id/runs` |
 | run input | follow-up · interrupt |
 | **capability discovery** | `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills` |
+| **auth test** | `POST /api/providers/verify` |
+| **host AWS profiles** | `GET /api/aws-profiles` |
+| **skill management** (owner) | `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name` |
 | **event backfill** | `GET /api/sessions/:id/events?after=<cursor>` |
+| **projection repair** | `GET /api/sessions/:id/projection/check` · `POST /api/sessions/:id/projection/rederive` (owner) |
 | **diff** | `GET /api/runs/:id/diff` (REST only) |
 | changeset | approve · reject |
 | files | tree · content read |
@@ -67,6 +71,33 @@ Returns **`200`** with an **ordered array of Contract-1 event envelopes**, every
 `id` **greater than** `<cursor>`, in **ascending `id`** order. The catch-up algorithm relies only
 on the envelope cursor (`id`) and dedupe-by-`id` for durable events.
 
+### Projection repair — `GET /api/sessions/:id/projection/check` · `POST .../rederive`
+
+`events` is a **projection** of the harness's store, so a gap in it — a Rails outage, a
+ring-buffer overflow the harness reported as genuine loss — is repairable rather than lost.
+
+`check` is read-only and returns both sides so a divergence can be read rather than guessed:
+`{ diverged, reason, rails: { high_water, count }, harness: { high_water, count } }`. `reason`
+is one of `missing_batch` (Rails is behind), `unexpected_rows` (Rails has rows the record does
+not), `content_mismatch` (same high water mark, different content — a mutated or duplicated
+row), or `null`. **It never repairs what it finds**: a silent auto-heal destroys the evidence.
+
+`rederive` defaults to **gap-fill** — replay from Rails' own `max(store_seq)`, additive, and
+broadcast because those events are genuinely unseen. `reset: true` deletes the rows the record
+can rebuild — those with a `store_seq` — and replays the whole log; it does **not** broadcast,
+because the rebuilt rows get new `id`s and re-broadcasting would defeat the client's
+dedupe-by-id and replay the session into every open feed. A client whose cursor spans a reset
+must reload.
+
+Rows Rails appended itself (`chat_message`, `changeset_approved`/`rejected`,
+`participant_joined`) have no `store_seq` and are **preserved**: no harness entry exists to put
+them back, so deleting them destroyed the chat and the review audit trail permanently. They
+keep their old, lower `id`s, so after a reset a mid-session chat message sorts before the
+transcript in an `id`-ordered feed. `ts` stays correct.
+
+**Owner-only.** Rebuilding the room's history is a session-management action, not a review
+action: an editor can drive Claude and still cannot rewrite what the room saw.
+
 ### Diffs are REST-only
 
 A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delivered over cable.**
@@ -77,27 +108,97 @@ A run's diff is fetched at `GET /api/runs/:id/diff`. **No diff payload is delive
 `permission_mode`, each defaulting to today's behavior when omitted:
 
 - `disallowed_tools: string[]` — built-in tool ids to turn OFF (validated ⊆ the shared
-  `BUILTIN_TOOLS` constant),
+  `BUILTIN_TOOLS` constant, whose ids are the harness's own registry names — `read`, `bash`,
+  `str_replace_based_edit_tool` — never the Agent SDK's `Read`/`Bash`, which nothing answers to; see
+  CHANGELOG 1.8.0),
 - `connectors: string[]` — host-configured MCP server names to enable (validated ⊆ the session's
   discovered connectors),
 - `skills: "all" | string[]` — skills to enable (`"all"` or validated ⊆ discovered skills).
 
 An unknown/non-selectable value is refused **`422`** `{ errors }` and starts no run; when discovery
-is unavailable, validation **fails open** (the sidecar is the backstop). Setting these follows the
+is unavailable, validation **fails open** (the harness is the backstop). Setting these follows the
 existing **start-run** role gate (owner/editor) — a reviewer/viewer is **`403`** `{ errors }`. On
 success the run returns its existing **`202`** shape. The `run_started` event echoes the resolved
 selection.
 
 ### Capability discovery — `GET /api/sessions/:id/connectors` · `GET /api/sessions/:id/skills`
 
-Read-only, **session-scoped** (the repo is per-session), proxied from the sidecar and cached like
+Read-only, **session-scoped** (the repo is per-session), proxied from the harness and cached like
 model discovery (cache key includes the repo path). Return **`200`** with
 `{ connectors: [{ name, transport }], source }` and `{ skills: [{ name, description }], source }`
 respectively — an empty list with an unavailable `source` when the repo has no config, and **`502`**
-when the sidecar is unreachable. Any participant may read them; a non-participant/cross-session
+when the harness is unreachable. Any participant may read them; a non-participant/cross-session
 request is **`404`** `{ errors }`. Connector responses never contain a server's
 command/url/headers/tokens. The built-in **tools** list is the shared `BUILTIN_TOOLS` constant, not
 an endpoint.
+
+### Session run defaults — `PATCH /api/sessions/:id`
+
+**OWNER only** (`manage_session`), and now accepts `default_provider`, `default_model`, `aws_profile`
+and `title` alongside the existing `repository_path`. Returns the session, which `GET
+/api/sessions/:id` also exposes to **every** participant: which provider a run uses and which account
+pays are facts about the room, not owner secrets — only the writing is gated.
+
+**Only the keys present are touched.** The endpoint recomputes the working directory *only* when
+`repository_path` is sent, because `working_directory` defaults to the repo root when blank — so
+recomputing on every PATCH would move a session's directory the moment someone set a provider default.
+
+An empty string **clears** a default (stored as NULL): "no default, resolve one at run start" has to
+stay reachable. Validation follows the capability-selection rule (design D6) — only a value outside a
+**known, non-empty** set is **`422`**, so a harness outage cannot block a settings change. A model is
+checked against **its own provider**, never the union, because a model id only means something
+relative to the provider serving it.
+
+`aws_profile` is validated against `GET /api/aws-profiles` (names only, never a credential value —
+) and decides **whose account pays**.
+
+**The defaults are what a run starts with**: `POST /api/sessions/:id/runs` resolves
+explicit param → session default → built-in, so the composer's per-run pick still wins.
+
+### Skill management — `POST /api/sessions/:id/skills` · `DELETE /api/sessions/:id/skills/:name`
+
+**OWNER only** (`manage_session`). The app's only writes outside a session worktree, and treated as
+such because a skill is *instructions Claude will follow* — adding one is closer to granting a
+capability than to editing a document.
+
+`POST` takes `{ scope: "project" | "host", name, description, body, replace? }` and returns **`201`**.
+`scope` defaults to **`project`**, never `host`: a host skill reaches every session on the machine and
+the developer's own terminal Claude Code, so the larger blast radius is asked for explicitly. An
+existing name is **`422`** unless `replace: true`. The harness validates `name` as a strict single
+lowercase segment BEFORE touching the filesystem, so a write cannot land outside the chosen root;
+a refused name is **`422`** with an actionable message.
+
+`DELETE` takes `?scope=` and **does not delete**: the harness moves the directory to a sibling
+`.claude/skills-removed/`, so an unwanted removal is recoverable on disk — the same reasoning as
+`bin/harness reset-session`. Moving it OUT of `skills/` rather than renaming it in place is
+load-bearing: discovery keys on the frontmatter `name`, so a renamed directory stayed listed, stayed
+in every run's skill index, and stayed loadable. A name absent from that scope is **`404`**.
+
+Both append a **`skill_changed`** event attributed to the acting participant, because who changed
+what the room can do belongs in its timeline rather than only in a file's mtime.
+
+### Auth test — `POST /api/providers/verify`
+
+Does each provider ACTUALLY work, right now? Returns **`200`**
+`{ providers: [{ id, displayName, ok, model?, credentialSource?, reason?, remedy?, error?, usage?,
+durationMs? }] }`, proxied from the harness's `POST /verify`.
+
+**A POST, because it is not a read**: the harness sends one minimal (1-token) real request per
+provider through the same adapter path a run uses. That is the point — `GET /api/models` reports
+PRESENCE (a credential and a region were found), which is not the claim "a run would be accepted".
+Two measured counter-examples: `us.amazon.nova-premier-v1:0` is refused on entitlement with a
+perfectly valid credential, and a correctly-configured MCP server answered `invalid_token`. A
+settings tab built on presence alone reports both as fine.
+
+`credentialSource` is a NAME (`env:AWS_PROFILE`, `profile:active`) and never a value .
+`error` is the provider's OWN message, because "AccessDeniedException" or "expired" is the entire
+diagnostic and paraphrasing discards the actionable part. `usage` reports what the check spent, so
+the cost is stated rather than implied.
+
+Readable by **any participant**, like `GET /api/models`: the route is not session-nested (providers
+are host-wide, so there is no session to view-gate against) and a viewer who cannot diagnose a
+provider failure has to ask someone else to look. **Never cached** — the reason to run it is that
+something just changed. **`502`** `{ errors }` when the harness is unreachable.
 
 ## 3. Cable — `/~cable`, one envelope shape
 
@@ -118,6 +219,7 @@ an endpoint.
 | start run / send follow-up / interrupt | ✓ | ✓ | ✗ | ✗ |
 | approve / reject changeset | ✓ | ✓ | ✓ | ✗ |
 | archive session | ✓ | ✗ | ✗ | ✗ |
+| check / re-derive the projection | ✓ | ✗ | ✗ | ✗ |
 
 (owner = everything incl. runs + approve/reject + invites/archive; editor =
 runs/follow-ups/interrupt + tasks/chat + approve/reject; reviewer = tasks/chat/view +
