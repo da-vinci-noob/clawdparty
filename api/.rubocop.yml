@@ -14,7 +14,7 @@ AllCops:
     - "tmp/**/*"
     - "storage/**/*"
 
-# Project conventions (docs/PLAN.md §16 / CLAUDE.md): 120 cols, frozen string
+# Project conventions (CLAUDE.md): 120 cols, frozen string
 # literals, required parens on method calls with arguments.
 Layout/LineLength:
   Max: 120

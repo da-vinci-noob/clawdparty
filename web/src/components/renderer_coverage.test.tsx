@@ -53,7 +53,7 @@ const DELIBERATELY_NOT_RENDERED: Record<string, string> = {
   context_usage: "drives the live CONTEXT bar in the composer",
   // Chat is its own panel, deliberately separate from the run timeline.
   chat_message: "rendered in the chat panel",
-  // The task board was cut from the MVP (PLAN §12).
+  // The task board was cut from the MVP.
   task_created: "task board is out of MVP scope",
   task_updated: "task board is out of MVP scope",
 };

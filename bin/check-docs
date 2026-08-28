@@ -28,7 +28,7 @@ cd "${repo_root}"
 # README.md is IN here as of the supervisor decision: it had drifted for months — claiming the
 # harness mounts `~/.claude` and that a container cannot read the Keychain — precisely because it was
 # the one participant-facing document nothing checked.
-GUIDANCE=(README.md CLAUDE.md docs/PLAN.md)
+GUIDANCE=(README.md CLAUDE.md)
 
 # Constants whose home is a gem, not this tree.
 FRAMEWORK_NAMESPACES='^(ActiveRecord|ActiveSupport|ActionCable|ActionController|Rails|RSpec|SolidQueue|SolidCable|Faraday|Net|JSON|Time|Struct|StandardError)::'
@@ -144,8 +144,8 @@ for doc in "${GUIDANCE[@]}"; do
 done
 
 # The same claim, made WITHOUT a directory. The check above requires a slash, so a bare
-# `permissions.ts` was invisible to it — and that is exactly how docs/PLAN.md kept naming four
-# source files the SDK removal deleted, while this gate reported OK. A whole category of stale
+# `permissions.ts` was invisible to it — and a bare filename is exactly how guidance kept naming
+# four source files the SDK removal deleted, while this gate reported OK. A whole category of stale
 # claim walked through the hole in the gate written to catch it.
 #
 # Resolved by BASENAME against the tracked tree, which is what makes an unanchored name checkable:
