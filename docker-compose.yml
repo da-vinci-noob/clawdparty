@@ -10,10 +10,10 @@
 # locations a container cannot — notably the macOS Keychain. `bin/start` brings up
 # this file AND the host harness; `bin/harness` manages it alone.
 #
-# Because the harness is not a compose service, no service here bind-mounts the
-# target repo at an identical host path any more: the harness edits worktrees
-# directly on the host, and Rails only needs the repo for git operations.
-# Run with `bin/start` (after `bin/setup`). See docs/PLAN.md §2/§3 + CLAUDE.md.
+# The target repo IS still bind-mounted at an identical host path below, and must be:
+# Rails creates each session worktree in here, and worktree gitdir metadata holds
+# ABSOLUTE paths that the host harness then has to resolve.
+# Run with `bin/start` (after `bin/setup`). See CLAUDE.md.
 
 # Pin the project name so the whole stack always comes up under `clawdparty`
 # (containers `clawdparty-<service>-1`), independent of the host directory name.
@@ -77,9 +77,10 @@ services:
       # Rails.root.join("..","packages",...) resolves identically in-container
       # and on the host (fake-Claude replay reads the fixture + CONTRACT_VERSION).
       - ./packages:/packages:ro
-      # Target repo at the IDENTICAL host path. Rails runs the git operations
-      # (worktree create, diff, approve-commit, reject-revert) against worktrees the
-      # host harness wrote, whose gitdir files hold absolute HOST paths.
+      # Target repo at the IDENTICAL host path. Rails runs the git operations here
+      # (worktree create, diff, approve-commit, reject-revert), and a worktree's gitdir
+      # files hold ABSOLUTE paths — the host harness edits inside that checkout, so the
+      # container path must be the same string as the host path.
       # TARGET_REPO_PATH must be an ABSOLUTE host path (the parent of your repos).
       - ${TARGET_REPO_PATH:-/repo}:${TARGET_REPO_PATH:-/repo}
     depends_on:

@@ -12,7 +12,7 @@ interface Props {
   composer?: ReactNode;
 }
 
-// The session workspace (docs/PLAN.md §6), styled to the dark-green design:
+// The session workspace, styled to the dark-green design:
 // a fixed 264px left sidebar / fluid center "terminal" (titlebar · scrollable
 // feed · composer) / fixed 340px right chat sidebar. Regions are filled via slots
 // by the session page. aria-labels are load-bearing (the shell test asserts them).

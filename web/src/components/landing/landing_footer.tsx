@@ -65,7 +65,7 @@ export const LandingFooter: FC = () => (
       }}
     >
       <span style={{ fontSize: 11.5, color: "var(--muted-4)" }}>
-        LAN-only MVP · your main checkout is never touched
+        LAN-only · your main checkout is never touched
       </span>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {BADGES.map((b) => (

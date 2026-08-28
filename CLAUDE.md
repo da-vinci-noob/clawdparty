@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**clawdparty** is a real-time collaborative Claude Code session server: any number of developers join a browser session and watch/guide Claude Code working live on a repository hosted on one Mac. It provides shared chat, a live Claude activity stream, file/diff/terminal viewers, and a human approval flow for Claude's changes. The host machine runs everything (Rails + harness + repo); **everyone — including the host — interacts only through the browser.** The web session IS the interface to Claude; nobody drives it from a terminal.
+**clawdparty** is a real-time collaborative Claude Code session server: any number of developers join a browser session and watch/guide Claude Code working live on a repository hosted on one Mac. It provides shared chat, a live Claude activity stream, diff review, and a human approval flow for Claude's changes. The host machine runs everything (Rails + harness + repo); **the browser is a COMPLETE participation surface and stays one** — every capability is reachable from the web UI, and nothing requires a terminal to drive a session.
 
-**Current state: the MVP is implemented and merged to `main`.** The `api/`, `harness/`, `web/`, `packages/`, `docker/`, and `docs/contracts/` directories described below are real and working. The whole core loop ships — session create/join, chat, the live activity stream, interrupt, and diff review + approve (commit) / reject (revert) — plus the supporting features: no-git chat mode, the directory picker + per-repo review worktrees, and live-streaming text/thinking. **`docs/PLAN.md` is the authoritative design** and `docs/contracts/` holds the frozen interface contracts; the per-capability **living spec is under `openspec/specs/`** (promoted from the changes now archived in `openspec/changes/archive/`). When this file and the plan disagree, the plan wins (and fix this file).
+The `api/`, `harness/`, `web/`, `packages/`, `docker/`, and `docs/contracts/` directories described below are real and working. **`docs/contracts/` holds the frozen interface contracts and is the authority for every seam**, and this file is the authority for the load-bearing invariants. When the two disagree, the contract wins for its own seam (and fix this file).
 
 ## Architecture at a glance
 
@@ -42,18 +42,17 @@ The three code streams and **who owns which file** (operate in the stream that o
   <!-- doc-truth:end -->
 - **`web/`** — React 19 + Vite + TypeScript + Tailwind SPA. State: **Zustand** (event streams) + **TanStack Query** (fetched resources). Key libs: `react-diff-view`, `react-arborist`, `shiki`, `@dnd-kit`, `anser`, `@rails/actioncable`. The catch-up/cable logic lives in one file: `web/src/lib/cable.ts`.
 
-## Repo layout (target — per the plan)
+## Repo layout
 
 ```text
 clawdparty/
-├── docs/PLAN.md             # authoritative design doc (read this first)
 ├── docs/contracts/          # frozen interface contracts: events.md, harness_protocol.md, http_api.md, CHANGELOG.md
 ├── packages/contracts/      # shared TS types + fixtures/sample_run.jsonl (the executable contract)
 ├── api/                     # Rails 8 API + ActionCable + PostgreSQL
 ├── harness/                 # Node; owns the loop, the record, recovery
 ├── web/                     # React 19 + Vite + TS + Tailwind
-├── docker/                  # Dockerfiles + entrypoints per service (rails, harness, web)
-├── docker-compose.yml       # rails · harness · jobs · postgres (+ vite in dev); named volumes
+├── docker/                  # Dockerfiles + entrypoints per container (rails, web) + launchd/systemd units for the harness
+├── docker-compose.yml       # rails · jobs · postgres (+ vite in dev); named volumes — NO harness service
 ├── bin/start                # brings up the containers AND the host harness; reports both
 ├── bin/stop                 # takes both down; harness first, so it releases its store locks
 ├── bin/harness              # start|stop|status|logs|foreground + sessions|reset-session for the host process
@@ -103,9 +102,9 @@ The build files + wiring are all in place — these are the project's working co
 - **Tests / CI:** three independent GitHub Actions jobs — `api`: RuboCop + RSpec · `harness`: Biome + `tsc` + Vitest · `web`: Biome + `tsc` + Vitest. Web tests are **Vitest + React Testing Library**, `.test.tsx` co-located with components, **MSW** (`setupServer`) for REST mocking.
 - Pinned toolchain: **Ruby 4.0.5, Node 24 LTS, PostgreSQL 18**; `openspec` v1.5.0. (CI pins these; note the host currently has Node 25.7.0 installed, so pin Node 24 in CI to avoid green-on-laptop / red-in-CI drift.)
 
-## Engineering conventions (see `docs/PLAN.md §16`)
+## Engineering conventions
 
-Standard Rails/React patterns chosen to keep a small MVP simple — match these:
+Standard Rails/React patterns chosen to keep the codebase simple — match these:
 
 - **Cable:** an ActionCable provider (connection-state Context bridged to React) mounted at `/~cable`; layer the buffer/backfill/drain cursor on top. Connection auth = `identified_by :current_user` + `find_verified_user` + `reject_unauthorized_connection`, where `find_verified_user` resolves the signed `clawd_uid` cookie.
 - **Backend style:** single-responsibility service POROs (`Runs::Start`, `Events::Ingest`, `Git::WorktreeManager`); `rescue_from` → `render json: { errors: [...] }, status:`; one minimal factory per model with `sequence` for uniqueness; `annotaterb` for schema comments.
@@ -126,4 +125,4 @@ Under the hood (`openspec` CLI, v1.5.0): `openspec new change "<kebab-name>"`, `
 
 ## Scope discipline
 
-Five pieces ARE the product and are **never cut**: session create/join, chat, live activity stream, interrupt, and diff review + approve/reject. Already cut from MVP: the task board and a dedicated terminal tab (tool + terminal events already show in the activity feed). If a milestone slips >1 day, cut top-down per `docs/PLAN.md §12`: file tree/viewer → presence indicators → mid-run follow-ups → collapse roles to owner-vs-everyone → harness-restart session resume. **Out of MVP scope entirely:** multiplayer editing / CRDT / Monaco, remote access (Tailscale — future phase), per-tool live Bash approval, and merging session branches to main.
+Five pieces ARE the product and are **never cut**: session create/join, chat, live activity stream, interrupt, and diff review + approve/reject. Cut, and staying cut: the task board (the `task_created`/`task_updated` names stay in the frozen taxonomy and the `tasks` table stays in the schema, but no role, route or surface can produce one) and a dedicated terminal tab (tool + terminal events already show in the activity feed). If work has to be shed, cut top-down: file tree/viewer → presence indicators → mid-run follow-ups → collapse roles to owner-vs-everyone → harness-restart session resume. **Out of scope entirely:** multiplayer editing / CRDT / Monaco, remote access (Tailscale — future phase), interactive per-tool approval prompts, third-party extension loading, and merging session branches to main.
